@@ -55,3 +55,18 @@ Rules:
 ## UI
 
 The interface is the ship's own equipment: stencilled plate labels, split-flap counters, warning lamps, gauge needles and amber CRT telemetry. It is never rounded SaaS cards, gradients or emoji. Fonts: Chakra Petch (UI), Saira Stencil One (titles and stencils), Share Tech Mono (telemetry).
+
+Four materials, one vocabulary (`src/styles.css`, parts in `src/ui/kit.ts` and `src/ui/cards.ts`):
+
+| Material | Used for | Parts |
+| --- | --- | --- |
+| Steel | Consoles, the status rail, switches, the HUD plates | Riveted panels, stencil plates, steel keys (press travel, no hover lift), heavy hazard-bezel switches, guarded switches, lamps, split-flap drums, segmented bars, needle gauges |
+| CRT | Telemetry and comms | Amber phosphor on near-black glass with scanlines: plot readout, quartermaster terminal, intercepted transmissions (teletype), registry line |
+| Paper | Orders and documents | Requisition slips (parts), work orders (drydock, derelict), salvage manifest, ghost dossier, wreck report, till roll. Rubber stamps in blue-black (approved) or oxblood (void) ink |
+| Enamel | Relics | Insignia pins: steel round (common), brass shield (rare), brass star (boss), tarnished spiked (curse) |
+
+Rules for new UI:
+- Icons come from `src/ui/icons.ts` (game-icons.net, CC BY 3.0); map a new id there rather than drawing one-off glyphs.
+- Screens are built in `src/ui/screens/*.ts` and shown with `show()`, which transitions automatically. Give each screen a `data-screen` key; re-rendering the same key swaps in place.
+- UI sounds go through `uiSound()` in `src/ui/sound.ts` (hooks: press, hover, buy, stamp, flap, type, deny).
+- Map node symbols follow military plotting conventions: hostile diamonds (fight, elite, boss), neutral squares (merchant, derelict), unknown quatrefoil (signal), friendly circle (drydock).
