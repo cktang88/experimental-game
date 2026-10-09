@@ -4,6 +4,7 @@ import { TerrainLayer } from './render/world/terrain';
 import { ShipLayer } from './render/ship/shipLayer';
 import { UnitLayer } from './render/units/unitLayer';
 import { FxLayer } from './render/fx/fxLayer';
+import { preloadKits } from './render/assets';
 import { V } from './game/vfx';
 import { drawHud } from './render/hud';
 import { drawBlueprint } from './render/shipPreview';
@@ -46,6 +47,8 @@ if (webglAvailable()) {
     renderer = eng;
   } catch (e) { console.error(e); renderer = null; }
 }
+// Kitbash pieces for the ship hulls (the ship layer rebuilds once they arrive).
+if (renderer) preloadKits(['scifi']).catch((e) => console.error('kit load failed', e));
 window.addEventListener('resize', resize);
 resize();
 seedDecor();
