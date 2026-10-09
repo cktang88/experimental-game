@@ -3,6 +3,8 @@ import { test, expect, type Page } from '@playwright/test';
 // These tests play the real game in Chromium. Combat runs with a test-only
 // invulnerability flag and a sped-up clock so a fight finishes in seconds.
 const SHOTS = 'test-results/shots';
+// Software WebGL in CI sandboxes can drop to a few frames per second; give whole flows room.
+test.describe.configure({ timeout: 300_000 });
 
 async function startRun(page: Page, callsign = 'E2E') {
   await page.route('https://fonts.googleapis.com/**', (r) => r.abort());
@@ -24,7 +26,7 @@ async function fast(page: Page) { await gd(page, '(g.god(true), g.debug.timeScal
 async function winFight(page: Page) {
   await expect.poll(() => gd<string>(page, 'g.S.mode'), { timeout: 30_000 }).toBe('play');
   await fast(page);
-  if (await gd<boolean>(page, "g.S.enc.kind === 'elite'")) await expect.poll(() => gd<boolean>(page, '!!g.S.elite'), { timeout: 30_000 }).toBe(true);
+  if (await gd<boolean>(page, "g.S.enc.kind === 'elite'")) await expect.poll(() => gd<boolean>(page, '!!g.S.elite'), { timeout: 90_000 }).toBe(true);
   await gd(page, 'g.winNow()');
 }
 
@@ -44,13 +46,13 @@ test('title, map and a full fight with reward and refit', async ({ page }) => {
 
   await clickNode(page);
   await expect.poll(() => gd<string>(page, 'g.S.mode'), { timeout: 30_000 }).toBe('play');
-  await gd(page, '(g.god(true), g.debug.timeScale = 4)');
+  await gd(page, '(g.god(true), g.debug.timeScale = 8)');
   await expect.poll(() => gd<number>(page, 'g.S.enemies.length + g.S.eb.length'), { timeout: 60_000 }).toBeGreaterThan(2);
   await page.screenshot({ path: `${SHOTS}/03-combat.png` });
   await expect.poll(() => gd<number>(page, 'g.S.kills'), { timeout: 60_000 }).toBeGreaterThan(0);
   const scrapBefore = await gd<number>(page, 'g.run.scrap');
   await gd(page, 'g.winNow()');
-  await expect(page.getByRole('heading', { name: 'Salvage' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: 'Salvage' })).toBeVisible({ timeout: 120_000 });
   expect(await gd<number>(page, 'g.run.scrap')).toBeGreaterThanOrEqual(scrapBefore);
   await page.screenshot({ path: `${SHOTS}/04-reward.png` });
   const invBefore = await gd<number>(page, 'g.run.inv.length');
@@ -97,7 +99,7 @@ test('merchant, event, drydock, derelict and elite nodes', async ({ page }) => {
   if (await page.getByRole('button', { name: 'Engage' }).isVisible()) {
     await page.getByRole('button', { name: 'Engage' }).click();
     await winFight(page);
-    await expect(page.getByRole('heading', { name: 'Salvage' })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('heading', { name: 'Salvage' })).toBeVisible({ timeout: 120_000 });
     await page.locator('.pcard').first().click();
   } else await page.click('#btn-continue');
   await expect(page.locator('svg[aria-label^="Sector"]')).toBeVisible();
@@ -122,12 +124,12 @@ test('merchant, event, drydock, derelict and elite nodes', async ({ page }) => {
   // elite
   await gd(page, "g.forceNext('elite')");
   await expect.poll(() => gd<string>(page, 'g.S.mode'), { timeout: 30_000 }).toBe('play');
-  await gd(page, '(g.god(true), g.debug.timeScale = 4)');
-  await expect.poll(() => gd<boolean>(page, '!!g.S.elite'), { timeout: 30_000 }).toBe(true);
+  await gd(page, '(g.god(true), g.debug.timeScale = 8)');
+  await expect.poll(() => gd<boolean>(page, '!!g.S.elite'), { timeout: 90_000 }).toBe(true);
   await page.waitForTimeout(2500);
   await page.screenshot({ path: `${SHOTS}/09-elite.png` });
   await gd(page, 'g.winNow()');
-  await expect(page.getByRole('heading', { name: 'Salvage' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: 'Salvage' })).toBeVisible({ timeout: 120_000 });
   await expect(page.getByRole('heading', { name: 'Relic recovered' })).toBeVisible();
   expect(await gd<number>(page, 'g.run.stats.elites')).toBe(1);
 });
@@ -138,13 +140,13 @@ test('boss fight leads to salvage, relic and the next sector', async ({ page }) 
   await expect.poll(() => gd<boolean>(page, '!!g.run.bossGhost'), { timeout: 15_000 }).toBe(true);
   await gd(page, "g.travelTo('boss')");
   await expect.poll(() => gd<string>(page, 'g.S.mode'), { timeout: 30_000 }).toBe('play');
-  await gd(page, '(g.god(true), g.debug.timeScale = 6)');
-  await expect.poll(() => gd<boolean>(page, '!!(g.S.boss && g.S.boss.entered)'), { timeout: 90_000 }).toBe(true);
-  await gd(page, '(g.god(true), g.debug.timeScale = 6)');
+  await gd(page, '(g.god(true), g.debug.timeScale = 10)');
+  await expect.poll(() => gd<boolean>(page, '!!(g.S.boss && g.S.boss.entered)'), { timeout: 150_000 }).toBe(true);
+  await gd(page, '(g.god(true), g.debug.timeScale = 10)');
   await page.waitForTimeout(4000);
   await page.screenshot({ path: `${SHOTS}/10-boss.png` });
   await gd(page, 'g.winNow()');
-  await expect(page.getByRole('heading', { name: /^Salvage:/ })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: /^Salvage:/ })).toBeVisible({ timeout: 120_000 });
   await page.screenshot({ path: `${SHOTS}/11-boss-salvage.png` });
   await page.locator('.pcard').first().click();
   await expect(page.getByRole('heading', { name: 'Choose a relic' })).toBeVisible();
@@ -158,8 +160,8 @@ test('dying uploads a ghost that becomes the next boss', async ({ page, request 
   await startRun(page, name);
   await clickNode(page);
   await expect.poll(() => gd<string>(page, 'g.S.mode'), { timeout: 30_000 }).toBe('play');
-  await gd(page, 'g.killPlayer()');
-  await expect(page.getByRole('heading', { name: 'Dreadnought down' })).toBeVisible({ timeout: 60_000 });
+  await gd(page, '(g.debug.timeScale = 8, g.killPlayer())');
+  await expect(page.getByRole('heading', { name: 'Dreadnought down' })).toBeVisible({ timeout: 120_000 });
   await expect(page.getByTestId('ghost-status')).toContainText('Pilots who reach', { timeout: 15_000 });
   await page.screenshot({ path: `${SHOTS}/12-death.png` });
   const res = await request.get('/api/ghosts?sector=1');
@@ -176,7 +178,7 @@ test('a run survives a reload and can be continued', async ({ page }) => {
   await startRun(page);
   await clickNode(page);
   await winFight(page);
-  await expect(page.getByRole('heading', { name: 'Salvage' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: 'Salvage' })).toBeVisible({ timeout: 120_000 });
   await page.locator('.pcard').first().click();
   const scrap = await gd<number>(page, 'Math.floor(g.run.scrap)');
   await page.reload();
@@ -194,7 +196,75 @@ test('phone layout has no sideways scroll', async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await clickNode(page);
   await expect.poll(() => gd<string>(page, 'g.S.mode'), { timeout: 30_000 }).toBe('play');
-  await gd(page, '(g.god(true), g.debug.timeScale = 4)');
+  await gd(page, '(g.god(true), g.debug.timeScale = 8)');
   await page.waitForTimeout(3000);
   await page.screenshot({ path: `${SHOTS}/14-phone-combat.png` });
+});
+
+test('combat: Overdrive fires on Space, batteries report arcs, carnage and hitstop state exist', async ({ page }) => {
+  await startRun(page);
+  await clickNode(page);
+  await expect.poll(() => gd<string>(page, 'g.S.mode'), { timeout: 30_000 }).toBe('play');
+  await gd(page, '(g.god(true), g.debug.timeScale = 8)');
+  expect(await gd<string[]>(page, 'g.S.P.dv.mounts.map(m => m.arc)')).toEqual(['bow', 'broadside', 'ventral', 'broadside', 'internal']);
+  expect(await gd<string>(page, 'g.S.overdrive.kind')).toBe('lance');
+  await gd(page, 'g.S.overdrive.charge = 1');
+  await page.keyboard.press('Space');
+  await expect.poll(() => gd<boolean>(page, 'g.S.overdrive.active'), { timeout: 30_000 }).toBe(true);
+  await expect.poll(() => gd<boolean>(page, '!!g.S.overdrive.beam'), { timeout: 30_000 }).toBe(true);
+  await page.screenshot({ path: `${SHOTS}/15-overdrive.png` });
+  expect(await gd<number>(page, 'g.S.carnage.mult')).toBeGreaterThanOrEqual(1);
+  expect(typeof await gd<number>(page, 'g.S.P.vx')).toBe('number');
+  await expect.poll(() => gd<number>(page, 'g.S.stats.broadsides'), { timeout: 120_000 }).toBeGreaterThan(0);
+});
+
+test('fleet loop: admiralty, locked hulls and the daily strike', async ({ page }) => {
+  await page.route('https://fonts.googleapis.com/**', (r) => r.abort());
+  await page.goto('/');
+  await expect(page.locator('.launch')).toBeVisible();
+  await expect(page.locator('[data-hull="vanguard"]')).toBeEnabled();
+  await expect(page.locator('[data-hull="bastion"]')).toBeDisabled();
+  await page.screenshot({ path: `${SHOTS}/16-launch.png` });
+  await page.click('#btn-admiralty');
+  await expect(page.getByRole('heading', { name: 'Ensign' })).toBeVisible();
+  await page.click('[data-tab="goals"]');
+  await expect(page.locator('[data-goal="victory"]')).toBeVisible();
+  await page.click('[data-tab="codex"]');
+  await expect(page.locator('.codex')).toContainText('Enemies');
+  await page.screenshot({ path: `${SHOTS}/17-admiralty.png`, fullPage: true });
+  await page.click('#btn-back');
+  await page.fill('#callsign', 'DAILY');
+  await page.click('#btn-daily');
+  await expect(page.locator('svg[aria-label="Sector 1 route map"]')).toBeVisible();
+  const today = await page.evaluate(() => { const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; });
+  expect(await gd<string>(page, 'g.run.daily')).toBe(today);
+  expect(await gd<string>(page, 'g.run.hull')).toBe('vanguard');
+});
+
+test('victory after sector 3 banks the run, unlocks heat and offers endless', async ({ page }) => {
+  await startRun(page, 'VICTOR');
+  // Jump the run to the last floor of sector 3.
+  await gd(page, "(() => { const r = g.run; r.sector = 3; r.bossGhost = null; const n = Object.values(r.map.nodes).find(n => n.floor === 9); r.at = n.id; r.visited.push(n.id); })()");
+  await gd(page, "g.travelTo('boss')");
+  await expect.poll(() => gd<string>(page, 'g.S.mode'), { timeout: 60_000 }).toBe('play');
+  await gd(page, '(g.god(true), g.debug.timeScale = 10)');
+  await expect.poll(() => gd<boolean>(page, '!!(g.S.boss && g.S.boss.entered)'), { timeout: 150_000 }).toBe(true);
+  await gd(page, 'g.winNow()');
+  await expect(page.getByRole('heading', { name: /^Salvage:/ })).toBeVisible({ timeout: 120_000 });
+  await page.locator('.pcard').first().click();
+  await page.locator('.pcard').first().click();
+  await expect(page.getByRole('heading', { name: 'Victory' })).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/18-victory.png`, fullPage: true });
+  // the choice survives a reload
+  await page.reload();
+  await page.click('#btn-continue');
+  await expect(page.getByRole('heading', { name: 'Victory' })).toBeVisible();
+  await page.click('#btn-retire');
+  await expect(page.getByRole('heading', { name: 'Wreck report' })).toBeVisible();
+  await expect(page.getByTestId('xp-total')).toContainText('XP');
+  expect(await gd<number>(page, 'g.profile.stats.wins')).toBe(1);
+  await page.screenshot({ path: `${SHOTS}/19-port.png`, fullPage: true });
+  await page.click('#btn-home');
+  await expect(page.locator('[data-heat="1"]')).toBeVisible();
+  await expect(page.locator('#btn-continue')).toHaveCount(0);
 });

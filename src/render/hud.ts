@@ -34,6 +34,12 @@ export function drawHud(c: CanvasRenderingContext2D, scale: number, dpr: number,
   c.textAlign = 'left'; c.fillStyle = '#dbe4ec'; c.font = '700 12px "Chakra Petch",sans-serif';
   c.fillText(`SECTOR ${S.sector} · ${S.enc?.name.toUpperCase() ?? ''}`, 12, 43);
   if (S.enc?.kind === 'fight' && S.mode === 'play') bar(c, 220, 38, 70, 4, S.time / S.enc.duration, '#f2a541', 'rgba(255,255,255,.08)');
+  // Overdrive and carnage readouts (gameplay agent placeholder: the UI pass owns the final look; see docs/TECH.md)
+  { const o = S.overdrive, ready = o.charge >= 1 && !o.active, k = o.active ? o.t / o.dur : o.charge;
+    c.fillStyle = '#8597a8'; c.font = '600 10px "IBM Plex Mono",monospace'; c.fillText(o.active ? 'OVERDRIVE ACTIVE' : ready ? 'OVERDRIVE READY · SPACE' : 'OVERDRIVE', 320, 15);
+    bar(c, 320, 21, 180, 7, k, ready || o.active ? (S.t * 4 % 1 < 0.5 ? '#ffb347' : '#fff1c1') : '#f2a541');
+    const m = S.carnage.mult; c.fillStyle = m > 1.05 ? '#ffb347' : '#8597a8'; c.fillText(`CARNAGE x${m.toFixed(1)}`, 520, 15);
+    bar(c, 520, 21, 110, 4, (m - 1) / 2, '#ff8a3d'); }
   c.strokeStyle = '#8597a8'; c.lineWidth = 1; c.strokeRect(W - 40, 8, 30, 30); c.fillStyle = '#dbe4ec'; c.fillRect(W - 30, 15, 4, 16); c.fillRect(W - 23, 15, 4, 16);
   const B = S.boss, E = S.elite && !S.elite.dead ? S.elite : null;
   if ((B && B.alive) || E) {

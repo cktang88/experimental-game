@@ -33,3 +33,88 @@ Shared files that anyone may read but should change only with care: `src/render/
 2. You looked at real screenshots of your work in the running game, at 1600×900, and fixed what looked wrong.
 3. New assets are credited in `CREDITS.md` with the exact license.
 4. Commit with a clear message.
+
+## Gameplay state
+
+Everything below lives on the combat state `S` (`src/game/combat.ts`) unless noted. Field units, y down, bow points up.
+Renderers read it every frame; nothing here needs to be written by them.
+
+### Player ship (`S.P`)
+- `x, y` hull centre. `vx, vy` velocity (units/s). `bank` eased roll input in -1..1 (negative rolls left): tilt the hull by it.
+- `dv` is `derive(build, mods)`: `speed` (top), `accel`, `brake` (units/s²), `rects`, `mounts`, `maxHp`, ...
+- `tx, ty` pointer-steer target (null when keys steer). Movement math: `src/game/feel.ts` (`stepShipVelocity`, `arriveWish`, `stepBank`).
+- Bounds: the whole 1600×900 field minus the hull's half size (56 units kept clear at the top for the HUD).
+
+### Firing arcs (`src/data/parts.ts`)
+- Every `Mount` has `arc: 'bow' | 'broadside' | 'ventral' | 'omni' | 'internal'` and `side: -1 | 0 | 1` (broadside port/starboard, 0 = either).
+  `ARC_INFO[arc]` gives `label`, `short`, `col` and `desc` for the UI. `positionArc(sectionType, slotKind)` is the arc a mount position
+  gives; `mountArc(sectionType, slotKind, partId)` the effective arc (bombs and mortars are always ventral, arc coils and PD omni).
+- Bridge and gun decks are bow; Broadside Battery sections are broadside (outer mounts port/starboard, centre either side).
+- Ranges (`ARC_RANGE` in combat.ts): bow fires at targets within ±300 of the mount's x ahead of it (air only, plus ground for
+  `both`-layer weapons); broadside reaches 760 sideways for anything within half a hull length + 90 of the ship's y, air or ground
+  (ground targets get lobbed shells); mortars 520 around the ship; bomb bays drop under the hull. A battery with nothing in its arc holds fire.
+- Broadside cadence (`BROADSIDE`): each side fires one ripple volley about every 1.7 s, stern to bow, 35 ms between rounds; each gun packs
+  `broadsideRounds(part)` rounds (period / cooldown, max 12) at 1.2x damage, +10% per extra gun on the side.
+- Enemy weapons have `range` (`EN[type].range`, measured to the hull by `hullDist`). Out-ranging them is the positional game.
+
+### Events (`S.events`, `S.eventId`)
+Sim to audio/VFX/UI queue, capped at 160. Each `GameEvent` has an increasing `id`; consumers remember the last id they handled
+(so `debug.timeScale` multi-steps lose nothing). Types: `broadside` (`side`, `n` guns, `kind` = rounds as a string, x/y at the hull side),
+`kill` (`kind` enemy type, `n` max hull), `eliteKill`, `bossDown`, `overdrive` / `overdriveReady` / `overdriveEnd` (`kind`),
+`structure` (`n` scrap it paid), `carnageTier` (`n` new whole multiplier), `playerHit` (`n` damage).
+
+### Overdrive (`S.overdrive`)
+`{ charge 0..1, active, kind, t (seconds left), dur, beam, trail, allies, radius }`. Space (`keys.od = true`, or `triggerOverdrive()`)
+fires it when `charge >= 1`. Charge comes from kills (elites 0.5), structures and damage to a ghost. While active every battery fires 1.5x faster.
+Kinds (`OVERDRIVES` in `src/data/hulls.ts`):
+- `lance` Ventral Lance (Vanguard, 3.6 s): `beam = { x1, y1, x2, y2, w: 38, ground: true, col }` where (x1, y1) is the keel on the flight
+  plane and (x2, y2) the same field point on the ground: draw a vertical column from `toFlight(x1, y1)` down to `toGround(x2, y2)`.
+  Every 50 ms it calls `worldBlast(x, y, 44, dmg)` and burns ground units in radius 50. `trail[]` = `{ x, y, life, max }` scorch points
+  that scroll with the city (draw burning ground, fade by life / max).
+- `spear` Lance Spear (Lance, 2.6 s): `beam = { x1, y1 (bow), x2: x1, y2: -60, w: 54, ground: false }` on the flight plane. Deletes enemy shots in it.
+- `wing` Strike Wing (Leviathan, 7 s): `allies[]` = `{ x, y, vx, vy, hdg, cd, tg, t }`, eight strike craft on the flight plane. Their shots are normal `S.pb` bolts.
+- `bulwark` Bulwark Aegis (Bastion, 5 s): a 460-radius shockwave on activation, then `radius` > 0: an aegis around the hull that eats enemy shots; damage taken halved.
+
+### Carnage (`S.carnage`) and scrap
+`{ value, mult 1..3, since, peak }` (`src/game/feel.ts`, `CARNAGE`). Kills and structures add value; after a 1.6 s grace it decays at
+8 + 35% of value per second. `mult = 1 + value / 80`, capped at 3. Every scrap drop is `base * SCRAP_SCALE (0.35) * carnage.mult *
+heat.scrap * dv.scrapMult`. Scrap pickups home to the hull on their own after ~0.9 s (sooner with magnets); `S.pickStreak = { n, t }`
+counts pickups landing within 0.5 s of each other (rising pitch for audio). City agent: `worldBlast()` should return about 1-4 scrap per
+building destroyed; combat applies the scaling and carnage, counts it as a structure and feeds Overdrive.
+
+### Hitstop and slow-mo
+- `S.stop = { left, since, total }`: while `left > 0` the simulation is frozen; the renderer keeps drawing (shake keeps decaying).
+  Ordinary kills use the dead-air formula capped at 60 ms with a 240 ms cooldown; elite kill 120 ms, boss death 350 ms, heavy player hit 100 ms always land.
+- `S.slowmo` timeline (tinwar shape: 0.25x, 100 ms ramp in, 1.2 s total, 300 ms ramp out); `SLOWMO_BOSS` 0.2x for 2 s, `SLOWMO_SHORT` on Overdrive.
+  `S.slowK` is this frame's time scale, `S.slowFx` 0..1 intensity for a cinematic look (letterbox, vignette, audio low-pass).
+
+### Enemies
+Besides `x, y, r, hp, maxHp, layer, type`: `hdg` heading (aircraft), `ang` turret aim, `tele` 0..1 wind-up before a shot (draw a growing hostile glint),
+`vx`. Enemy shots in `S.eb` carry `src` (who fired). Kinds unchanged: `bullet`, `orb`, `mine`, `missile`, `beam` (warn then fire), `strike` (growing ring).
+
+### Fight stats (`S.stats`, `S.seen`)
+`kills, airKills, groundKills, elites, structures, broadsides, maxVolley, overdrives, lanceStructures, dmgTaken, dmgDealt, dmgToTarget,
+peakCarnage, scrapRaw, dmgBy{src: dmg}`. `S.seen` = kills per enemy type this fight (codex). main.ts folds them into `run.stats` / `run.seen`.
+
+### Run (`src/game/run.ts`, save v3)
+`RunState` adds `hull`, `heat`, `daily` (date key or null), `won`, `endless`, `phase: 'map' | 'victory'`, `odStart`, `seen`, and the wider
+`RunStats`. Saved under `gd.run.v3`; a `gd.run.v2` save migrates (`migrateRunSave`) to the Vanguard at heat 0. `CAMPAIGN_SECTORS = 3`:
+clearing sector 3 shows the victory screen; the pilot banks the run or pushes on into endless sectors.
+
+### Profile and the fleet loop (`src/game/meta.ts`, `src/data/goals.ts`, `src/data/hulls.ts`, `src/data/heat.ts`)
+- `Profile` in localStorage `gd.profile`, `PROFILE_VERSION` 2 with step migrations (`migrateProfile` takes anything).
+  Fields: `xp`, `stats` (lifetime `MetaStats`), `goals`, `flown`, selected `hull` and `heat`, `codex { enemies, parts, relics, ghosts }`, `best`, `daily`, `history`.
+- Rank: `rankOf(xp)` over `RANKS` (10 ranks, Ensign to Fleet Admiral); hulls unlock at ranks 2 / 4 / 6; `perksFor(xp)` gives launch perks.
+- `settleRun(profile, summary)` is pure and returns XP lines, goals completed, rank change, new hulls, heat unlocked, best/daily records.
+  main.ts settles exactly once per run: on death, on retiring after victory, or on abandoning (half XP).
+- Heat: `maxHeat(profile)` is 0 until the first victory, then one above the highest heat won (max 8). `heatFx(level)` folds the modifiers.
+- Daily strike: `dailySeed(dateKey())`, Vanguard, heat 0, no perks; `dailyShareLine` for sharing.
+- Screens: `src/game/metaScreens.ts` (launch panel on the title, Admiralty with service record / goals / codex tabs, wreck report, victory, port).
+
+### Balance harness
+`tests/sim/harness.ts` runs real fights headless with a scripted pilot and seeded `Math.random`. `BALANCE=1 npx vitest run
+tests/unit/balance.test.ts --disable-console-intercept` prints the table (`ONLY=s2-boss,ace` narrows it).
+
+### Debug hooks (`window.__gd`)
+`run`, `profile`, `S`, `debug.timeScale`, `god()`, `winNow()` (kills boss/elite outright), `killPlayer()`, `overdrive()` (charge and fire),
+`travelTo(type)`, `forceNext(type)`, `addScrap(n)`.

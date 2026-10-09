@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { derive, starterBuild, mkPart, buildToGhost, ghostToBuild, neutralMods, WEAPONS, UTILS, SECTIONS } from '../../src/data/parts';
+import { derive, starterBuild, mkPart, buildToGhost, ghostToBuild, neutralMods, WEAPONS, UTILS, SECTIONS, mountArc, ARC_INFO } from '../../src/data/parts';
 import { relicMods, RELICS } from '../../src/data/relics';
 import { validGhost, aiGhost } from '../../src/game/ghosts';
 // @ts-expect-error plain JS module shared with the server
@@ -8,9 +8,9 @@ import { validateGhost, WEAPON_IDS, UTIL_IDS, SECTION_SLOTS } from '../../server
 describe('ship stats', () => {
   it('starter ship has expected hull and mounts', () => {
     const d = derive(starterBuild());
-    expect(d.maxHp).toBe(60 + 30 + 25);
-    expect(d.mounts).toHaveLength(4);
-    expect(d.mounts.filter((m) => m.part).length).toBe(3);
+    expect(d.maxHp).toBe(60 + 35 + 25);
+    expect(d.mounts).toHaveLength(5);
+    expect(d.mounts.filter((m) => m.part).length).toBe(4);
   });
   it('more mass is slower, engines are faster', () => {
     const b = starterBuild();
@@ -34,7 +34,7 @@ describe('ship stats', () => {
     expect(buildToGhost(back)).toEqual(buildToGhost(b));
   });
   it('every relic has a name, description and known rarity', () => {
-    for (const [id, r] of Object.entries(RELICS)) { expect(r.name, id).toBeTruthy(); expect(['common', 'rare', 'boss', 'curse']).toContain(r.rarity); }
+    for (const [id, r] of Object.entries(RELICS)) { expect(r.name, id).toBeTruthy(); expect(['common', 'rare', 'boss', 'curse', 'perk']).toContain(r.rarity); }
     expect(neutralMods().hullMul).toBe(1);
   });
 });
@@ -64,5 +64,28 @@ describe('ghost validation', () => {
   it('AI ghosts are valid ships that scale with sector', () => {
     for (let s = 1; s <= 6; s++) { const g = aiGhost(s); expect(validGhost(g)).not.toBeNull(); expect(validateGhost(g)).not.toBeNull(); }
     expect(derive(ghostToBuild(aiGhost(5).sections)).maxHp).toBeGreaterThan(derive(ghostToBuild(aiGhost(1).sections)).maxHp);
+  });
+});
+
+describe('firing arcs', () => {
+  it('assigns arcs by mount position and weapon', () => {
+    const d = derive(starterBuild());
+    expect(d.mounts.map((m) => [m.arc, m.side])).toEqual([['bow', 0], ['broadside', -1], ['ventral', 0], ['broadside', 1], ['internal', 0]]);
+  });
+  it('bombs and mortars are always ventral, coils and PD omni, gun decks fire from the bow', () => {
+    expect(mountArc('gundeck', 'W', 'artillery')).toBe('ventral');
+    expect(mountArc('battery', 'W', 'bomb')).toBe('ventral');
+    expect(mountArc('battery', 'W', 'tesla')).toBe('omni');
+    expect(mountArc('gundeck', 'W', 'pulse')).toBe('bow');
+    expect(mountArc('battery', 'W', null)).toBe('broadside');
+    for (const a of ['bow', 'broadside', 'ventral', 'omni', 'internal'] as const) expect(ARC_INFO[a].desc.length).toBeGreaterThan(10);
+  });
+  it('heavier hulls accelerate and brake more slowly', () => {
+    const light = derive(starterBuild());
+    const b = starterBuild(); for (let i = 0; i < 4; i++) b.sections.push({ type: 'armor', slots: [null] });
+    const heavy = derive(b);
+    expect(heavy.accel).toBeLessThan(light.accel);
+    expect(heavy.brake).toBeLessThan(light.brake);
+    expect(light.speed / light.accel).toBeLessThan(0.4);
   });
 });

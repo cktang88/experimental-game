@@ -36,7 +36,7 @@ if (ghost) {
     weps: [] } as unknown as typeof S.boss;
   S.P = null;
 } else {
-  S.P = { x, y, build, dv, hp: dv.maxHp * hp, shield: 0, cds: {}, lastHit: 9, flash: 0, tx: null, ty: null, droneCd: [] };
+  S.P = { x, y, build, dv, hp: dv.maxHp * hp, shield: 0, cds: {}, lastHit: 9, flash: 0, tx: null, ty: null, droneCd: [], vx: 0, vy: 0, bank: 0 };
 }
 S.mode = 'play'; S.enemies = []; S.eb = [];
 if (q.get('enemies') === '1') S.enemies = [
