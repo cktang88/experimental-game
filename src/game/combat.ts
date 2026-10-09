@@ -46,6 +46,8 @@ export const S = {
   god: false, scrap: 0, kills: 0, score: 0, firstHitUsed: false, cheatDeath: false, cheatDeathUsed: false, theme: 0,
 };
 export const keys: Record<string, boolean> = {};
+/** Weapon uid -> S.t of its last shot (player and boss). Read by the ship renderer for recoil. */
+export const fireLog = new Map<number, number>();
 
 const hpMult = () => 1 + 0.3 * (S.level - 1);
 const bspd = () => Math.min(320, 165 * (1 + 0.035 * (S.level - 1)));
@@ -195,7 +197,7 @@ function updateBoss(dt: number) {
   S.escortT -= dt; if (S.escortT <= 0) { S.escortT = rnd(6, 9); spawnGroup(pick(['heli', 'turret', 'tank', 'jet'] as EnemyType[])); }
   if (!b.entered) return;
   const fm = b.fireMul * (b.phase === 2 ? 1.35 : 1);
-  for (const w of b.weps) { w.cd -= dt * fm; if (w.cd > 0) continue; w.cd = BOSS_CD[w.part.id] * b.cdMul * rnd(0.85, 1.15); bossFire(w); }
+  for (const w of b.weps) { w.cd -= dt * fm; if (w.cd > 0) continue; w.cd = BOSS_CD[w.part.id] * b.cdMul * rnd(0.85, 1.15); bossFire(w); fireLog.set(w.part.uid, S.t); }
 }
 function damageBoss(d: number) {
   const b = S.boss; if (!b || !b.alive || S.mode !== 'play') return;
@@ -286,6 +288,7 @@ function fireWeapons(dt: number) {
     if (P.cds[p.uid] === undefined) P.cds[p.uid] = rnd(0, 0.25);
     P.cds[p.uid] -= dt * fm; if (P.cds[p.uid] > 0) continue;
     const ok = fireWeapon(p, P.x + m.ox, P.y + m.oy);
+    if (ok) fireLog.set(p.uid, S.t);
     P.cds[p.uid] = ok ? wCd(p) * (p.id === 'rail' ? P.dv.mods.railCdMul : 1) : 0.12;
     if (ok && p.id !== 'pd' && p.id !== 'tesla') muzzle(P.x + m.ox, P.y + m.oy - 7, WEAPONS[p.id].col, p.id === 'rail' ? 20 : 10);
   }
