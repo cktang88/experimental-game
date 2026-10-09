@@ -316,7 +316,7 @@ Object.assign(CUES, {
     tone(c, { type: 'sine', f0: 62, f1: 24, dur: 1.1 + 0.08 * rounds, vol: 0.9, attack: 0.006 }); // the pressure wave
     noise(c, { filter: 'lowpass', f0: 600, f1: 50, dur: 1.6 + 0.1 * rounds, vol: 0.4 * k, brown: true, delay: 0.04, attack: 0.05 }); // thunder rolling down the hull
     debris(c, 3 + Math.round(rounds / 2), rounds * stagger + 0.3, 0.06, 1800, 5200, 0.05); // shell cases and rattling plates
-    duck('music', 0.7, 0.01, 0.1 + rounds * stagger, 0.5);
+    duck('music', 0.5, 0.01, 0.15 + rounds * stagger, 0.6); duck('amb', 0.4, 0.01, 0.2 + rounds * stagger, 0.8);
   } },
   // Overdrive charged: capacitors topping off and a bridge chime
   odReady: { gap: 800, priority: 3, cost: 6, play(o: CueOpts) {
@@ -411,7 +411,7 @@ export const ALIASES: Record<string, string> = { boomGround: 'groundBoom', explo
  */
 export const LEVEL_DB: Record<string, number> = {
   cannon: -3, rail: -2, lance: -3.5, boom: -2.5, groundBoom: -4.5, big: -1.5, collapse: -4, hit: -2, shield: -4,
-  zap: 9, pd: 3, mortar: -2, broadside: -1, od_lance: -2, od_spear: -2, od_wing: 0, od_bulwark: -2, bossDown: -1, odReady: 2, carnageTier: 0, odEnd: 0, bombDrop: 5, railCharge: 6, pick: 9, alarm: 8, clear: 2, flakPop: 1, missile: -1,
+  zap: 9, pd: 3, mortar: -2, broadside: 3.5, od_lance: -2, od_spear: -2, od_wing: 12, od_bulwark: -2, bossDown: -1, odReady: 5, carnageTier: 10, odEnd: 8, bombDrop: 5, railCharge: 6, pick: 12, alarm: 8, clear: 2, flakPop: 1, missile: -1,
   eshot: 9, eMissile: 7, jet: 2,
   ui: 5, uiHover: 4, uiToggle: -3.5, uiOpen: -6, uiClose: -6, uiConfirm: -4, uiError: 1.5, uiFlap: -3, buy: -2, uiStamp: -2.7, uiSwitch: -0.5,
 };
