@@ -9,7 +9,9 @@ import { V } from './game/vfx';
 import { drawHud } from './render/hud';
 import { drawBlueprint } from './render/shipPreview';
 import { S, W, H, keys, startCombat, updateCombat, updateBg, endCombat, seedDecor, setScrapHandler, damagePlayer, damageTarget, triggerOverdrive } from './game/combat';
-import { initAudio, sfx, audio, setMuted, music, updateAudio } from './audio';
+import { initAudio, sfx, audio, setMuted, music, updateAudio, setVolume } from './audio';
+import { settings as uiSettings, onSettings } from './ui/settings';
+import { wireAudioSettings } from './ui/sound';
 import {
   newRun, loadRun, saveRun, clearSave, maxHp, dv, mods, level, bossLevel, heal, partChoices, relicChoices, addRelic, addSection,
   nextSectionCost, enterNextSector, deathGhost, changeBuild, runRng, type RunState,
@@ -37,6 +39,9 @@ import { launchPanel, admiraltyScreen, settle, victoryScreen, portScreen } from 
 import { HULLS } from './data/hulls';
 import { heatFx } from './data/heat';
 import { CAMPAIGN_SECTORS } from './game/run';
+
+// The pause/title settings sliders are the source of truth for volume.
+wireAudioSettings(setVolume, () => uiSettings, (fn) => { onSettings(fn); });
 
 /* ---------------- canvas + renderer ---------------- */
 const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
