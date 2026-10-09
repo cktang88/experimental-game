@@ -39,7 +39,7 @@ export function launchPanel(p: Profile, onDaily: () => void, onAdmiralty: () => 
     const hulls = el('div', { class: 'hulls', role: 'radiogroup', 'aria-label': 'Hull class' }, ...HULL_IDS.map((id) => {
       const h = HULLS[id], ok = hullUnlocked(p, id), sel = p.hull === id;
       return el('button', {
-        class: 'hull' + (sel ? ' sel' : '') + (ok ? '' : ' locked'), role: 'radio', 'aria-checked': String(sel), 'data-hull': id, disabled: !ok,
+        class: 'hullpick' + (sel ? ' sel' : '') + (ok ? '' : ' locked'), role: 'radio', 'aria-checked': String(sel), 'data-hull': id, disabled: !ok,
         title: ok ? `${h.name} ${h.cls}. ${h.desc} Overdrive: ${OVERDRIVES[h.overdrive].name}.` : `Reach rank ${h.rank} (${RANKS[h.rank - 1].title}) to fly the ${h.name}.`,
         onclick: () => { p.hull = id; saveProfile(p); sfx('ui'); render(); },
       }, el('span', 'hull-ico', icon(ok ? HULL_ICON[id] ?? 'battleship' : 'padlock')), el('b', null, h.name), el('small', null, ok ? h.cls : `Rank ${h.rank}`), lamp(sel ? 'warn' : 'off'));
@@ -118,7 +118,7 @@ function codexView(p: Profile): HTMLElement {
   const enemyTypes = Object.keys(EN) as EnemyType[];
   const entry = (known: boolean, ic: string, name: string, info: string, meta: string, col = 'var(--fg)') =>
     el('div', { class: 'codex-entry' + (known ? '' : ' unknown'), style: `--ink:${col}` },
-      el('span', 'cx-ico', icon(known ? ic : 'padlock')),
+      el('span', 'cx-ico', icon(ic)),
       el('span', 'cx-txt', el('b', null, known ? name : 'Unrecorded'), el('span', null, known ? info : 'Not yet encountered.'), known && meta ? el('small', null, meta) : null));
   const partIds = [...Object.keys(WEAPONS), ...Object.keys(UTILS)];
   const count = (o: Record<string, number>, ids: string[]) => ids.filter((i) => o[i]).length;

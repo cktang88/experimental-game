@@ -603,7 +603,8 @@ ol.sections li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap:
 
 /* ---------------- wreck report ---------------- */
 .wreck-page { min-height: 100%; background: radial-gradient(ellipse at 50% 40%, rgba(60, 10, 8, .55), rgba(5, 4, 4, .94) 70%); animation: crt-off .6s ease-out; }
-@keyframes crt-off { 0% { filter: brightness(3); clip-path: inset(49.5% 0 49.5% 0); } 35% { filter: brightness(1.6); clip-path: inset(0 0 0 0); } 100% { filter: none; } }
+/* brightness only: if a starved compositor never advances the animation, the report is still readable */
+@keyframes crt-off { 0% { filter: brightness(2.6) saturate(.3); } 100% { filter: none; } }
 .report-sheet { position: relative; width: 100%; max-width: 760px; padding: 26px 30px 26px; color: var(--ink); background: var(--fibre), linear-gradient(172deg, #e0d6bd, var(--paper) 50%, #c8ba98); box-shadow: 0 30px 80px rgba(0, 0, 0, .7), 0 0 0 1px #8d7e60; transform: rotate(-.4deg); }
 .report-sheet .eyebrow { color: var(--stamp); }
 .report-sheet h2 { color: var(--ink); font-size: 44px; margin-top: 4px; }
@@ -683,16 +684,16 @@ ol.sections li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap:
 .segbar.xp i.on { background: linear-gradient(#ffe0a6, var(--hazard) 45%, #a8661a); box-shadow: 0 0 5px rgba(242, 165, 65, .4); }
 .hull-k { margin-top: 2px; }
 .hulls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
-.hull { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 4px 8px; min-width: 0; color: var(--dim); background: var(--noise), linear-gradient(#1f2832, #151c23); border: 1px solid #000; box-shadow: 0 3px 0 #06090c, inset 0 1px 0 rgba(255, 255, 255, .06); transition: transform .06s, box-shadow .06s, border-color .15s; }
-.hull .hull-ico .ico { width: 28px; height: 28px; }
-.hull b { font-family: var(--f-stencil); font-weight: 400; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg); }
-.hull small { font-family: var(--f-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
-.hull .lamp { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; }
-.hull:hover:not(:disabled) { border-color: var(--hazard); }
-.hull:active:not(:disabled) { transform: translateY(3px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04); }
-.hull.sel { color: var(--hazard); border-color: var(--hazard); background: var(--noise), linear-gradient(#2e2414, #1e180e); }
-.hull.locked { opacity: .5; cursor: not-allowed; }
-.hull.locked b { color: var(--faint); }
+.hullpick { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 4px 8px; min-width: 0; color: var(--dim); background: var(--noise), linear-gradient(#1f2832, #151c23); border: 1px solid #000; box-shadow: 0 3px 0 #06090c, inset 0 1px 0 rgba(255, 255, 255, .06); transition: transform .06s, box-shadow .06s, border-color .15s; }
+.hullpick .hull-ico .ico { width: 28px; height: 28px; }
+.hullpick b { font-family: var(--f-stencil); font-weight: 400; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--fg); }
+.hullpick small { font-family: var(--f-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.hullpick .lamp { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; }
+.hullpick:hover:not(:disabled) { border-color: var(--hazard); }
+.hullpick:active:not(:disabled) { transform: translateY(3px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04); }
+.hullpick.sel { color: var(--hazard); border-color: var(--hazard); background: var(--noise), linear-gradient(#2e2414, #1e180e); }
+.hullpick.locked { opacity: .5; cursor: not-allowed; }
+.hullpick.locked b { color: var(--faint); }
 .hull-desc { font-size: 13px; line-height: 1.4; color: #a9b8c6; }
 .od-tag { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 0; font-family: var(--f-mono); font-size: 12px; color: var(--od); border: 1px solid var(--od); white-space: nowrap; }
 .od-tag .ico { width: 13px; height: 13px; }
@@ -746,7 +747,7 @@ ol.heat-list li.shut { opacity: .5; }
 .cx-txt span { font-size: 12.5px; line-height: 1.35; color: var(--ink-2); }
 .cx-txt small { font-family: var(--f-mono); font-size: 10.5px; color: #6a604c; text-transform: uppercase; letter-spacing: .06em; }
 .codex-entry.unknown { background: #1a2129; color: var(--faint); box-shadow: inset 0 0 0 1px #000; }
-.codex-entry.unknown .cx-ico { color: #3a4652; background: #0b1015; }
+.codex-entry.unknown .cx-ico { color: #2a343e; background: #0b1015; filter: blur(.6px); }
 .codex-entry.unknown .cx-txt span { color: var(--faint); }
 
 /* ---------------- wreck report body, pay slip, victory ---------------- */
