@@ -23,7 +23,7 @@ export interface Runtime {
   sfxIn: GainNode; sfxDuck: GainNode; sfxVol: GainNode;
   ambIn: GainNode; ambDuck: GainNode; ambVol: GainNode;
   musicIn: GainNode; musicDuck: GainNode; musicVol: GainNode;
-  worldLP: BiquadFilterNode; glue: DynamicsCompressorNode;
+  worldLP: BiquadFilterNode; glue: DynamicsCompressorNode; slowLP: BiquadFilterNode;
   reverb: ConvolverNode | null;
   white: AudioBuffer; brown: AudioBuffer;
   offline: boolean;
@@ -108,7 +108,9 @@ export function buildGraph(ctx: BaseAudioContext, destination: AudioNode, offlin
   const ceiling = ctx.createWaveShaper(), cc = new Float32Array(4096);
   for (let i = 0; i < cc.length; i++) { const x = (i / (cc.length - 1)) * 2 - 1, a = Math.abs(x), knee = 0.85, top = 0.966; cc[i] = Math.sign(x) * (a <= knee ? a : knee + (top - knee) * Math.tanh((a - knee) / (top - knee))); }
   ceiling.curve = cc; ceiling.oversample = '4x';
-  master.connect(limiter); limiter.connect(ceiling); ceiling.connect(destination);
+  // slow-mo colouring of the whole mix (S.slowFx)
+  const slowLP = ctx.createBiquadFilter(); slowLP.type = 'lowpass'; slowLP.frequency.value = 20000; slowLP.Q.value = 0.6;
+  master.connect(slowLP); slowLP.connect(limiter); limiter.connect(ceiling); ceiling.connect(destination);
 
   const glue = ctx.createDynamicsCompressor();
   glue.threshold.value = -14; glue.knee.value = 10; glue.ratio.value = 8; glue.attack.value = 0.002; glue.release.value = 0.16;
@@ -129,7 +131,7 @@ export function buildGraph(ctx: BaseAudioContext, destination: AudioNode, offlin
 
   let reverb: ConvolverNode | null = null;
   try { reverb = ctx.createConvolver(); reverb.buffer = impulse(ctx); const wet = g(0.55); reverb.connect(wet); wet.connect(sfxDuck); } catch { reverb = null; }
-  return { ctx, master, limiter, sfxIn, sfxDuck, sfxVol, ambIn, ambDuck, ambVol, musicIn, musicDuck, musicVol, worldLP, glue, reverb, white: noiseBuffer(ctx, false), brown: noiseBuffer(ctx, true), offline, clock: null };
+  return { ctx, master, limiter, slowLP, sfxIn, sfxDuck, sfxVol, ambIn, ambDuck, ambVol, musicIn, musicDuck, musicVol, worldLP, glue, reverb, white: noiseBuffer(ctx, false), brown: noiseBuffer(ctx, true), offline, clock: null };
 }
 
 /** Create the live context (call from a user gesture). Safe to call often. */
@@ -279,4 +281,11 @@ export function muffle(amount: number, seconds = 0.6) {
   const t = now(), f = R.worldLP.frequency, hz = 20000 * Math.pow(500 / 20000, clamp(amount, 0, 1));
   f.cancelScheduledValues(t); f.setValueAtTime(f.value, t); f.exponentialRampToValueAtTime(hz, t + 0.03);
   if (seconds > 0) f.setTargetAtTime(20000, t + seconds, seconds / 2);
+}
+
+/** Slow-mo look for the ears (S.slowFx 0..1): the whole mix closes down to about 900 Hz at full slow-mo. */
+export function setSlowFx(v: number) {
+  if (!R) return;
+  const hz = 20000 * Math.pow(900 / 20000, clamp(v, 0, 1));
+  R.slowLP.frequency.setTargetAtTime(hz, now(), 0.05);
 }

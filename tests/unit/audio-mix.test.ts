@@ -76,8 +76,15 @@ describe('ambience helpers', () => {
 
 describe('cue table', () => {
   it('every cue the game calls exists', () => {
-    const called = ['pew', 'spread', 'boom', 'big', 'hit', 'pick', 'rail', 'zap', 'alarm', 'clear', 'ui', 'buy', 'cannon', 'flak', 'flakPop', 'missile', 'bombDrop', 'pd', 'groundBoom', 'collapse', 'shield', 'eshot', 'eMissile', 'railCharge', 'jet'];
+    const called = ['pew', 'spread', 'boom', 'big', 'hit', 'pick', 'rail', 'zap', 'alarm', 'clear', 'ui', 'buy', 'cannon', 'flak', 'flakPop', 'missile', 'bombDrop', 'pd', 'groundBoom', 'collapse', 'shield', 'eshot', 'eMissile', 'railCharge', 'jet', 'broadside', 'mortar', 'odReady', 'odEnd', 'od_lance', 'od_spear', 'od_wing', 'od_bulwark', 'bossDown', 'carnageTier'];
     for (const c of called) expect(CUES[c], c).toBeTruthy();
     for (const [k, v] of Object.entries(ALIASES)) expect(CUES[v], k).toBeTruthy();
+  });
+});
+
+describe('event coverage', () => {
+  it('every Overdrive kind has its own signature cue', async () => {
+    const { OVERDRIVES } = await import('../../src/data/hulls');
+    for (const k of Object.keys(OVERDRIVES)) expect(CUES[`od_${k}`], k).toBeTruthy();
   });
 });

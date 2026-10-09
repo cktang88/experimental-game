@@ -4,10 +4,11 @@ import { TerrainLayer } from './render/world/terrain';
 import { ShipLayer } from './render/ship/shipLayer';
 import { UnitLayer } from './render/units/unitLayer';
 import { FxLayer } from './render/fx/fxLayer';
+import { preloadKits } from './render/assets';
 import { V } from './game/vfx';
 import { drawHud } from './render/hud';
 import { drawBlueprint } from './render/shipPreview';
-import { S, W, H, keys, startCombat, updateCombat, updateBg, endCombat, seedDecor, setScrapHandler, damagePlayer } from './game/combat';
+import { S, W, H, keys, startCombat, updateCombat, updateBg, endCombat, seedDecor, setScrapHandler, damagePlayer, damageTarget, triggerOverdrive } from './game/combat';
 import { initAudio, sfx, audio, setMuted, music, updateAudio } from './audio';
 import {
   newRun, loadRun, saveRun, clearSave, maxHp, dv, mods, level, bossLevel, heal, partChoices, relicChoices, addRelic, addSection,
@@ -23,6 +24,11 @@ import { el, show, ui, partCard, relicCard, topBar } from './ui/dom';
 import { mapView, glyph } from './ui/mapView';
 import { refitPanel } from './ui/refit';
 import { pick, rint, clamp } from './util/rng';
+import { loadProfile, perksFor, dailySeed, dateKey, type Profile } from './game/meta';
+import { launchPanel, admiraltyScreen, settle, wreckReport, victoryScreen, portScreen } from './game/metaScreens';
+import { HULLS } from './data/hulls';
+import { heatFx } from './data/heat';
+import { CAMPAIGN_SECTORS } from './game/run';
 
 /* ---------------- canvas + renderer ---------------- */
 const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
@@ -46,12 +52,16 @@ if (webglAvailable()) {
     renderer = eng;
   } catch (e) { console.error(e); renderer = null; }
 }
+// Kitbash pieces for the ship hulls (the ship layer rebuilds once they arrive).
+if (renderer) preloadKits(['scifi']).catch((e) => console.error('kit load failed', e));
 window.addEventListener('resize', resize);
 resize();
 seedDecor();
 
 /* ---------------- state ---------------- */
 let run: RunState | null = null;
+/** The persistent pilot profile (fleet loop). Settled once per run: death, retiring after victory, or abandoning. */
+const profile: Profile = loadProfile();
 let mode: 'title' | 'menu' | 'combat' = 'title';
 let paused = false;
 let onCombatDone: ((o: 'win' | 'dead') => void) | null = null;
@@ -64,6 +74,7 @@ const KEYMAP: Record<string, string> = { ArrowLeft: 'l', KeyA: 'l', ArrowRight: 
 window.addEventListener('keydown', (e) => {
   if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
   if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = true; if (mode === 'combat') e.preventDefault(); }
+  if (e.code === 'Space' && mode === 'combat') { e.preventDefault(); if (!e.repeat && !paused) keys.od = true; }
   if ((e.code === 'KeyP' || e.code === 'Escape') && mode === 'combat') setPaused(!paused);
   if (e.code === 'KeyM') setMuted(audio.on);
 });
@@ -129,11 +140,16 @@ function titleScreen() {
     reg.replaceChildren('Ghost registry: ', el('b', online ? null : 'off', online ? 'online' : 'offline'),
       online ? `. ${total} fallen pilot${total === 1 ? '' : 's'} on record. Their wrecks become the bosses.` : '. Bosses will come from ghosts on this device only.');
   });
-  const start = () => {
+  const launch = (daily: boolean) => {
     initAudio(); sfx('ui');
     const cs = sanitizeName(input.value) || 'PILOT'; try { localStorage.setItem('gd.callsign', cs); } catch { /* ignore */ }
-    run = newRun(cs); mapToast = 'Choose your first node. Everything on floor one is a fight.'; mapScreen();
+    if (saved) settle(profile, saved, saved.won ? 'victory' : 'abandoned'); // a run left unfinished is banked at half pay
+    const key = dateKey();
+    run = daily ? newRun(cs, dailySeed(key), { daily: key }) : newRun(cs, undefined, { hull: profile.hull, heat: profile.heat, perks: perksFor(profile.xp) });
+    mapToast = daily ? `Daily strike ${key}: the same route for every pilot today.` : 'Choose your first node. Everything on floor one is a fight.';
+    mapScreen();
   };
+  const start = () => launch(false);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); });
   const noGl = !renderer ? el('p', 'fatal', 'WebGL is not available in this browser, so combat cannot be drawn. Try a current Chrome, Edge, Firefox or Safari.') : null;
   show(el('div', 'screen center', el('div', 'panel stack',
@@ -141,10 +157,11 @@ function titleScreen() {
     el('h1', null, 'Ghost', el('br'), el('span', null, 'Dreadnought')),
     el('p', null, 'Build a flying battleship one hull section at a time. Chart a route through each sector: fights, elites, merchants, derelicts and strange signals. At the end of every sector waits a ghost dreadnought, the wreck of a real pilot who died there. When you die, your ship becomes theirs to fight.'),
     noGl,
+    launchPanel(profile, () => launch(true), () => admiraltyScreen(profile, titleScreen)),
     el('label', { for: 'callsign', class: 'eyebrow', style: 'color:var(--dim)' }, 'Callsign'), input,
     el('div', 'row', el('button', { class: 'primary', id: 'btn-new', onclick: start, disabled: !renderer }, saved ? 'New run' : 'Launch'),
-      saved ? el('button', { id: 'btn-continue', onclick: () => { initAudio(); run = saved; mapToast = 'Run restored.'; mapScreen(); } }, `Continue · sector ${saved.sector}`) : null),
-    el('div', 'keys', el('kbd', null, 'WASD'), ' / ', el('kbd', null, 'Arrows'), ' or drag to steer. Guns fire on their own. ', el('kbd', null, 'P'), ' pause, ', el('kbd', null, 'M'), ' mute.'),
+      saved ? el('button', { id: 'btn-continue', onclick: () => { initAudio(); run = saved; if (saved.phase === 'victory') { showVictory(); return; } mapToast = 'Run restored.'; mapScreen(); } }, `Continue · sector ${saved.sector}`) : null),
+    el('div', 'keys', el('kbd', null, 'WASD'), ' / ', el('kbd', null, 'Arrows'), ' or drag to steer. Batteries fire on their own: bow ahead, broadsides beside, bombs below. ', el('kbd', null, 'Space'), ' Overdrive, ', el('kbd', null, 'P'), ' pause, ', el('kbd', null, 'M'), ' mute.'),
     reg,
   )));
   input.focus(); input.select();
@@ -173,8 +190,8 @@ function intelCard(): HTMLElement {
 }
 function mapScreen() {
   if (!run) return titleScreen();
-  mode = 'menu'; renderer?.clearLayers(); saveRun(run);
-  music.setScene('map');
+  mode = 'menu'; renderer?.clearLayers(); music.setScene('map');
+  run.stats.maxScrapHeld = Math.max(run.stats.maxScrapHeld, run.scrap); saveRun(run);
   const r = run;
   const info = el('section', 'card', el('div', 'eyebrow', `Sector ${r.sector} route`), el('p', { 'data-testid': 'node-info' }, 'Hover a node to see what it is. Pick one of the glowing nodes to travel there.'));
   const setInfo = (id: string | null) => {
@@ -204,7 +221,7 @@ function abandonPrompt() {
     el('div', 'row', el('button', { class: 'primary', onclick: mapScreen }, 'Back to map'), el('button', { onclick: titleScreen }, 'Save and quit'),
       el('button', { onclick: (e: Event) => { const b = e.currentTarget as HTMLButtonElement; if (b.dataset.armed) abandonRun(); else { b.dataset.armed = '1'; b.textContent = 'Confirm: abandon run'; } } }, 'Abandon run')))));
 }
-function abandonRun() { clearSave(); run = null; endCombat(); mode = 'title'; titleScreen(); }
+function abandonRun() { if (run) settle(profile, run, 'abandoned'); clearSave(); run = null; endCombat(); mode = 'title'; titleScreen(); }
 function refitScreen() {
   const r = run!;
   const top = el('div');
@@ -236,15 +253,25 @@ function fight(enc: Encounter, after: () => void, ghost?: Ghost) {
   show(); mode = 'combat'; paused = false;
   music.setScene(enc.kind === 'boss' ? 'boss' : enc.kind === 'elite' ? 'elite' : 'combat');
   setScrapHandler((v) => { r.scrap += v; r.stats.scrapEarned += v; });
-  startCombat({ enc, level: enc.kind === 'boss' ? bossLevel(r) : level(r, enc.kind === 'elite'), sector: r.sector, build: r.build, hp: r.hp, relics: r.relics, mods: mods(r), ghost, cheatDeathAvailable: !r.jumpUsed });
+  startCombat({
+    enc, level: enc.kind === 'boss' ? bossLevel(r) : level(r, enc.kind === 'elite'), sector: r.sector, build: r.build, hp: r.hp, relics: r.relics, mods: mods(r), ghost, cheatDeathAvailable: !r.jumpUsed,
+    overdrive: HULLS[r.hull].overdrive, heat: heatFx(r.heat), odCharge: r.odStart,
+  });
   onCombatDone = (o) => {
-    r.stats.kills += S.kills; r.stats.score += S.score;
+    const fs = S.stats, rs = r.stats;
+    rs.kills += S.kills; rs.score += S.score; rs.fights++;
+    rs.structures += fs.structures; rs.broadsides += fs.broadsides; rs.maxVolley = Math.max(rs.maxVolley, fs.maxVolley); rs.overdrives += fs.overdrives;
+    rs.lanceStructures += fs.lanceStructures; rs.peakCarnage = Math.max(rs.peakCarnage, fs.peakCarnage); rs.dmgTaken += fs.dmgTaken; rs.dmgDealt += fs.dmgDealt;
+    if (o === 'win' && fs.dmgTaken < S.P!.dv.maxHp * 0.05) rs.flawless++;
+    for (const [k, n] of Object.entries(S.seen)) r.seen.enemies[k] = (r.seen.enemies[k] || 0) + (n || 0);
+    if (ghost) r.seen.ghosts.push({ id: ghost.id, name: ghost.name, sector: ghost.sector, ai: !!ghost.ai, outcome: o === 'win' ? 'killed' : 'lost' });
     if (S.cheatDeathUsed) r.jumpUsed = true;
     endCombat(); mode = 'menu'; renderer?.clearLayers();
     if (o === 'dead') { onDeath(); return; }
     music.setScene(enc.kind === 'boss' ? 'victory' : 'map');
     r.hp = clamp(S.P!.hp, 1, maxHp(r));
     if (hasFlag(r.relics, 'heal_after_fight')) heal(r, 0.1);
+    rs.maxScrapHeld = Math.max(rs.maxScrapHeld, r.scrap);
     saveRun(r); after();
   };
 }
@@ -408,6 +435,7 @@ function bossReward(g: Ghost) {
   const next = (id: string | null) => {
     if (id) addRelic(r, id);
     heal(r, 0.3);
+    if (r.sector >= CAMPAIGN_SECTORS && !r.won) { r.won = true; r.phase = 'victory'; saveRun(r); showVictory(); return; }
     enterNextSector(r); sectorGhosts = [];
     mapToast = `Sector ${r.sector}. Crews patched 30% of your hull on the way in.`;
     saveRun(r); mapScreen();
@@ -415,16 +443,24 @@ function bossReward(g: Ghost) {
   render();
 }
 
+function showVictory() {
+  const r = run!;
+  mode = 'menu'; sfx('clear'); music.setScene('victory');
+  victoryScreen(r,
+    () => { const st = settle(profile, r, 'victory'); clearSave(); portScreen(r, st, () => { run = null; titleScreen(); }); },
+    () => { r.endless = true; r.phase = 'map'; enterNextSector(r); sectorGhosts = []; mapToast = `Endless: sector ${r.sector}. The map keeps going, and so do they.`; saveRun(r); mapScreen(); });
+}
+
 async function onDeath() {
   const r = run!;
-  clearSave();
-  music.setScene('death');
+  clearSave(); music.setScene('death');
+  const st = settle(profile, r, 'dead');
   const g = deathGhost(r);
   const status = el('p', { style: 'color:var(--fg)', 'data-testid': 'ghost-status' }, 'Recording your wreck…');
   show(el('div', 'screen center solid', el('div', 'panel hostile stack',
     el('div', { class: 'eyebrow', style: 'color:var(--hostile)' }, 'Signal lost'), el('h2', null, 'Dreadnought down'),
     el('p', null, `${r.callsign} went down in sector ${r.sector}, floor ${g.floor + 1}.`),
-    el('div', 'deathstats', ...([['Score', Math.floor(r.stats.score)], ['Kills', r.stats.kills], ['Elites', r.stats.elites], ['Bosses', r.stats.bosses], ['Scrap earned', Math.floor(r.stats.scrapEarned)], ['Nodes', r.stats.nodes]] as const).map(([k, v]) => el('div', null, el('b', null, String(v)), el('span', null, k)))),
+    wreckReport(r, st),
     status,
     el('button', { class: 'primary', id: 'btn-again', onclick: () => { run = null; titleScreen(); } }, 'Fly again'),
   )));
@@ -437,12 +473,13 @@ async function onDeath() {
 /* ---------------- debug hooks for automated tests ---------------- */
 declare global { interface Window { __gd: unknown } }
 window.__gd = {
-  get run() { return run; }, S, debug, EVENTS,
+  get run() { return run; }, get profile() { return profile; }, S, debug, EVENTS,
   travelTo(type: NodeType) { const r = run!; const id = reachable(r.map, r.at).find((i) => r.map.nodes[i].type === type); if (id) travel(id); return !!id; },
   reachableTypes() { const r = run!; return reachable(r.map, r.at).map((i) => r.map.nodes[i].type); },
   forceNext(type: NodeType) { const r = run!; const id = reachable(r.map, r.at)[0]; r.map.nodes[id].type = type; if (type === 'fight') r.map.nodes[id].enc = 'patrol'; if (type === 'elite') r.map.nodes[id].enc = 'ace'; travel(id); },
   god(on = true) { S.god = on; },
-  winNow() { if (S.boss) S.boss.hp = 1; if (S.elite) S.elite.hp = 1; S.time = 9999; for (const e of S.enemies) e.hp = 0.5; },
+  winNow() { if (S.boss?.alive) damageTarget(S.boss, 1e9); if (S.elite && !S.elite.dead) damageTarget(S.elite, 1e9); S.time = 9999; for (const e of S.enemies) e.hp = 0.5; },
+  overdrive() { S.overdrive.charge = 1; return triggerOverdrive(); },
   killPlayer() { S.god = false; S.firstHitUsed = true; S.cheatDeath = false; if (S.P) { S.P.shield = 0; S.P.hp = 1; } damagePlayer(9999); },
   addScrap(n: number) { run!.scrap += n; },
 };

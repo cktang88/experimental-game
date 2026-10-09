@@ -83,6 +83,7 @@ function explosion(o: Out | null, size: number, ground: boolean) {
 /* ---------------------------------------------------------------- the table */
 
 let scrapStreak = 0, scrapAt = -1;
+const PENTA = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24];
 
 export const CUES: Record<string, Cue> = {
   /* our weapons ---------------------------------------------------- */
@@ -235,12 +236,15 @@ export const CUES: Record<string, Cue> = {
   /* salvage, warnings, state -------------------------------------------- */
   // scrap whooshing into the hull: each pickup in a stream climbs a semitone (to an octave), then the stream resets
   pick: { gap: 30, burst: 8, priority: 2, cost: 3, layer: 'ship', play(o) {
+    // the stream climbs a pentatonic ladder (S.pickStreak.n from combat, else our own streak count), two octaves at most
     const t = now();
-    scrapStreak = t - scrapAt < 0.45 ? Math.min(12, scrapStreak + 1) : 0; scrapAt = t;
-    const r = Math.pow(2, scrapStreak / 12), c = out(o, 'ship', { vol: 0.42, wet: 0.1 });
-    noise(c, { filter: 'bandpass', f0: 900 * r, f1: 3800 * r, q: 2, dur: 0.12, vol: 0.18, attack: 0.05 });
-    tone(c, { type: 'sine', f0: 1046 * r, f1: 1046 * r * 1.02, dur: 0.12, vol: 0.12, delay: 0.06 });
-    tone(c, { type: 'triangle', f0: 2093 * r, dur: 0.08, vol: 0.04, delay: 0.07 });
+    scrapStreak = t - scrapAt < 0.5 ? scrapStreak + 1 : 0; scrapAt = t;
+    const n = Math.max(0, Math.round(o.size ?? scrapStreak + 1) - 1), step = PENTA[Math.min(PENTA.length - 1, n)];
+    const r = Math.pow(2, step / 12), c = out({ ...o, size: undefined }, 'ship', { vol: 0.42, wet: 0.12 });
+    noise(c, { filter: 'bandpass', f0: 700 * r, f1: 3000 * r, q: 2, dur: 0.1, vol: 0.16, attack: 0.04 });
+    tone(c, { type: 'sine', f0: 784 * r, f1: 784 * r * 1.01, dur: 0.14, vol: 0.12, delay: 0.05 });
+    tone(c, { type: 'triangle', f0: 1568 * r, dur: 0.08, vol: 0.035, delay: 0.06 });
+    if (n >= PENTA.length - 1) tone(c, { type: 'sine', f0: 3136, dur: 0.25, vol: 0.02, delay: 0.08 }); // top of the ladder sparkles
   } },
   // ship klaxon over the PA: banner alarms (elite contact, boss arrival, enrage, emergency jump)
   alarm: { gap: 400, priority: 3, cost: 6, play(o) {
@@ -286,6 +290,116 @@ export const CUES: Record<string, Cue> = {
   timp: { gap: 200, priority: 3, cost: 2, play(o) { sample(out(o, 'ui', { vol: 0.8, wet: 0.4 }), I('timp-38'), { vol: 1 }); } },
 };
 
+/* ---------------------------------------------------------------- volleys and Overdrive (driven by S.events) */
+
+/** One heavy gun of a broadside ripple: crack, chest thump and a short high snap. Three voices each. */
+function round(c: Out | null, delay: number, p: number, v: number) {
+  noise(c, { filter: 'bandpass', f0: 1500 * p, f1: 320, q: 0.7, dur: 0.16, vol: 0.5 * v, delay });
+  tone(c, { type: 'sine', f0: 105 * p, f1: 38, dur: 0.32, vol: 0.75 * v, delay, attack: 0.003 });
+  noise(c, { filter: 'highpass', f0: 4200, dur: 0.025, vol: 0.18 * v, delay });
+}
+
+Object.assign(CUES, {
+  /**
+   * A broadside: opts.size = rounds in the volley (stern to bow, 35 ms apart, as combat's BROADSIDE.stagger), x is the
+   * hull side, so the whole volley sits hard on that side. One shared sub-bass, cannon body and rolling thunder carry
+   * the mass; each round adds its own crack and thump.
+   */
+  broadside: { gap: 300, priority: 3, cost: 30, layer: 'ship', play(o: CueOpts) {
+    const rounds = Math.max(1, Math.min(14, Math.round(o.size ?? 4))), side = (o.x ?? 800) < 800 ? -1 : 1;
+    const c = makeOut({ x: side < 0 ? 120 : 1480, layer: 'air' }, { vol: o.vol ?? 1, wet: 0.3 });
+    const k = Math.sqrt(rounds / 6), stagger = 0.035;
+    for (let i = 0; i < rounds; i++) round(c, i * stagger, j(0.05) * (0.94 + 0.012 * i), 0.55 + 0.25 / (1 + i * 0.3));
+    sample(c, S('cannon'), { vol: 0.85, rate: 0.82 * j(0.03) });
+    sample(c, S('cannon'), { vol: 0.6, rate: 0.74, delay: rounds * stagger * 0.5 });
+    sample(c, S('boom_low1'), { vol: 0.7 * k, rate: 0.8 });
+    tone(c, { type: 'sine', f0: 62, f1: 24, dur: 1.1 + 0.08 * rounds, vol: 0.9, attack: 0.006 }); // the pressure wave
+    noise(c, { filter: 'lowpass', f0: 600, f1: 50, dur: 1.6 + 0.1 * rounds, vol: 0.4 * k, brown: true, delay: 0.04, attack: 0.05 }); // thunder rolling down the hull
+    debris(c, 3 + Math.round(rounds / 2), rounds * stagger + 0.3, 0.06, 1800, 5200, 0.05); // shell cases and rattling plates
+    duck('music', 0.7, 0.01, 0.1 + rounds * stagger, 0.5);
+  } },
+  // Overdrive charged: capacitors topping off and a bridge chime
+  odReady: { gap: 800, priority: 3, cost: 6, play(o: CueOpts) {
+    const c = out({ vol: o.vol }, 'ui', { vol: 0.5, wet: 0.35 });
+    tone(c, { type: 'sawtooth', f0: 110, f1: 440, dur: 0.6, vol: 0.05, attack: 0.5 });
+    noise(c, { filter: 'bandpass', f0: 600, f1: 5000, q: 2, dur: 0.6, vol: 0.08, attack: 0.5 });
+    for (const [i, f] of [[0, 659.3], [1, 987.8], [2, 1318.5]] as const) tone(c, { type: 'sine', f0: f, dur: 0.9, vol: 0.09, delay: 0.55 + i * 0.09 });
+  } },
+  odEnd: { gap: 800, priority: 2, cost: 4, layer: 'ship', play(o: CueOpts) {
+    const c = out(o, 'ship', { vol: 0.5, wet: 0.3 });
+    tone(c, { type: 'sawtooth', f0: 220, f1: 40, dur: 1.1, vol: 0.06 });
+    noise(c, { filter: 'lowpass', f0: 3000, f1: 200, dur: 0.9, vol: 0.12 });
+  } },
+  // Ventral Lance: a column of fire from the keel to the street. Ignition, a roaring beam for `size` seconds, the street burning.
+  od_lance: { gap: 1000, priority: 3, cost: 14, layer: 'ship', play(o: CueOpts) {
+    const dur = o.size ?? 3.6, c = out({ ...o, size: undefined }, 'ship', { vol: 0.9, wet: 0.35 });
+    sample(c, S('lance'), { vol: 0.85, dur: Math.min(6, dur + 1.2), release: 1 });
+    tone(c, { type: 'sawtooth', f0: 55, f1: 49, dur, vol: 0.12, attack: 0.15 });
+    tone(c, { type: 'sawtooth', f0: 110.5, f1: 98, dur, vol: 0.06, attack: 0.15 });
+    tone(c, { type: 'sine', f0: 40, f1: 30, dur: dur + 0.5, vol: 0.6, attack: 0.05 });
+    noise(c, { filter: 'bandpass', f0: 900, f1: 500, q: 1.5, dur, vol: 0.25, attack: 0.2 });
+    noise(c, { filter: 'lowpass', f0: 1800, f1: 300, dur: dur + 1, vol: 0.3, brown: true, delay: 0.3, attack: 0.4 });
+    explosion(c, 1.2, true);
+    duck('music', 0.55, 0.05, dur, 1.2);
+  } },
+  // Lance Spear: a forward beam that screams down the field
+  od_spear: { gap: 1000, priority: 3, cost: 12, layer: 'ship', play(o: CueOpts) {
+    const dur = o.size ?? 2.6, c = out({ ...o, size: undefined }, 'ship', { vol: 0.85, wet: 0.3 });
+    sample(c, S('railburst'), { vol: 0.7, rate: 0.8 });
+    tone(c, { type: 'sawtooth', f0: 220, f1: 440, dur: 0.4, vol: 0.12, attack: 0.02 });
+    tone(c, { type: 'sawtooth', f0: 440, f1: 415, dur, vol: 0.07, delay: 0.35 });
+    tone(c, { type: 'square', f0: 880.5, f1: 830, dur, vol: 0.025, delay: 0.35 });
+    noise(c, { filter: 'highpass', f0: 3500, dur: dur + 0.2, vol: 0.18, attack: 0.1 });
+    tone(c, { type: 'sine', f0: 70, f1: 35, dur: 0.8, vol: 0.7 });
+    duck('music', 0.6, 0.03, dur, 1);
+  } },
+  // Strike Wing: the hangar opens and eight strike craft are catapulted off the deck, one after another
+  od_wing: { gap: 1000, priority: 3, cost: 24, layer: 'ship', play(o: CueOpts) {
+    const c = out({ ...o, size: undefined }, 'ship', { vol: 0.75, wet: 0.35 });
+    tone(c, { type: 'sawtooth', f0: 466, dur: 0.35, vol: 0.05, attack: 0.02 }); tone(c, { type: 'sawtooth', f0: 466, dur: 0.35, vol: 0.05, delay: 0.45, attack: 0.02 }); // deck klaxon
+    for (let i = 0; i < 8; i++) {
+      const t = 0.5 + i * 0.22, side = i % 2 ? 1 : -1, l = makeOut({ x: (o.x ?? 800) + side * 260, layer: 'air' }, { vol: 0.5 * (o.vol ?? 1) });
+      noise(c, { filter: 'bandpass', f0: 500, f1: 300, q: 2, dur: 0.06, vol: 0.3, delay: t }); // catapult shuttle clunk
+      noise(l, { filter: 'bandpass', f0: 700, f1: 3400, q: 1.2, dur: 0.7, vol: 0.3, delay: t + 0.03, attack: 0.08 }); // launch roar
+      tone(l, { type: 'sawtooth', f0: 330, f1: 900, dur: 0.7, vol: 0.02, delay: t + 0.03, attack: 0.1 });
+    }
+  } },
+  // Bulwark Aegis: a shockwave that flattens the sky, then the aegis hums around the hull
+  od_bulwark: { gap: 1000, priority: 3, cost: 16, layer: 'ship', play(o: CueOpts) {
+    const dur = o.size ?? 5, c = out({ ...o, size: undefined }, 'ship', { vol: 0.9, wet: 0.45 });
+    noise(c, { filter: 'bandpass', f0: 300, f1: 4000, q: 1, dur: 0.45, vol: 0.2, attack: 0.42 }); // reverse suck-in
+    tone(c, { type: 'sine', f0: 80, f1: 22, dur: 1.8, vol: 1, delay: 0.45 });
+    noise(c, { filter: 'lowpass', f0: 5000, f1: 80, dur: 1.6, vol: 0.6, delay: 0.45, brown: true });
+    sample(c, S('boom_chunky'), { vol: 0.6, rate: 0.7, delay: 0.45 });
+    sample(c, S('shield'), { vol: 0.5, rate: 0.6, delay: 0.5 });
+    for (const [f, v] of [[220, 0.05], [330.4, 0.035], [440.8, 0.025]] as const) tone(c, { type: 'sine', f0: f, f1: f * 0.995, dur, vol: v, delay: 0.6, attack: 0.4 });
+    duck('music', 0.5, 0.05, 0.9, 1.4); muffle(0.45, 0.6);
+  } },
+  // the boss goes down: a cascade of secondary blasts across a dying hull, then the reactor
+  bossDown: { gap: 2000, priority: 3, cost: 30, play(o: CueOpts) {
+    const c = out(o, 'air', { vol: 1, wet: 0.5 });
+    for (let i = 0; i < 6; i++) { const l = makeOut({ x: (o.x ?? 800) + (Math.random() - 0.5) * 400, y: o.y, layer: 'air' }, { vol: 0.6 * (o.vol ?? 1), extraDelay: i * 0.22 + Math.random() * 0.1 }); explosion(l, 0.8, false); }
+    explosion(c, 2.2, false);
+    tone(c, { type: 'sine', f0: 50, f1: 20, dur: 3.5, vol: 0.9, delay: 1.4 });
+    noise(c, { filter: 'lowpass', f0: 1200, f1: 40, dur: 4, vol: 0.5, brown: true, delay: 1.4, attack: 0.1 });
+    duck('music', 0.35, 0.02, 1.2, 2); muffle(0.5, 1.2);
+  } },
+  // a new carnage tier: a rising metallic swell, a fourth higher each tier
+  carnageTier: { gap: 400, priority: 2, cost: 4, play(o: CueOpts) {
+    const c = out({ vol: o.vol }, 'ui', { vol: 0.45, wet: 0.3 }), r = Math.pow(2, (Math.max(0, (o.size ?? 2) - 2) * 5) / 12);
+    noise(c, { filter: 'bandpass', f0: 400 * r, f1: 3000 * r, q: 3, dur: 0.35, vol: 0.12, attack: 0.3 });
+    tone(c, { type: 'sawtooth', f0: 146.8 * r, f1: 293.7 * r, dur: 0.4, vol: 0.05, attack: 0.3 });
+    tone(c, { type: 'sine', f0: 587.3 * r, dur: 0.5, vol: 0.08, delay: 0.32 });
+  } },
+  // mortar battery: a dull tube cough
+  mortar: { gap: 90, burst: 4, priority: 2, cost: 4, layer: 'ship', play(o: CueOpts) {
+    const c = out(o, 'ship', { vol: 0.6 }), p = j(0.06);
+    tone(c, { type: 'sine', f0: 140 * p, f1: 45, dur: 0.25, vol: 0.7 });
+    noise(c, { filter: 'lowpass', f0: 1100, f1: 200, dur: 0.18, vol: 0.4 });
+    noise(c, { filter: 'bandpass', f0: 2600, f1: 1200, q: 1, dur: 0.05, vol: 0.2 });
+  } },
+} satisfies Record<string, Cue>);
+
 /** Old names kept working for existing callers. */
 export const ALIASES: Record<string, string> = { boomGround: 'groundBoom', explosion: 'boom', broadside: 'cannon', arc: 'zap', bomb: 'bombDrop', scrap: 'pick', klaxon: 'alarm' };
 
@@ -297,7 +411,7 @@ export const ALIASES: Record<string, string> = { boomGround: 'groundBoom', explo
  */
 export const LEVEL_DB: Record<string, number> = {
   cannon: -3, rail: -2, lance: -3.5, boom: -2.5, groundBoom: -4.5, big: -1.5, collapse: -4, hit: -2, shield: -4,
-  zap: 9, pd: 3, bombDrop: 5, railCharge: 6, pick: 9, alarm: 8, clear: 2, flakPop: 1, missile: -1,
+  zap: 9, pd: 3, mortar: -2, broadside: -1, od_lance: -2, od_spear: -2, od_wing: 0, od_bulwark: -2, bossDown: -1, odReady: 2, carnageTier: 0, odEnd: 0, bombDrop: 5, railCharge: 6, pick: 9, alarm: 8, clear: 2, flakPop: 1, missile: -1,
   eshot: 9, eMissile: 7, jet: 2,
   ui: 5, uiHover: 4, uiToggle: -3.5, uiOpen: -6, uiClose: -6, uiConfirm: -4, uiError: 1.5, uiFlap: -3, buy: -2, uiStamp: -2.7, uiSwitch: -0.5,
 };

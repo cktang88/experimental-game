@@ -15,7 +15,10 @@ import { measure } from './probe.mjs';
 
 const CUES = ['pew', 'spread', 'cannon', 'flak', 'flakPop', 'missile', 'bombDrop', 'rail', 'railCharge', 'zap', 'pd', 'lance',
   'boom', 'groundBoom', 'big', 'collapse', 'hit', 'shield', 'eshot', 'eMissile', 'jet', 'pick', 'alarm', 'clear',
-  'ui', 'uiHover', 'uiSwitch', 'uiToggle', 'uiOpen', 'uiClose', 'uiConfirm', 'uiError', 'uiFlap', 'buy', 'uiStamp'];
+  'ui', 'uiHover', 'uiSwitch', 'uiToggle', 'uiOpen', 'uiClose', 'uiConfirm', 'uiError', 'uiFlap', 'buy', 'uiStamp',
+  'broadside', 'mortar', 'odReady', 'odEnd', 'od_lance', 'od_spear', 'od_wing', 'od_bulwark', 'bossDown', 'carnageTier'];
+/** Per-cue options for the solo renders (size means rounds, duration or tier for some cues). */
+const OPTS = { broadside: { x: 1300, size: 8 }, od_lance: { x: 800, size: 3.6 }, od_spear: { x: 800, size: 2.6 }, od_wing: { x: 800 }, od_bulwark: { x: 800, size: 5 }, carnageTier: { size: 3 }, pick: { x: 800, size: 4 } };
 
 const range = (n, f) => Array.from({ length: n }, (_, i) => f(i));
 export const SCENARIOS = {
@@ -26,6 +29,7 @@ export const SCENARIOS = {
     { t: 0, engine: true, throttle: 1 }, { t: 0, ambience: true, destruction: 0.8 }, { t: 0, scene: 'combat' },
     ...range(60, (i) => ({ t: 0.5 + i * 0.05, cue: 'pew', opts: { x: 700 + (i % 5) * 40, layer: 'ship' } })),
     ...range(12, (i) => ({ t: 0.6 + i * 0.25, cue: 'cannon', opts: { x: 800, layer: 'ship' } })),
+    { t: 1.5, cue: 'broadside', opts: { x: 300, size: 12, vol: 1.2 } }, { t: 3.2, cue: 'broadside', opts: { x: 1300, size: 12, vol: 1.2 } }, { t: 5, cue: 'od_lance', opts: { x: 800, size: 3.6 } },
     ...range(30, (i) => ({ t: 0.5 + i * 0.1, cue: 'boom', opts: { x: (i * 397) % 1600, y: 300, size: 10 + (i % 4) * 8 } })),
     ...range(20, (i) => ({ t: 0.7 + i * 0.15, cue: 'groundBoom', opts: { x: (i * 211) % 1600, y: 200 + (i % 5) * 120, size: 36 } })),
     ...range(10, (i) => ({ t: 1 + i * 0.3, cue: 'flakPop', opts: { x: 300 + i * 100, y: 200 } })),
@@ -83,7 +87,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.met
     // each cue alone, peak per cue
     if (!only.length || only.includes('percue')) {
       for (const cue of CUES) {
-        const r = await page.evaluate(([c]) => window.__gdAudioLab.render([{ t: 0.05, cue: c, opts: { x: 800, y: 400, size: 18 } }], 3), [cue]);
+        const r = await page.evaluate(([c, o]) => window.__gdAudioLab.render([{ t: 0.05, cue: c, opts: o }], 4), [cue, OPTS[cue] ?? { x: 800, y: 400, size: 18 }]);
         console.log(`  cue ${cue.padEnd(11)} peak ${String(r.peakDb).padStart(6)} dBFS  loudest400ms ${String(r.maxShortRmsDb).padStart(6)} dB`);
         if (r.clipped > 0) bad++;
       }
