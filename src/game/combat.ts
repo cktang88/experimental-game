@@ -265,6 +265,7 @@ function spawnBoss(g: Ghost) {
 const bossMount = (w: { ox: number; oy: number }) => ({ x: S.boss!.x + w.ox * S.boss!.s, y: S.boss!.y - w.oy * S.boss!.s });
 let shooter = 'unknown';
 function eShot(x: number, y: number, a: number, spd: number, o: Record<string, any> = {}) {
+  sfx(o.kind === 'missile' ? 'eMissile' : 'eshot', { x, y, layer: 'air' });
   S.eb.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: 4.5, dmg: edmg(), col: '#ff5a4e', kind: 'bullet', life: 8, t: 0, dead: false, src: shooter, ...o });
 }
 function ring(x: number, y: number, n: number, spd: number, o: Record<string, any> = {}) { const off = rnd(0, Math.PI * 2); for (let i = 0; i < n; i++) eShot(x, y, off + (i * Math.PI * 2) / n, spd, o); }
@@ -279,7 +280,7 @@ function bossFire(w: Boss['weps'][number]) {
     case 'bomb': for (let i = -1; i <= 1; i++) eShot(x + i * 18, y, Math.PI / 2, 90 + rnd(0, 40), { kind: 'mine', r: 7, life: rnd(1.3, 2.1), col: '#f2a541', dmg }); break;
     case 'artillery': { const n = t >= 3 ? 4 : 2; for (let k = 0; k < n; k++) strike(P.x + (k ? rnd(-110, 110) : 0), P.y + (k ? rnd(-90, 90) : 0), dmg * 2.2, 46); break; }
     case 'rail': S.eb.push({ kind: 'beam', x, y, warn: 1.0, dur: 0.3, w: 18 + 3 * t, dmg: dmg * 4, t: 0, life: 9, vx: 0, vy: 0, r: 0, col: '#c9a6ff', dead: false }); break;
-    case 'tesla': ring(x, y, 12 + t, spd * 0.6, { r: 3.5, col: '#9be7ff', dmg: dmg * 0.8 }); sfx('zap'); break;
+    case 'tesla': ring(x, y, 12 + t, spd * 0.6, { r: 3.5, col: '#9be7ff', dmg: dmg * 0.8 }); sfx('zap', { x, y }); break;
     case 'pd': {
       let best: Ent | null = null, bd = 160 * 160;
       for (const b of S.pb) { if (!['missile', 'shell', 'bomb', 'flak'].includes(b.kind)) continue; const dd = (b.x - x) ** 2 + (b.y - y) ** 2; if (dd < bd) { bd = dd; best = b; } }
@@ -331,11 +332,11 @@ function bossDown() {
   addCarnage(S.carnage, 120);
   for (let i = 0; i < 24; i++) S.pickups.push({ x: b.x + rnd(-b.halfW, b.halfW), y: b.y + rnd(-40, 40), vx: rnd(-80, 80), vy: rnd(-80, 40), val: (4 + 2 * S.sector) * S.P!.dv.scrapMult * S.heat.scrap, t: 0, kind: 'scrap' });
   setBanner(b.ghost.ai ? 'CORE DESTROYED' : 'GHOST LAID TO REST', b.ghost.name, 3, '#8fe39a');
-  sfx('big'); V.shake = 18; V.flashA = 0.35;
+  V.shake = 18; V.flashA = 0.35;
   requestStop(S.stop, HITSTOP.bossDeath, true); requestSlow(S.slowmo, SLOWMO_BOSS);
   emit({ type: 'bossDown', x: b.x, y: b.y });
   boomFx(b.x, b.y, 46, '#ffb347');
-  later(1.5, () => { if (S.mode === 'bossdown') { boomFx(b.x, b.y + 30, 80, '#fff1c1'); V.flashA = 0.45; V.shake = 22; sfx('big'); } });
+  later(1.5, () => { if (S.mode === 'bossdown') { boomFx(b.x, b.y + 30, 80, '#fff1c1'); V.flashA = 0.45; V.shake = 22; sfx('big', { x: b.x, y: b.y }); } });
 }
 
 /* ---------------- player ---------------- */
@@ -375,7 +376,7 @@ export function damagePlayer(d: number, src = 'unknown') {
   P.lastHit = 0;
   if (P.shield > 0) { const a = Math.min(P.shield, d); P.shield -= a; d -= a; }
   if (d > 0) {
-    P.hp -= d; S.stats.dmgTaken += d; S.stats.dmgBy[src] = (S.stats.dmgBy[src] || 0) + d; P.flash = 1; V.hurt = Math.min(1, V.hurt + 0.25 + d / (P.dv.maxHp * 0.08)); V.shake = Math.min(10, V.shake + d * 0.5); sfx('hit');
+    P.hp -= d; S.stats.dmgTaken += d; S.stats.dmgBy[src] = (S.stats.dmgBy[src] || 0) + d; P.flash = 1; V.hurt = Math.min(1, V.hurt + 0.25 + d / (P.dv.maxHp * 0.08)); V.shake = Math.min(10, V.shake + d * 0.5); sfx('hit', { x: P.x, layer: 'ship' });
     const heavy = d >= P.dv.maxHp * 0.07;
     requestStop(S.stop, heavy ? HITSTOP.playerHurt : hitstopFor(false, d * 4), heavy);
     emit({ type: 'playerHit', x: P.x, y: P.y, n: d });
@@ -391,7 +392,7 @@ export function damagePlayer(d: number, src = 'unknown') {
 function playerDie() {
   const P = S.P!; P.hp = 0; S.mode = 'dying'; S.endT = 2.4; endOverdrive();
   for (let i = 0; i < 8; i++) later(i * 0.12, () => boomFx(P.x + rnd(-P.dv.width / 2, P.dv.width / 2), P.y + rnd(-P.dv.len / 2, P.dv.len / 2), rnd(14, 28), pick(['#ffb347', '#ff6a3d', '#fff1c1'])));
-  sfx('big'); V.shake = 16; V.flashA = 0.4; boomFx(P.x, P.y, 40, '#ffb347');
+  sfx('big', { x: P.x, layer: 'ship' }); V.shake = 16; V.flashA = 0.4; boomFx(P.x, P.y, 40, '#ffb347');
   requestStop(S.stop, 0.2, true); requestSlow(S.slowmo, SLOWMO);
 }
 export function dronePos(i: number, n: number) { const P = S.P!, a = S.t * 1.8 + (i * Math.PI * 2) / n, R = Math.max(P.dv.width, P.dv.len) / 2 + 16; return { x: P.x + Math.cos(a) * R, y: P.y + Math.sin(a) * R * 0.6 }; }
@@ -410,7 +411,7 @@ function updateDrones(dt: number) {
 export function feedOverdrive(amount: number) {
   const o = S.overdrive; if (o.active || amount <= 0 || S.mode !== 'play') return;
   const was = o.charge; o.charge = Math.min(1, o.charge + amount);
-  if (was < 1 && o.charge >= 1) { emit({ type: 'overdriveReady', x: S.P!.x, y: S.P!.y, kind: o.kind }); sfx('clear'); }
+  if (was < 1 && o.charge >= 1) { emit({ type: 'overdriveReady', x: S.P!.x, y: S.P!.y, kind: o.kind }); }
 }
 /** Fire Overdrive if it is charged. Returns whether it started. */
 export function triggerOverdrive(): boolean {
@@ -419,7 +420,7 @@ export function triggerOverdrive(): boolean {
   o.active = true; o.charge = 0; o.dur = OVERDRIVES[o.kind].duration; o.t = o.dur; o.tick = 0;
   S.stats.overdrives++;
   setBanner(OVERDRIVES[o.kind].name.toUpperCase(), 'Overdrive', 1.2, OVERDRIVES[o.kind].col);
-  requestSlow(S.slowmo, SLOWMO_SHORT); V.shake = Math.max(V.shake, 8); V.flashA = Math.max(V.flashA, 0.2); sfx('big');
+  requestSlow(S.slowmo, SLOWMO_SHORT); V.shake = Math.max(V.shake, 8); V.flashA = Math.max(V.flashA, 0.2);
   emit({ type: 'overdrive', x: P.x, y: P.y, kind: o.kind });
   if (o.kind === 'wing') {
     for (let i = 0; i < 8; i++) { const a = -Math.PI / 2 + (i - 3.5) * 0.35; o.allies.push({ x: P.x, y: P.y, vx: Math.cos(a) * 300, vy: Math.sin(a) * 300, hdg: a, cd: 0.4 + i * 0.05, tg: null, t: 0 }); }
@@ -610,14 +611,14 @@ function fireWeapon(p: Part, m: Mount, x: number, y: number, mul: number, side =
   if (arc === 'broadside' && tg && tg.layer === 'ground' && p.id !== 'rail' && p.id !== 'missile') {
     const n = p.id === 'spread' ? (p.tier >= 3 ? 3 : 2) : 1;
     for (let i = 0; i < n; i++) shell(x, y, tg.x + rnd(-14, 14) * i, tg.y + S.scroll * 0.5 + rnd(-10, 10) * i, d * (p.id === 'flak' ? 1.4 : 1.15), c, 28, 0.5);
-    sfx('pew'); return true;
+    sfx('cannon', { x, layer: 'ship' }); return true;
   }
   switch (p.id) {
-    case 'pulse': S.pb.push(bolt(x, y, Math.cos(a) * 760, Math.sin(a) * 760, d, lay, c, 3.5)); sfx('pew'); return true;
-    case 'spread': { const n = p.tier >= 3 ? 5 : 3; for (let i = 0; i < n; i++) { const aa = a + (i - (n - 1) / 2) * 0.15; S.pb.push(bolt(x, y, Math.cos(aa) * 640, Math.sin(aa) * 640, d, lay, c, 3)); } sfx('pew'); return true; }
+    case 'pulse': S.pb.push(bolt(x, y, Math.cos(a) * 760, Math.sin(a) * 760, d, lay, c, 3.5)); sfx('pew', { x, layer: 'ship' }); return true;
+    case 'spread': { const n = p.tier >= 3 ? 5 : 3; for (let i = 0; i < n; i++) { const aa = a + (i - (n - 1) / 2) * 0.15; S.pb.push(bolt(x, y, Math.cos(aa) * 640, Math.sin(aa) * 640, d, lay, c, 3)); } sfx('spread', { x, layer: 'ship' }); return true; }
     case 'flak': {
       const dist = tg ? clamp(Math.hypot(tg.x - x, tg.y - y), 80, 700) : 260;
-      const b = bolt(x, y, Math.cos(a) * 560, Math.sin(a) * 560, d, lay, c, 4); Object.assign(b, { kind: 'flak', life: dist / 560, aoe: 56 }); S.pb.push(b); return true;
+      const b = bolt(x, y, Math.cos(a) * 560, Math.sin(a) * 560, d, lay, c, 4); Object.assign(b, { kind: 'flak', life: dist / 560, aoe: 56 }); S.pb.push(b); sfx('flak', { x, layer: 'ship' }); return true;
     }
     case 'missile': {
       const sx = arc === 'broadside' ? side : 0;
@@ -625,7 +626,7 @@ function fireWeapon(p: Part, m: Mount, x: number, y: number, mul: number, side =
         const vx = sx ? sx * 300 : s * 130, vy = sx ? s * 80 : -160;
         const b = bolt(x + s * 4, y, vx, vy, d, 'both', c, 3); Object.assign(b, { kind: 'missile', turn: 5, speed: 470, life: 2.6 }); S.pb.push(b);
       }
-      return true;
+      sfx('missile', { x, layer: 'ship' }); return true;
     }
     case 'bomb': {
       // Ventral bomb bay: carpet-bombs the ground under the hull. Prefers ground targets beneath the ship.
@@ -635,14 +636,14 @@ function fireWeapon(p: Part, m: Mount, x: number, y: number, mul: number, side =
         const tx = under ? under.x + rnd(-10, 10) : P.x + rnd(-P.dv.width * 0.45, P.dv.width * 0.45), ty = under ? under.y : P.y + rnd(-P.dv.len * 0.45, P.dv.len * 0.45);
         const b = bolt(x, y, 0, 0, d, 'ground', c, 4); Object.assign(b, { kind: 'bomb', life: 0.55, max: 0.55, aoe: 46, sx: x, sy: y, tx, ty }); S.pb.push(b);
       }
-      return true;
+      sfx('bombDrop', { x, layer: 'ship' }); return true;
     }
     case 'artillery': {
       const P = S.P!;
       const tg2 = nearest(P.x, P.y, (e) => (e.layer === 'ground' && !EN[e.type as EnemyType].salvage) || !!e.isBoss, ARC_RANGE.mortar)
         ?? nearest(P.x, P.y, (e) => e.layer === 'ground', ARC_RANGE.mortar);
       const tx = tg2 ? tg2.x : P.x + rnd(-260, 260), ty = tg2 ? (tg2.isBoss ? tg2.y : tg2.y + S.scroll * 0.6) : P.y - rnd(80, 320);
-      shell(x, y, tx, ty, d, c, 36, 0.6); return true;
+      shell(x, y, tx, ty, d, c, 36, 0.6); sfx('mortar', { x, layer: 'ship' }); return true;
     }
     case 'rail': {
       railLine(x, y, x + Math.cos(a) * 1500, y + Math.sin(a) * 1500, d, c);
@@ -657,13 +658,13 @@ function fireWeapon(p: Part, m: Mount, x: number, y: number, mul: number, side =
         S.beams.push({ x1: cx, y1: cy, x2: best.x, y2: best.y, col: c, life: 0.14, max: 0.14, w: 2, zig: true });
         damageTarget(best, d); cx = best.x; cy = best.y; range = 150; any = true;
       }
-      if (any) sfx('zap'); return any;
+      if (any) sfx('zap', { x, y }); return any;
     }
     case 'pd': {
       let best: Ent | null = null, bd = 170 * 170;
       for (const b of S.eb) { if (b.kind === 'beam' || b.kind === 'strike' || b.dead) continue; const dd = (b.x - x) ** 2 + (b.y - y) ** 2; if (dd < bd) { bd = dd; best = b; } }
       if (!best) return false;
-      best.dead = true; S.beams.push({ x1: x, y1: y, x2: best.x, y2: best.y, col: c, life: 0.12, max: 0.12, w: 1.5 }); spark(best.x, best.y, c, 4); return true;
+      best.dead = true; S.beams.push({ x1: x, y1: y, x2: best.x, y2: best.y, col: c, life: 0.12, max: 0.12, w: 1.5 }); spark(best.x, best.y, c, 4); sfx('pd', { x, layer: 'ship' }); return true;
     }
   }
   return false;
@@ -679,7 +680,7 @@ function railLine(x1: number, y1: number, x2: number, y2: number, d: number, c: 
   const distTo = (px: number, py: number) => { const k = clamp((px - x1) * ux + (py - y1) * uy, 0, L); return Math.hypot(x1 + ux * k - px, y1 + uy * k - py); };
   for (const e of S.enemies) if (!e.dead && distTo(e.x, e.y) < e.r + 6) damageTarget(e, d);
   const B = S.boss; if (B && B.alive && distTo(B.x, B.y) < B.halfW) damageBoss(d);
-  sfx('rail');
+  sfx('rail', { x: x1, layer: 'ship' });
 }
 export function damageTarget(e: Ent, d: number) {
   if (e.isBoss) { damageBoss(d); return; }
@@ -701,7 +702,6 @@ function killEnemy(e: Enemy) {
   const big = e.r > 15;
   boomFx(e.x, e.y, e.r * (d.elite ? 2 : 1.25), e.layer === 'air' ? '#ffb347' : '#ff8a3d', e.layer === 'ground');
   if (big) V.shake = Math.min(d.elite ? 16 : 8, V.shake + (d.elite ? 12 : 3));
-  sfx(d.elite ? 'big' : 'boom');
   if (e.layer === 'ground') groundBlast(e.x, e.y, e.r * 1.4, 20);
   const tierBefore = Math.floor(S.carnage.mult);
   if (!d.salvage) {
@@ -739,7 +739,7 @@ function updatePB(dt: number) {
     if (b.kind === 'shell' || b.kind === 'bomb') {
       b.ty += S.scroll * dt; // the ground keeps moving under falling ordnance
       const k = 1 - b.life / b.max; b.x = b.sx + (b.tx - b.sx) * k; b.y = b.sy + (b.ty - b.sy) * k;
-      if (b.life <= 0) { explode(b.x, b.y, b.aoe, b.dmg, 'ground', b.col); sfx('boom'); b.dead = true; }
+      if (b.life <= 0) { explode(b.x, b.y, b.aoe, b.dmg, 'ground', b.col); sfx('groundBoom', { x: b.x, y: b.y, size: b.aoe }); b.dead = true; }
       continue;
     }
     if (b.kind === 'missile') {
@@ -919,8 +919,9 @@ function updateEB(dt: number) {
     if (b.dead) continue;
     b.t += dt; b.life -= dt;
     if (b.kind === 'beam') {
+      if (!b.charged) { b.charged = true; sfx('railCharge', { x: b.x, y: b.y, layer: 'air' }); }
       if (b.t >= b.warn && !b.fired) {
-        b.fired = true; sfx('rail'); V.shake = Math.min(10, V.shake + 5); V.flashA = Math.max(V.flashA, 0.12);
+        b.fired = true; sfx('rail', { x: b.x, layer: 'air' }); V.shake = Math.min(10, V.shake + 5); V.flashA = Math.max(V.flashA, 0.12);
         for (let i = 0; i < 22; i++) addFx({ type: 'spark', x: b.x + rnd(-b.w / 2, b.w / 2), y: rnd(b.y, H), vx: rnd(-220, 220), vy: rnd(-80, 80), life: rnd(0.2, 0.5), max: 0.5, size: 1.8, drag: 3, tint: '#e3d0ff' });
         if (canHit && Math.abs(P.x - b.x) < b.w / 2 + P.dv.width * 0.35 && P.y > b.y) damagePlayer(b.dmg, 'beam');
       }
@@ -928,7 +929,7 @@ function updateEB(dt: number) {
     }
     if (b.kind === 'strike') {
       b.y += S.scroll * dt * 0.5;
-      if (b.t >= b.delay) { boomFx(b.x, b.y, b.rad * 0.8, '#ff7a4e'); sfx('boom'); if (canHit && shipHit(b.x, b.y, b.rad * 0.7, P.x, P.y, P.dv, 1, 1)) damagePlayer(b.dmg, 'strike'); b.dead = true; }
+      if (b.t >= b.delay) { boomFx(b.x, b.y, b.rad * 0.8, '#ff7a4e'); sfx('boom', { x: b.x, y: b.y, size: b.rad }); if (canHit && shipHit(b.x, b.y, b.rad * 0.7, P.x, P.y, P.dv, 1, 1)) damagePlayer(b.dmg, 'strike'); b.dead = true; }
       continue;
     }
     if (b.kind === 'missile') {
@@ -976,7 +977,7 @@ function updatePickups(dt: number) {
     if (d < 28 && S.mode !== 'dying') {
       if (p.kind === 'repair') { const amt = P.dv.maxHp * p.val * S.heat.heal; P.hp = Math.min(P.dv.maxHp, P.hp + amt); spark(P.x, P.y, '#8fe39a', 12); setBanner('REPAIR KIT', `+${Math.round(amt)} hull`, 0.9, '#8fe39a'); }
       else { S.scrap += p.val; onScrap(p.val); S.pickStreak.n++; S.pickStreak.t = 0; }
-      p.dead = true; sfx('pick');
+      p.dead = true; sfx('pick', { x: P.x, layer: 'ship', size: S.pickStreak.n });
     }
     if (p.y > H + 20) p.dead = true;
   }
@@ -1019,7 +1020,7 @@ export function updateCombat(rawDt: number) {
   for (const b of S.beams) b.life -= dt; S.beams = S.beams.filter((b) => b.life > 0);
   if (S.mode === 'bossdown' && S.boss) {
     S.chain -= dt;
-    if (S.chain <= 0) { const b = S.boss; S.chain = 0.12; boomFx(b.x + rnd(-b.halfW, b.halfW), b.y + rnd((-b.dv.len * b.s) / 2, (b.dv.len * b.s) / 2), rnd(14, 30), pick(['#ffb347', '#ff6a3d', '#fff1c1'])); sfx('boom'); V.shake = Math.min(10, V.shake + 2); }
+    if (S.chain <= 0) { const b = S.boss; S.chain = 0.12; boomFx(b.x + rnd(-b.halfW, b.halfW), b.y + rnd((-b.dv.len * b.s) / 2, (b.dv.len * b.s) / 2), rnd(14, 30), pick(['#ffb347', '#ff6a3d', '#fff1c1'])); sfx('boom', { x: b.x, y: b.y, size: 26 }); V.shake = Math.min(10, V.shake + 2); }
   }
   if (S.mode === 'play') checkEnd();
   else { S.endT -= dt; if (S.endT <= 0) { S.outcome = S.mode === 'dying' ? 'dead' : 'win'; S.mode = 'done'; } }
