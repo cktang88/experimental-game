@@ -41,7 +41,7 @@ export class MusicEngine {
     this.out = g(1, r.musicIn);
     this.lp = this.ctx.createBiquadFilter(); this.lp.type = 'lowpass'; this.lp.frequency.value = 20000; this.lp.Q.value = 0.5; this.lp.connect(this.out);
     this.duckG = g(1, this.lp);
-    this.stingBus = g(0.9, r.musicVol);
+    this.stingBus = g(0.7, r.musicVol);
     this.drumBus = g(0, this.lp);
     this.lastTick = now();
   }
