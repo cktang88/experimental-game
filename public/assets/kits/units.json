@@ -1,0 +1,20 @@
+{
+ "kit": "units",
+ "models": [
+  "K_DebrisDoor",
+  "K_DebrisDrivetrain",
+  "K_DebrisPlateA",
+  "K_DebrisTire",
+  "K_HangarRoundGlass",
+  "K_TruckFlat",
+  "K_TurretDouble",
+  "Q_Bob",
+  "Q_Challenger",
+  "Q_Executioner",
+  "Q_Imperial",
+  "Q_Omen",
+  "Q_Spitfire",
+  "Q_Zenith",
+  "_Detail"
+ ]
+}

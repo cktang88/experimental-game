@@ -30,6 +30,14 @@ export const KITS = {
     include: (n) => !/Alien/.test(n),
     textureSize: 1024,
   },
+  // Enemy units: run `node scripts/assets/prep-units.mjs` first (re-encodes several CC0 packs).
+  units: {
+    dir: 'units-src',
+    include: () => true,
+    // Units are articulated (turret heads, rotors, wheels): keep each model's node hierarchy.
+    keepHierarchy: true,
+    textureSize: 1024,
+  },
 };
 
 function listGltf(dir, recursive) {
@@ -68,7 +76,7 @@ async function buildKit(name, kit) {
   await doc.transform(
     unpartition(),
     dedup(),
-    flatten(),
+    ...(kit.keepHierarchy ? [] : [flatten()]),
     weld(),
     prune({ keepLeaves: true }),
     textureCompress({ encoder: sharp, targetFormat: 'webp', resize: [kit.textureSize, kit.textureSize], quality: 82 }),

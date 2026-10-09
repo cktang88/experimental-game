@@ -1,0 +1,93 @@
+// The livery material: one PBR shader that paints every enemy unit in the same military night style.
+//
+// Unit geometry carries an ENCODING instead of colours (see scripts/assets/prep-units.mjs):
+//   r = luminance (panel detail, grime), g = paint mask, b = lamp mask.
+// It comes from the model's texture (Quaternius ships) or from vertex colours (Kenney and procedural
+// parts). The shader turns it into livery paint over bare gunmetal, adds the sci-fi trim sheet's
+// grunge layer in object space (triplanar), and handles two per-instance effects:
+//   aFx.x = hit flash (0..1), aFx.y = burn (0 = intact, 1 = charred wreck with glowing embers).
+import * as THREE from 'three';
+import type { Detail } from './kit';
+
+export interface Livery { paint: number; metal: number; lamp: string; lampK: number }
+/** Enemy military liveries (docs/ART.md): olive drab, desert, charcoal. Lamps are hostile red. */
+export const LIVERY = {
+  olive: { paint: 0x4f5a34, metal: 0x3d4247, lamp: '#ff5a4e', lampK: 3 },
+  desert: { paint: 0x8a7550, metal: 0x44474a, lamp: '#ff5a4e', lampK: 3 },
+  charcoal: { paint: 0x2b2f33, metal: 0x4a5058, lamp: '#ff5a4e', lampK: 3 },
+  /** Elites: charcoal with oxide-red paint. */
+  elite: { paint: 0x5a2a26, metal: 0x2e3236, lamp: '#ff5a4e', lampK: 4 },
+  /** Salvage: worn hazard-yellow (scrap colour) over steel; lamps glow scrap gold. */
+  salvage: { paint: 0x8a6a2a, metal: 0x4c5157, lamp: '#ffc24a', lampK: 3.5 },
+  /** Infantry fatigues. */
+  fatigue: { paint: 0x46502f, metal: 0x2a2c2a, lamp: '#fff1d6', lampK: 3 },
+} satisfies Record<string, Livery>;
+export type LiveryName = keyof typeof LIVERY;
+
+export const liveryUniforms = { uTime: { value: 0 } };
+let blank: THREE.DataTexture | null = null;
+const blankTex = () => blank ?? (blank = Object.assign(new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1), { needsUpdate: true }));
+
+export interface LiveryOpts { map?: THREE.Texture | null; normalMap?: THREE.Texture | null; detailScale?: number; double?: boolean }
+const cache = new Map<string, THREE.MeshStandardMaterial>();
+
+/** A shared livery material (cached by livery + texture). */
+export function liveryMaterial(name: LiveryName, detail: Detail | null, o: LiveryOpts = {}) {
+  const key = `${name}|${o.map?.uuid ?? 'vc'}|${o.detailScale ?? 1}|${o.double ? 1 : 0}`;
+  const hit = cache.get(key); if (hit) return hit;
+  const L: Livery = LIVERY[name];
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.4, side: o.double ? THREE.DoubleSide : THREE.FrontSide });
+  if (o.map) { o.map.colorSpace = THREE.NoColorSpace; o.map.needsUpdate = true; m.map = o.map; }
+  else m.vertexColors = true;
+  if (o.normalMap) { m.normalMap = o.normalMap; m.normalScale.set(0.9, 0.9); }
+  const lamp = new THREE.Color(L.lamp).multiplyScalar(L.lampK);
+  const uniforms = {
+    uPaint: { value: new THREE.Color(L.paint) }, uMetal: { value: new THREE.Color(L.metal) }, uLamp: { value: lamp },
+    uGrunge: { value: detail?.grunge ?? blankTex() }, uDetail: { value: 1 / (o.detailScale ?? 22) }, uTime: liveryUniforms.uTime,
+  };
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, uniforms);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+attribute vec2 aFx; varying vec2 vFx; varying vec3 vObjPos; varying vec3 vObjN;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+vFx = aFx; vObjPos = position; vObjN = normal;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+uniform vec3 uPaint; uniform vec3 uMetal; uniform vec3 uLamp; uniform sampler2D uGrunge; uniform float uDetail; uniform float uTime;
+varying vec2 vFx; varying vec3 vObjPos; varying vec3 vObjN;
+float tri(vec3 p, vec3 w) { return texture2D(uGrunge, p.yz).r * w.x + texture2D(uGrunge, p.xz).r * w.y + texture2D(uGrunge, p.xy).r * w.z; }`)
+      .replace('#include <map_fragment>', `
+#ifdef USE_MAP
+  vec3 enc = texture2D(map, vMapUv).rgb;
+#else
+  vec3 enc = vec3(1.0, 0.0, 0.0);
+#endif
+#if defined( USE_COLOR )
+  enc = vColor.rgb;
+#endif
+  vec3 tw = pow(abs(normalize(vObjN)), vec3(4.0)); tw /= (tw.x + tw.y + tw.z + 1e-4);
+  vec3 tp = vObjPos * uDetail;
+  float gr = tri(tp, tw);
+  float gr2 = tri(tp * 2.7 + 0.37, tw);
+  float lum = enc.r, paint = smoothstep(0.25, 0.75, enc.g), lampM = smoothstep(0.45, 0.8, enc.b);
+  float wear = smoothstep(0.62, 0.7, gr2) * paint;
+  vec3 base = mix(uMetal, uPaint, paint * (1.0 - wear * 0.7)) * (0.45 + 1.3 * lum * lum) * (0.6 + 0.7 * gr);
+  base = mix(base, vec3(0.03, 0.028, 0.026) * (0.6 + gr), vFx.y);
+  diffuseColor.rgb = base;`)
+      .replace('#include <color_fragment>', '')
+      .replace('#include <roughnessmap_fragment>', `float roughnessFactor = clamp(mix(0.42, 0.72, paint) * (0.75 + 0.5 * gr) + vFx.y * 0.3, 0.2, 1.0);`)
+      .replace('#include <metalnessmap_fragment>', `float metalnessFactor = mix(0.7, 0.25, paint) * (1.0 - vFx.y * 0.6);`)
+      .replace('#include <emissivemap_fragment>', `
+  totalEmissiveRadiance = uLamp * lampM * (1.0 - vFx.y);
+  totalEmissiveRadiance += vec3(1.0, 0.92, 0.82) * vFx.x * 0.55;
+  // cold moonlit rim so small units read against the dark city
+  float rim = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 2.5);
+  totalEmissiveRadiance += vec3(0.32, 0.4, 0.52) * rim * 0.22 * (1.0 - vFx.y);
+  float ember = smoothstep(0.58, 0.8, gr2) * (0.55 + 0.45 * sin(uTime * 6.0 + vObjPos.x * 0.7 + vObjPos.z * 0.5));
+  totalEmissiveRadiance += vec3(1.0, 0.32, 0.06) * ember * vFx.y * 1.6;`);
+  };
+  m.customProgramCacheKey = () => `livery|${o.map ? 1 : 0}|${o.normalMap ? 1 : 0}`;
+  cache.set(key, m);
+  return m;
+}
