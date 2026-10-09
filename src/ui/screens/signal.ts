@@ -64,7 +64,7 @@ export function signalView(o: SignalOpts) {
     el('kbd', null, String(i + 1)),
     el('span', 'choice-txt', el('b', null, c.label), el('span', null, c.detail), c.disabled ? el('em', null, c.disabled) : null)));
   const replies = el('div', 'replies', el('div', 'crt-k', 'Transmit reply'), ...choices);
-  const tt = teletype(msg, o.text, { cps: 150, delay: 380, done: () => { printed = true; replies.classList.add('ready'); } });
+  const tt = teletype(msg, o.text, { cps: 150, delay: 380, done: () => { printed = true; replies.classList.add('ready'); const st = msg.closest('.sig-crt')?.querySelector('.sig-status'); if (st) st.textContent = 'Decoded · awaiting reply'; } });
   msg.addEventListener('click', () => tt.skip());
   bindKeys(choices);
   return frame(o.run, { screen: 'event-' + o.id, kind: 'terminal', eyebrow: 'Unknown signal', title: o.title, glyph: 'aerial-signal', cls: 'signal' },
