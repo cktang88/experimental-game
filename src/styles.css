@@ -604,7 +604,7 @@ ol.sections li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap:
 /* ---------------- wreck report ---------------- */
 .wreck-page { min-height: 100%; background: radial-gradient(ellipse at 50% 40%, rgba(60, 10, 8, .55), rgba(5, 4, 4, .94) 70%); animation: crt-off .6s ease-out; }
 /* brightness only: if a starved compositor never advances the animation, the report is still readable */
-@keyframes crt-off { 0% { filter: brightness(2.6) saturate(.3); } 100% { filter: none; } }
+@keyframes crt-off { 0% { filter: brightness(1.5) saturate(.5); } 100% { filter: none; } }
 .report-sheet { position: relative; width: 100%; max-width: 760px; padding: 26px 30px 26px; color: var(--ink); background: var(--fibre), linear-gradient(172deg, #e0d6bd, var(--paper) 50%, #c8ba98); box-shadow: 0 30px 80px rgba(0, 0, 0, .7), 0 0 0 1px #8d7e60; transform: rotate(-.4deg); }
 .report-sheet .eyebrow { color: var(--stamp); }
 .report-sheet h2 { color: var(--ink); font-size: 44px; margin-top: 4px; }
