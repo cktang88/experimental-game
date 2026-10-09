@@ -441,7 +441,7 @@ em.layer.air { color: #1c7f92; } em.layer.ground { color: #a1600f; } em.layer.bo
 
 /* the ghost dossier */
 .dossier { position: relative; flex: none; padding: 16px 16px 18px; color: var(--ink); background: var(--fibre), linear-gradient(172deg, #ddd2b7, #cfc3a4 60%, #c2b493); box-shadow: 0 10px 26px rgba(0, 0, 0, .55), 0 0 0 1px #8d7e60; transform: rotate(.5deg); margin-top: 6px; }
-.dossier .clip { position: absolute; top: -9px; right: 28px; width: 16px; height: 40px; border: 3px solid #9aa4ad; border-bottom: 0; border-radius: 8px 8px 0 0; box-shadow: 1px 1px 0 rgba(0, 0, 0, .4); }
+.dossier .clip { position: absolute; top: -9px; right: 92px; width: 16px; height: 40px; border: 3px solid #9aa4ad; border-bottom: 0; border-radius: 8px 8px 0 0; box-shadow: 1px 1px 0 rgba(0, 0, 0, .4); }
 .doc-head { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 8px; margin-bottom: 10px; border-bottom: 2px solid var(--ink); font-family: var(--f-stencil); font-size: 15px; letter-spacing: .14em; text-transform: uppercase; }
 .doc-head .mono { font-size: 11px; color: var(--ink-2); }
 .dossier .photo { position: relative; padding: 6px 6px 22px; background: #efe9da; box-shadow: 0 3px 8px rgba(0, 0, 0, .35); transform: rotate(-1.4deg); margin: 0 18px 12px; }
@@ -620,7 +620,8 @@ ol.sections li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap:
 .wr-reg { margin-top: 16px; }
 .wr-reg .reg-line { font-size: 14px; min-height: 2.8em; max-width: none; }
 .report-sheet .foot { margin-top: 18px; }
-.wr-stamp { top: 22px; right: 120px; }
+.wr-stamp { top: auto; bottom: 34px; left: 44px; right: auto; transform: rotate(-8deg); }
+.wr-stamp b { font-size: 46px; }
 .wr-stamp.fresh { animation: stamp .3s cubic-bezier(.2, 1.4, .4, 1) .45s both; }
 
 /* ---------------- pause ---------------- */
@@ -777,7 +778,7 @@ ol.heat-list li.shut { opacity: .5; }
 }
 
 /* refit: firing arcs per mount */
-.slot { position: relative; }
+.slot { position: relative; padding-right: 38px; }
 .slot .arc-tag { position: absolute; top: 3px; right: 4px; font-style: normal; font-family: var(--f-mono); font-size: 9.5px; letter-spacing: .1em; color: var(--arc); opacity: .9; }
 .slot.w { box-shadow: inset 3px 0 0 var(--arc), inset 0 1px 3px rgba(0, 0, 0, .7); }
 .bank.arc .plate-k { color: var(--arc); }

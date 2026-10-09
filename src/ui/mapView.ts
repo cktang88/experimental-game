@@ -132,7 +132,7 @@ export function mapView(map: SectorMap, at: string | null, visited: string[], on
   const rot = wide ? 90 : 0;
   mk.append(svg('path', { d: 'M0 -15L8 4 0 0-8 4Z', transform: `rotate(${rot}) translate(0 ${at ? 34 : 0})` }));
   if (callsign) {
-    const tx = svg('text', { x: wide ? (at ? 0 : 14) : 14, y: wide ? (at ? -40 : 4) : (at ? -30 : 4), 'text-anchor': wide && at ? 'middle' : 'start' });
+    const tx = svg('text', { x: wide ? (at ? 0 : -8) : 14, y: wide ? (at ? -40 : -16) : (at ? -30 : 4), 'text-anchor': wide && at ? 'middle' : 'start' });
     tx.textContent = callsign; mk.append(tx);
   }
   root.append(mk);
