@@ -9,6 +9,14 @@
 ## Code and design borrowed from the author's earlier games
 - Audio mix chain, synthesized SFX recipes, game-feel constants and UI direction adapted from *Dead Air* and *Tinwar* by the same author.
 
+## Libraries
+- **postprocessing** 6.39.5 by pmndrs (https://github.com/pmndrs/postprocessing). Zlib license. Post chain: bloom, SMAA, tone mapping and the effect framework for the custom distortion and grade passes.
+- **n8ao** 2.0.1 by N8python (https://github.com/N8python/n8ao). ISC license. Screen-space ambient occlusion (high quality tier).
+- **three.js** (MIT) as before. The 3D simplex noise in `src/render/fx/atlas.ts` is Ashima Arts / Stefan Gustavson's public webgl-noise (MIT).
+
+## Effects
+- All particle, fire, smoke, scorch, beam and lightning visuals are procedural (GPU-baked puff atlas and shaders in `src/render/fx/`), original work. The explosion recipe, fire ramp, bloom threshold, trauma shake and slow-time grade follow *Tinwar* and *Dead Air* by the same author.
+
 ## Audio
 
 Everything under `public/assets/audio/`. Sources were cut, trimmed, faded, mixed to mono (SFX), loudness-normalised

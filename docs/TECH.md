@@ -142,3 +142,11 @@ tests/unit/balance.test.ts --disable-console-intercept` prints the table (`ONLY=
 ### Debug hooks (`window.__gd`)
 `run`, `profile`, `S`, `debug.timeScale`, `god()`, `winNow()` (kills boss/elite outright), `killPlayer()`, `overdrive()` (charge and fire),
 `travelTo(type)`, `forceNext(type)`, `addScrap(n)`.
+
+## VFX API (`src/game/vfx.ts`, rendering in `src/render/fx/`)
+Particles live in field coordinates plus a height `h` (ground particles: field units above the city; flight particles: world units above or below the flight plane). They are pooled; `V.cap` (set by the quality tier) bounds the live count.
+- Spawners: `boomFx(x, y, r, col, ground)` (fireball, smoke, sparks, embers, debris; ground adds scorch, dust ring, smoke column, lingering fire; flak colour `#ffd27a` gives a flak burst, `#9ff3ff` an energy discharge), `flakFx`, `energyBurst`, `broadsideFx(x, y, side, n, len)`, `railFx(x1, y1, x2, y2, col, hostile)`, `spark(x, y, col, n)` (seeker colour `#ff9f5a` becomes a small warhead blast), `muzzle(x, y, col, size)` (also drives the hull muzzle light), `addFx(spec)` for single particles.
+- Feel: `addTrauma(0..1)` (shake = 16 units × trauma^1.5, three-sine noise, small roll, decays in real time so hitstop keeps shaking), `kick(dx, dy)` (recoil shove, springs back in ~120 ms), `pulseCA(0..1)` (chromatic split), `setTimeGrade(0..1)` (slow-time desaturation that keeps hot light). Writing `V.shake` still works: it is converted to trauma (sqrt(shake / 22)) every tick.
+- The FX layer reads `S.events` (broadside, overdrive, overdriveReady, carnageTier, playerHit, eliteKill, bossDown), `S.overdrive` (lance pillar, burning trail, spear, strike wing, aegis), enemy `tele` glints and `S.slowFx` (letterbox, vignette and desaturation in post).
+- Post (`src/render/fx/post.ts`, `engine.post`): RenderPass (half float) → N8AO (high tier) → distortion + chromatic aberration → bloom (threshold on 0.5·(luma + max RGB)) → ACES → per-sector grade, slow-time, vignette, grain, letterbox → SMAA. `engine.setQuality('high' | 'low')` switches tiers at runtime (saved to `localStorage gd.quality`; `?quality=` overrides). Software GL renders at 0.6 resolution (`?scale=` overrides).
+- Draw calls: ground FX batch, ribbon trails, air FX batch, hostile batch (enemy fire, always on top with dark rims), one distortion batch. Debug hook: `window.__gdfx`.
