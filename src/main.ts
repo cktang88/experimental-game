@@ -64,6 +64,7 @@ const KEYMAP: Record<string, string> = { ArrowLeft: 'l', KeyA: 'l', ArrowRight: 
 window.addEventListener('keydown', (e) => {
   if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
   if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = true; if (mode === 'combat') e.preventDefault(); }
+  if (e.code === 'Space' && mode === 'combat') { e.preventDefault(); if (!e.repeat && !paused) keys.od = true; }
   if ((e.code === 'KeyP' || e.code === 'Escape') && mode === 'combat') setPaused(!paused);
   if (e.code === 'KeyM') setMuted(audio.on);
 });

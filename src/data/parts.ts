@@ -11,15 +11,15 @@ export interface WeaponDef { name: string; layer: Layer; cd: number; dmg: number
 export interface UtilDef { name: string; col: string; cost: number; desc: (t: number) => string }
 
 export const WEAPONS: Record<string, WeaponDef> = {
-  pulse: { name: 'Pulse Cannon', layer: 'air', cd: 0.16, dmg: 7, col: '#4fd1e8', cost: 40, desc: 'Rapid forward bolts.' },
-  spread: { name: 'Scatter Laser', layer: 'air', cd: 0.36, dmg: 5, col: '#7ee0ff', cost: 55, desc: 'Fan of 3 bolts, 5 at Mk III and up.' },
-  flak: { name: 'Flak Battery', layer: 'air', cd: 0.75, dmg: 16, col: '#ffd27a', cost: 60, desc: 'Shells burst ahead and damage every aircraft in the blast.' },
-  missile: { name: 'Seeker Pods', layer: 'both', cd: 1.0, dmg: 16, col: '#ff9f5a', cost: 75, desc: 'Paired homing missiles.' },
-  bomb: { name: 'Bomb Bay', layer: 'ground', cd: 0.6, dmg: 22, col: '#f2a541', cost: 45, desc: 'Bombs blast ground targets just ahead of the bow.' },
-  artillery: { name: 'Siege Mortar', layer: 'ground', cd: 1.1, dmg: 34, col: '#e88a3c', cost: 70, desc: 'Lobs shells onto the nearest ground target.' },
-  rail: { name: 'Rail Spine', layer: 'both', cd: 1.7, dmg: 48, col: '#c9a6ff', cost: 95, desc: 'Charged slug pierces everything in a straight line.' },
-  tesla: { name: 'Arc Coil', layer: 'both', cd: 0.5, dmg: 9, col: '#9be7ff', cost: 80, desc: 'Lightning jumps between nearby targets.' },
-  pd: { name: 'Point Defense', layer: 'none', cd: 0.3, dmg: 0, col: '#b8f2c8', cost: 65, desc: 'Shoots down enemy shots and missiles near your hull.' },
+  pulse: { name: 'Pulse Cannon', layer: 'air', cd: 0.16, dmg: 7, col: '#4fd1e8', cost: 40, desc: 'Rapid bolts. On the bow it hoses aircraft ahead; on a broadside it rips off twelve-round ripples.' },
+  spread: { name: 'Scatter Laser', layer: 'air', cd: 0.36, dmg: 5, col: '#7ee0ff', cost: 55, desc: 'Fan of 3 bolts, 5 at Mk III and up. Broadside fans shell ground targets beside you.' },
+  flak: { name: 'Flak Battery', layer: 'air', cd: 0.75, dmg: 16, col: '#ffd27a', cost: 60, desc: 'Shells burst at the target\'s range and damage every aircraft in the blast.' },
+  missile: { name: 'Seeker Pods', layer: 'both', cd: 1.0, dmg: 16, col: '#ff9f5a', cost: 75, desc: 'Paired homing missiles, air or ground. Broadside pods launch outward.' },
+  bomb: { name: 'Bomb Bay', layer: 'ground', cd: 0.6, dmg: 26, col: '#f2a541', cost: 45, desc: 'Ventral. Carpet-bombs the city and anything on the ground under the hull.' },
+  artillery: { name: 'Siege Mortar', layer: 'ground', cd: 1.1, dmg: 34, col: '#e88a3c', cost: 70, desc: 'Ventral. Lobs shells onto ground targets up to 520 away, or into the city when none are near.' },
+  rail: { name: 'Rail Spine', layer: 'both', cd: 1.7, dmg: 48, col: '#c9a6ff', cost: 95, desc: 'Charged slug pierces everything in a line: up the field from the bow, across it from a broadside.' },
+  tesla: { name: 'Arc Coil', layer: 'both', cd: 0.5, dmg: 9, col: '#9be7ff', cost: 80, desc: 'All-round. Lightning jumps between nearby targets, air or ground.' },
+  pd: { name: 'Point Defense', layer: 'none', cd: 0.3, dmg: 0, col: '#b8f2c8', cost: 65, desc: 'All-round. Shoots down enemy shots and missiles near your hull.' },
 };
 export const droneCount = (t: number) => Math.min(3, 1 + Math.floor((t - 1) / 2));
 export const UTILS: Record<string, UtilDef> = {
@@ -67,8 +67,50 @@ export interface Mods {
 export const neutralMods = (): Mods => ({ hullAdd: 0, hullMul: 1, speedMul: 1, fireMul: 1, shieldAdd: 0, magnetAdd: 0, scrapMul: 1, dmgAir: 1, dmgGround: 1, regen: 0, priceMul: 1, railCdMul: 1, bossHpMul: 1 });
 
 export interface Rect { x: number; y: number; w: number; h: number; type: SectionType }
-export interface Mount { ox: number; oy: number; kind: SlotKind; part: Part | null; si: number; i: number }
+
+/**
+ * Firing arcs. Every weapon mount belongs to one by its position on the hull, and the weapon in it decides how
+ * that arc is used:
+ *  - bow: the bridge and gun decks. Fires forward (up the screen) at aircraft and the ghost ahead.
+ *  - broadside: Broadside Battery sections. The outer mounts fire to port (left) or starboard (right), the centre
+ *    mount to whichever side has a target. Hits air AND ground targets level with the hull, in synchronized
+ *    ripple volleys.
+ *  - ventral: any bomb bay or mortar, wherever it is mounted. Drops ordnance on the city and ground units below
+ *    and around the ship.
+ *  - omni: arc coils and point defense work all around the hull.
+ */
+export type Arc = 'bow' | 'broadside' | 'ventral' | 'omni' | 'internal';
+export const ARC_INFO: Record<Arc, { label: string; short: string; col: string; desc: string }> = {
+  bow: { label: 'Bow', short: 'BOW', col: '#4fd1e8', desc: 'Fires forward at aircraft and ghosts ahead of the ship.' },
+  broadside: { label: 'Broadside', short: 'SIDE', col: '#f2a541', desc: 'Fires sideways in ripple volleys at anything level with the hull, air or ground.' },
+  ventral: { label: 'Ventral', short: 'BELLY', col: '#e88a3c', desc: 'Drops ordnance on the city and ground targets below and around the ship.' },
+  omni: { label: 'All-round', short: 'OMNI', col: '#9be7ff', desc: 'Works in every direction around the hull.' },
+  internal: { label: 'Internal', short: 'BAY', col: '#9aa7b4', desc: 'Utility bay inside the hull.' },
+};
+/** The arc a mount position gives, before the weapon in it is considered. */
+export function positionArc(type: SectionType, kind: SlotKind): Arc {
+  if (kind === 'U') return 'internal';
+  return type === 'battery' ? 'broadside' : 'bow';
+}
+/** The arc a part actually fires in from a mount: bombs and mortars always drop ventrally, coils and PD are omni. */
+export function mountArc(type: SectionType, kind: SlotKind, partId: string | null | undefined): Arc {
+  if (kind === 'U') return 'internal';
+  if (partId && has(WEAPONS, partId)) {
+    if (WEAPONS[partId].layer === 'ground') return 'ventral';
+    if (partId === 'tesla' || partId === 'pd') return 'omni';
+  }
+  return positionArc(type, kind);
+}
+export interface Mount {
+  ox: number; oy: number; kind: SlotKind; part: Part | null; si: number; i: number;
+  /** Arc this mount fires in with its current part (see Arc). */
+  arc: Arc;
+  /** Broadside side: -1 port (left), 1 starboard (right), 0 either. 0 for other arcs. */
+  side: -1 | 0 | 1;
+}
 export interface Derived {
+  /** Top speed (field units/s), acceleration and braking (units/s²): mass makes all three worse, thrust better. */
+  accel: number; brake: number;
   maxHp: number; speed: number; shieldMax: number; shieldRegen: number; regen: number; fireMult: number; magnet: number;
   scrapMult: number; drones: number; droneTier: number; rects: Rect[]; mounts: Mount[]; len: number; width: number; mass: number; thrust: number;
   u: Record<string, number>; mods: Mods;
@@ -86,7 +128,9 @@ export function derive(build: Build, mods: Mods = neutralMods()): Derived {
     d.slots.forEach((k, i) => {
       const ox = n === 1 ? 0 : n === 2 ? (i ? 1 : -1) * d.w * 0.27 : (i - 1) * d.w * 0.36;
       const p = s.slots[i] ?? null;
-      mounts.push({ ox, oy: y + d.h / 2, kind: k, part: p, si, i });
+      const arc = mountArc(s.type, k, p?.id);
+      const side: -1 | 0 | 1 = arc === 'broadside' ? (ox < -1 ? -1 : ox > 1 ? 1 : 0) : 0;
+      mounts.push({ ox, oy: y + d.h / 2, kind: k, part: p, si, i, arc, side });
       if (p && has(UTILS, p.id)) u[p.id] += p.tier;
     });
     y += d.h; width = Math.max(width, d.w);
@@ -95,9 +139,14 @@ export function derive(build: Build, mods: Mods = neutralMods()): Derived {
   rects.forEach((r) => (r.y -= off));
   mounts.forEach((m) => (m.oy -= off));
   hp = (hp + 35 * u.plate + mods.hullAdd) * mods.hullMul;
-  const speed = (250 * (1 + thrust * 0.05)) / (1 + mass * 0.075) * (1 + 0.12 * u.thruster) * mods.speedMul;
+  const speed = (290 * (1 + thrust * 0.05)) / (1 + mass * 0.075) * (1 + 0.12 * u.thruster) * mods.speedMul;
+  // Seconds to reach top speed: a starter hull answers in about a third of a second, a full eight-section
+  // dreadnought takes most of a second to get going and to stop.
+  const accelTime = Math.max(0.24, Math.min(1, 0.22 + mass * 0.032 - thrust * 0.006 - u.thruster * 0.02));
+  const accel = speed / accelTime, brake = accel * 1.25;
   const shieldMax = 30 * u.shield + mods.shieldAdd;
   return {
+    accel, brake,
     maxHp: Math.round(hp), speed, shieldMax, shieldRegen: shieldMax ? 8 + 4 * u.shield + (u.shield ? 0 : 6) : 0,
     regen: 1.2 * u.repair + mods.regen, fireMult: (1 + 0.1 * u.reactor) * mods.fireMul,
     magnet: 80 + 45 * u.magnet + mods.magnetAdd, scrapMult: (1 + 0.1 * u.magnet) * mods.scrapMul,
@@ -106,10 +155,11 @@ export function derive(build: Build, mods: Mods = neutralMods()): Derived {
   };
 }
 
+/** The Vanguard starter: one bow gun, a broadside pair either side of a ventral bomb bay. Other hulls: data/hulls.ts. */
 export const starterBuild = (): Build => ({
   sections: [
     { type: 'bridge', slots: [mkPart('pulse', 1)] },
-    { type: 'gundeck', slots: [mkPart('pulse', 1), mkPart('bomb', 1)] },
+    { type: 'battery', slots: [mkPart('pulse', 1), mkPart('bomb', 1), mkPart('pulse', 1)] },
     { type: 'engine', slots: [null] },
   ],
 });
