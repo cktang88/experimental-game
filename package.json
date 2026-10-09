@@ -1,0 +1,26 @@
+{
+  "name": "ghost-dreadnought",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:client": "vite",
+    "server": "node server/server.mjs",
+    "build": "tsc --noEmit && vite build",
+    "start": "npm run build && NODE_ENV=production node server/server.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/three": "0.170.0",
+    "typescript": "5.6.3",
+    "vite": "6.3.5",
+    "vitest": "3.1.4"
+  }
+}
