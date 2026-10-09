@@ -33,3 +33,27 @@ Shared files that anyone may read but should change only with care: `src/render/
 2. You looked at real screenshots of your work in the running game, at 1600×900, and fixed what looked wrong.
 3. New assets are credited in `CREDITS.md` with the exact license.
 4. Commit with a clear message.
+
+## Audio API (`src/audio/`)
+Import from `src/audio` (`src/game/audio.ts` re-exports it for old callers). Nothing plays until the first user gesture; every call is safe before that and never throws.
+
+| Call | What it does |
+| --- | --- |
+| `sfx(name, opts?)` | One-shot cue. `opts`: `x` (0..1600, stereo pan), `y`, `layer` (`'ship'` our hull and guns: close, narrow; `'air'`: aircraft and flak, panned; `'ground'`: the city far below, low-passed, quieter, wetter and 45-105 ms late; `'ui'`: dry, centred), `ground: true` (shorthand for the ground layer), `size` (field radius, scales explosions), `vol`, `pitch`. Each cue has a min gap, a burst cap and a priority; low-priority cues are dropped first when voices run out. |
+| Cue names | Our guns: `pew` (bow autocannon), `spread`, `cannon` (broadside or artillery; dips the music), `flak`, `missile`, `bombDrop`, `rail`, `zap` (arc), `pd`, `lance` (Overdrive). Impacts: `boom` (kill; uses `size` and `ground`), `groundBoom` (bombs and shells in the city), `big` (elite, boss or our death; ducks and muffles), `collapse` (building), `flakPop`, `hit` (our hull), `shield`. Enemy: `eshot`, `eMissile`, `railCharge`, `jet`. Salvage and state: `pick` (rises a semitone per pickup in a stream), `alarm` (ship klaxon), `clear`. UI: `ui` (relay click), `uiHover`, `uiSwitch`, `uiToggle`, `uiOpen`, `uiClose`, `uiConfirm`, `uiError`, `uiFlap` (split-flap rattle; `size` = number of flaps), `buy` / `uiStamp` (stamp thunk). Full list in `src/audio/cues.ts`. |
+| `music.setScene(s)` | `'title' \| 'map' \| 'combat' \| 'elite' \| 'boss' \| 'victory' \| 'death' \| 'silent'`. Changes land on the playing track's next bar line with an equal-power crossfade. Escalations are immediate; calm-downs wait 2.5 s; `victory` plays out, then hands over to `map`; `death` is a tape-stop into a requiem drone. `main.ts` calls this at every screen change. |
+| `music.sting(kind)` | `'eliteKill' \| 'bossPhase2' \| 'clear' \| 'sectorClear' \| 'carnage'`: orchestral hit on the next beat, music ducks under it. The per-frame watcher already fires elite kill, boss phase 2, area clear and the carnage drop (8 kills in 3 s, once per 20 s). |
+| `music.beat()` | `{ index, phase, bar, beatInBar, bpm }` of the beat audible now, or null. Use it to pulse visuals on the music. |
+| `music.setIntensity(0..1)` | War-drum layer on the music's beat. Set automatically from the fight by `updateAudio`. |
+| `setShipThrottle(0..1)` | Engine drone swell. When not called for 0.5 s, the watcher derives it from ship motion. `setHullIntegrity(0..1)` makes a damaged engine cough. |
+| `updateAudio(dt, combatState \| null, paused)` | Once per frame from `main.ts`. Reads the combat state structurally (`CombatView`): drives the engine, sirens, fires, enemy radio chatter (cut by a squelch when the speaker dies), jet fly-bys, intensity, stings, low-hull muffling and pause ducking. |
+| `audioSettings.get() / set(patch) / onChange(f)` | Persisted volumes `{ master, music, sfx, muted }`, 0..1, in `localStorage['gd.audio.v1']` (the old `gd.mute` flag is honoured). Shortcuts: `getVolume(kind)`, `setVolume(kind, v)`, `setMuted(b)`, `isMuted()`, `audio.on`. Sliders map through a perceptual curve. |
+| `chatter(id, x)` / `cutChatter(id, x)` | Manual enemy radio burst, and the squelch cut. |
+
+Mix: cues -> distance gain, altitude low-pass and pan -> sfx bus (with a generated open-air reverb) and ambience bus -> muffle low-pass -> glue compressor (-14 dB, 8:1) -> tanh soft clip -> master; music has its own bus with ducking; master -> limiter (-1 dB) -> soft ceiling at -0.3 dBFS. Levels: music about -18 LUFS, the engine about -27 LUFS idle to -23 at full ahead, the city bed about -30 to -24 LUFS, single SFX peaks below -3 dBFS, nothing clips under the worst-case barrage.
+
+Assets and tools (`scripts/audio/`, need ffmpeg):
+- `build-music.mjs <srcDir>`: cuts each recording to a whole-bar loop that wraps on the music's own repetition, crossfades the seam, normalises to -18 LUFS, writes `public/assets/audio/music/*.mp3` and `src/audio/trackdata.ts`. Helpers: `analyze-track.mjs` (tempo grid, downbeat, per-bar loudness), `find-repeat.mjs` (where a recording repeats), `seam-check.mjs` (waveform and spectrogram of the loop wrap).
+- `build-sfx.mjs <srcDir>`: cuts, trims, fades and peak-normalises (-3 dBFS) the sampled layers into mono MP3s.
+- `probe.mjs <files>`: duration, bitrate, integrated LUFS, true peak.
+- `render-cues.mjs [outDir] [scenario...]`: renders every cue, a worst-case barrage, the music through all scenes, the engine and the city through the real mix graph in headless Chromium (`/src/audio/lab.html` on the dev server), writes WAVs and fails if anything clips.

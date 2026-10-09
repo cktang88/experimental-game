@@ -8,7 +8,7 @@ import { V } from './game/vfx';
 import { drawHud } from './render/hud';
 import { drawBlueprint } from './render/shipPreview';
 import { S, W, H, keys, startCombat, updateCombat, updateBg, endCombat, seedDecor, setScrapHandler, damagePlayer } from './game/combat';
-import { initAudio, sfx, audio, setMuted } from './game/audio';
+import { initAudio, sfx, audio, setMuted, music, updateAudio } from './audio';
 import {
   newRun, loadRun, saveRun, clearSave, maxHp, dv, mods, level, bossLevel, heal, partChoices, relicChoices, addRelic, addSection,
   nextSectionCost, enterNextSector, deathGhost, changeBuild, runRng, type RunState,
@@ -95,6 +95,7 @@ function frame(now: number) {
     for (let i = 0; i < debug.timeScale; i++) updateCombat(dt);
     if (S.outcome && onCombatDone) { const cb = onCombatDone; onCombatDone = null; cb(S.outcome); }
   } else if (mode === 'title') updateBg(dt);
+  updateAudio(dt, mode === 'combat' ? S : null, paused);
   const hideStage = mode === 'menu';
   if (stageEl.hidden !== hideStage) stageEl.hidden = hideStage;
   if (mode === 'combat' || mode === 'title') {
@@ -117,6 +118,7 @@ function setPaused(v: boolean) {
 /* ---------------- title ---------------- */
 function titleScreen() {
   mode = 'title'; paused = false; S.P = null; S.enemies = []; S.eb = []; S.pb = []; S.pickups = []; S.boss = null; S.theme = 0;
+  music.setScene('title');
   renderer?.clearLayers();
   const saved = loadRun();
   const input = el('input', { type: 'text', id: 'callsign', maxlength: 16, autocomplete: 'off', spellcheck: false });
@@ -172,6 +174,7 @@ function intelCard(): HTMLElement {
 function mapScreen() {
   if (!run) return titleScreen();
   mode = 'menu'; renderer?.clearLayers(); saveRun(run);
+  music.setScene('map');
   const r = run;
   const info = el('section', 'card', el('div', 'eyebrow', `Sector ${r.sector} route`), el('p', { 'data-testid': 'node-info' }, 'Hover a node to see what it is. Pick one of the glowing nodes to travel there.'));
   const setInfo = (id: string | null) => {
@@ -231,6 +234,7 @@ function travel(id: string) {
 function fight(enc: Encounter, after: () => void, ghost?: Ghost) {
   const r = run!;
   show(); mode = 'combat'; paused = false;
+  music.setScene(enc.kind === 'boss' ? 'boss' : enc.kind === 'elite' ? 'elite' : 'combat');
   setScrapHandler((v) => { r.scrap += v; r.stats.scrapEarned += v; });
   startCombat({ enc, level: enc.kind === 'boss' ? bossLevel(r) : level(r, enc.kind === 'elite'), sector: r.sector, build: r.build, hp: r.hp, relics: r.relics, mods: mods(r), ghost, cheatDeathAvailable: !r.jumpUsed });
   onCombatDone = (o) => {
@@ -238,6 +242,7 @@ function fight(enc: Encounter, after: () => void, ghost?: Ghost) {
     if (S.cheatDeathUsed) r.jumpUsed = true;
     endCombat(); mode = 'menu'; renderer?.clearLayers();
     if (o === 'dead') { onDeath(); return; }
+    music.setScene(enc.kind === 'boss' ? 'victory' : 'map');
     r.hp = clamp(S.P!.hp, 1, maxHp(r));
     if (hasFlag(r.relics, 'heal_after_fight')) heal(r, 0.1);
     saveRun(r); after();
@@ -413,6 +418,7 @@ function bossReward(g: Ghost) {
 async function onDeath() {
   const r = run!;
   clearSave();
+  music.setScene('death');
   const g = deathGhost(r);
   const status = el('p', { style: 'color:var(--fg)', 'data-testid': 'ghost-status' }, 'Recording your wreck…');
   show(el('div', 'screen center solid', el('div', 'panel hostile stack',

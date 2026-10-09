@@ -151,6 +151,7 @@ function spawnBoss(g: Ghost) {
 }
 const bossMount = (w: { ox: number; oy: number }) => ({ x: S.boss!.x + w.ox * S.boss!.s, y: S.boss!.y - w.oy * S.boss!.s });
 function eShot(x: number, y: number, a: number, spd: number, o: Record<string, any> = {}) {
+  sfx(o.kind === 'missile' ? 'eMissile' : 'eshot', { x, y, layer: 'air' });
   S.eb.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: 4, dmg: edmg(), col: '#ff5a4e', kind: 'bullet', life: 7, t: 0, dead: false, ...o });
 }
 function ring(x: number, y: number, n: number, spd: number, o: Record<string, any> = {}) { const off = rnd(0, Math.PI * 2); for (let i = 0; i < n; i++) eShot(x, y, off + (i * Math.PI * 2) / n, spd, o); }
@@ -165,7 +166,7 @@ function bossFire(w: Boss['weps'][number]) {
     case 'bomb': for (let i = -1; i <= 1; i++) eShot(x + i * 14, y, Math.PI / 2, 90 + rnd(0, 40), { kind: 'mine', r: 6, life: rnd(1.3, 2.1), col: '#f2a541', dmg }); break;
     case 'artillery': { const n = t >= 3 ? 3 : 1; for (let k = 0; k < n; k++) strike(P.x + (k ? rnd(-70, 70) : 0), P.y + (k ? rnd(-70, 70) : 0), dmg * 1.6); break; }
     case 'rail': S.eb.push({ kind: 'beam', x, y, warn: 0.9, dur: 0.3, w: 14 + 2 * t, dmg: dmg * 2.6, t: 0, life: 9, vx: 0, vy: 0, r: 0, col: '#c9a6ff', dead: false }); break;
-    case 'tesla': ring(x, y, 10 + t, spd * 0.6, { r: 3, col: '#9be7ff', dmg: dmg * 0.8 }); sfx('zap'); break;
+    case 'tesla': ring(x, y, 10 + t, spd * 0.6, { r: 3, col: '#9be7ff', dmg: dmg * 0.8 }); sfx('zap', { x, y }); break;
     case 'pd': {
       let best: Ent | null = null, bd = 140 * 140;
       for (const b of S.pb) { if (!['missile', 'shell', 'bomb', 'flak'].includes(b.kind)) continue; const dd = (b.x - x) ** 2 + (b.y - y) ** 2; if (dd < bd) { bd = dd; best = b; } }
@@ -210,9 +211,9 @@ function bossDown() {
   S.score += 2000 * S.sector; S.kills++;
   for (let i = 0; i < 26; i++) S.pickups.push({ x: b.x + rnd(-b.halfW, b.halfW), y: b.y + rnd(-40, 40), vx: rnd(-80, 80), vy: rnd(-80, 40), val: (6 + 3 * S.sector) * S.P!.dv.scrapMult, t: 0, kind: 'scrap' });
   setBanner(b.ghost.ai ? 'CORE DESTROYED' : 'GHOST LAID TO REST', b.ghost.name, 2.6, '#8fe39a');
-  sfx('big'); V.shake = 14; S.slow = 1.2; V.flashA = 0.3;
+  sfx('big', { x: b.x, y: b.y }); V.shake = 14; S.slow = 1.2; V.flashA = 0.3;
   boomFx(b.x, b.y, 46, '#ffb347');
-  setTimeout(() => { if (S.mode === 'bossdown') { boomFx(b.x, b.y + 30, 80, '#fff1c1'); V.flashA = 0.45; V.shake = 22; sfx('big'); } }, 1500);
+  setTimeout(() => { if (S.mode === 'bossdown') { boomFx(b.x, b.y + 30, 80, '#fff1c1'); V.flashA = 0.45; V.shake = 22; sfx('big', { x: b.x, y: b.y }); } }, 1500);
 }
 
 /* ---------------- player ---------------- */
@@ -245,8 +246,8 @@ export function damagePlayer(d: number) {
   if (S.mode !== 'play' || S.god) return;
   if (!S.firstHitUsed && hasFlag(S.relics, 'first_hit_free')) { S.firstHitUsed = true; spark(P.x, P.y, '#9aa7b4', 10); setBanner('REACTIVE PLATING', 'First hit absorbed', 1.2, '#9aa7b4'); return; }
   P.lastHit = 0;
-  if (P.shield > 0) { const a = Math.min(P.shield, d); P.shield -= a; d -= a; }
-  if (d > 0) { P.hp -= d; P.flash = 1; V.hurt = 1; V.shake = Math.min(10, V.shake + d * 0.4); sfx('hit'); }
+  if (P.shield > 0) { const a = Math.min(P.shield, d); P.shield -= a; d -= a; sfx('shield', { x: P.x, layer: 'ship' }); }
+  if (d > 0) { P.hp -= d; P.flash = 1; V.hurt = 1; V.shake = Math.min(10, V.shake + d * 0.4); sfx('hit', { x: P.x, layer: 'ship' }); }
   if (P.hp <= 0) {
     if (S.cheatDeath && !S.cheatDeathUsed) {
       S.cheatDeathUsed = true; P.hp = P.dv.maxHp * 0.3; S.eb = []; V.flashA = 0.5; setBanner('EMERGENCY JUMP', 'Hull restored to 30%', 1.8, '#7fb6ff'); sfx('alarm');
@@ -258,7 +259,7 @@ export function damagePlayer(d: number) {
 function playerDie() {
   const P = S.P!; P.hp = 0; S.mode = 'dying'; S.endT = 2.2;
   for (let i = 0; i < 8; i++) setTimeout(() => boomFx(P.x + rnd(-P.dv.width / 2, P.dv.width / 2), P.y + rnd(-P.dv.len / 2, P.dv.len / 2), rnd(14, 28), pick(['#ffb347', '#ff6a3d', '#fff1c1'])), i * 120);
-  sfx('big'); V.shake = 16; S.slow = 0.9; V.flashA = 0.4; boomFx(P.x, P.y, 40, '#ffb347');
+  sfx('big', { x: P.x, layer: 'ship' }); V.shake = 16; S.slow = 0.9; V.flashA = 0.4; boomFx(P.x, P.y, 40, '#ffb347');
 }
 export function dronePos(i: number, n: number) { const P = S.P!, a = S.t * 1.8 + (i * Math.PI * 2) / n, R = Math.max(P.dv.width, P.dv.len) / 2 + 16; return { x: P.x + Math.cos(a) * R, y: P.y + Math.sin(a) * R * 0.6 }; }
 function updateDrones(dt: number) {
@@ -293,22 +294,22 @@ function fireWeapons(dt: number) {
 function fireWeapon(p: Part, x: number, y: number): boolean {
   const d = wDmg(p), c = WEAPONS[p.id].col;
   switch (p.id) {
-    case 'pulse': S.pb.push(bolt(x, y - 8, 0, -720, d, 'air', c, 3)); sfx('pew'); return true;
-    case 'spread': { const n = p.tier >= 3 ? 5 : 3; for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.17; S.pb.push(bolt(x, y, Math.cos(a) * 600, Math.sin(a) * 600, d, 'air', c, 2.5)); } sfx('pew'); return true; }
-    case 'flak': { const b = bolt(x, y, 0, -520, d, 'air', c, 4); Object.assign(b, { kind: 'flak', life: 0.45, aoe: 46 }); S.pb.push(b); return true; }
-    case 'missile': for (const s of [-1, 1]) { const b = bolt(x + s * 4, y, s * 130, -160, d, 'both', c, 3); Object.assign(b, { kind: 'missile', turn: 5, speed: 460, life: 2.4 }); S.pb.push(b); } return true;
-    case 'bomb': { const b = bolt(x, y, rnd(-15, 15), -190, d, 'ground', c, 4); Object.assign(b, { kind: 'bomb', life: 0.55, max: 0.55, aoe: 36 }); S.pb.push(b); return true; }
+    case 'pulse': S.pb.push(bolt(x, y - 8, 0, -720, d, 'air', c, 3)); sfx('pew', { x, layer: 'ship' }); return true;
+    case 'spread': { const n = p.tier >= 3 ? 5 : 3; for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + (i - (n - 1) / 2) * 0.17; S.pb.push(bolt(x, y, Math.cos(a) * 600, Math.sin(a) * 600, d, 'air', c, 2.5)); } sfx('spread', { x, layer: 'ship' }); return true; }
+    case 'flak': { const b = bolt(x, y, 0, -520, d, 'air', c, 4); Object.assign(b, { kind: 'flak', life: 0.45, aoe: 46 }); S.pb.push(b); sfx('flak', { x, layer: 'ship' }); return true; }
+    case 'missile': for (const s of [-1, 1]) { const b = bolt(x + s * 4, y, s * 130, -160, d, 'both', c, 3); Object.assign(b, { kind: 'missile', turn: 5, speed: 460, life: 2.4 }); S.pb.push(b); } sfx('missile', { x, layer: 'ship' }); return true;
+    case 'bomb': { const b = bolt(x, y, rnd(-15, 15), -190, d, 'ground', c, 4); Object.assign(b, { kind: 'bomb', life: 0.55, max: 0.55, aoe: 36 }); S.pb.push(b); sfx('bombDrop', { x, layer: 'ship' }); return true; }
     case 'artillery': {
       const tg = nearest(x, y, (e) => (e.layer === 'ground' || e.isBoss) && e.y > -10 && e.y < y - 20, 560); if (!tg) return false;
       const b = bolt(x, y, 0, 0, d, 'ground', c, 4);
-      Object.assign(b, { kind: 'shell', sx: x, sy: y, tx: tg.x, ty: tg.isBoss ? tg.y : tg.y + S.scroll * 0.6, life: 0.6, max: 0.6, aoe: 32 }); S.pb.push(b); return true;
+      Object.assign(b, { kind: 'shell', sx: x, sy: y, tx: tg.x, ty: tg.isBoss ? tg.y : tg.y + S.scroll * 0.6, life: 0.6, max: 0.6, aoe: 32 }); S.pb.push(b); sfx('cannon', { x, layer: 'ship' }); return true;
     }
     case 'rail': {
       S.beams.push({ x1: x, y1: y, x2: x, y2: -10, col: c, life: 0.28, max: 0.28, w: 5 });
       for (let i = 0; i < 16; i++) addFx({ type: 'spark', x: x + rnd(-3, 3), y: rnd(0, y), vx: rnd(-160, 160), vy: rnd(-60, 60), life: rnd(0.15, 0.4), max: 0.4, size: 1.5, drag: 3, tint: '#e6d6ff' });
       for (const e of S.enemies) if (!e.dead && e.y < y && Math.abs(e.x - x) < e.r + 5) damageTarget(e, d);
       const B = S.boss; if (B && B.alive && B.y < y && Math.abs(B.x - x) < B.halfW) damageBoss(d);
-      sfx('rail'); return true;
+      sfx('rail', { x, layer: 'ship' }); return true;
     }
     case 'tesla': {
       let cx = x, cy = y, range = 170, any = false; const hit = new Set<Ent>();
@@ -319,13 +320,13 @@ function fireWeapon(p: Part, x: number, y: number): boolean {
         S.beams.push({ x1: cx, y1: cy, x2: best.x, y2: best.y, col: c, life: 0.14, max: 0.14, w: 2, zig: true });
         damageTarget(best, d); cx = best.x; cy = best.y; range = 130; any = true;
       }
-      if (any) sfx('zap'); return any;
+      if (any) sfx('zap', { x, y }); return any;
     }
     case 'pd': {
       let best: Ent | null = null, bd = 150 * 150;
       for (const b of S.eb) { if (b.kind === 'beam' || b.kind === 'strike' || b.dead) continue; const dd = (b.x - x) ** 2 + (b.y - y) ** 2; if (dd < bd) { bd = dd; best = b; } }
       if (!best) return false;
-      best.dead = true; S.beams.push({ x1: x, y1: y, x2: best.x, y2: best.y, col: c, life: 0.12, max: 0.12, w: 1.5 }); spark(best.x, best.y, c, 4); return true;
+      best.dead = true; S.beams.push({ x1: x, y1: y, x2: best.x, y2: best.y, col: c, life: 0.12, max: 0.12, w: 1.5 }); spark(best.x, best.y, c, 4); sfx('pd', { x, layer: 'ship' }); return true;
     }
   }
   return false;
@@ -345,7 +346,7 @@ function killEnemy(e: Enemy) {
   const big = e.r > 15;
   boomFx(e.x, e.y, e.r * (d.elite ? 2 : 1.25), e.layer === 'air' ? '#ffb347' : '#ff8a3d', e.layer === 'ground');
   if (big) V.shake = Math.min(d.elite ? 16 : 8, V.shake + (d.elite ? 12 : 3));
-  sfx(d.elite ? 'big' : 'boom');
+  sfx(d.elite ? 'big' : 'boom', { x: e.x, y: e.y, ground: e.layer === 'ground', size: e.r });
   S.score += d.score * (1 + 0.1 * (S.level - 1)); if (!d.salvage) S.kills++;
   const val = d.scrap * (1 + 0.08 * S.level) * S.P!.dv.scrapMult;
   dropScrap(e.x, e.y, val, Math.min(d.elite ? 14 : 6, Math.ceil(d.scrap / 2)));
@@ -355,7 +356,7 @@ function killEnemy(e: Enemy) {
 }
 function explode(x: number, y: number, r: number, d: number, layer: string, col: string) {
   boomFx(x, y, r * 0.7, col, layer === 'ground');
-  if (layer !== 'air') { const sc = worldBlast(x, y, r, d); if (sc > 0) dropScrap(x, y, sc * S.P!.dv.scrapMult, Math.min(6, Math.ceil(sc / 4))); }
+  if (layer !== 'air') { const sc = worldBlast(x, y, r, d); if (sc > 0) { dropScrap(x, y, sc * S.P!.dv.scrapMult, Math.min(6, Math.ceil(sc / 4))); sfx('collapse', { x, y }); } }
   for (const e of S.enemies) if (!e.dead && layerOk(layer, e.layer) && Math.hypot(e.x - x, e.y - y) < r + e.r) damageTarget(e, d);
   const B = S.boss; if (B && B.alive && shipHit(x, y, r * 0.6, B.x, B.y, B.dv, B.s, -1)) damageBoss(d);
 }
@@ -365,7 +366,7 @@ function updatePB(dt: number) {
     b.life -= dt;
     if (b.kind === 'shell') {
       const k = 1 - b.life / b.max; b.x = b.sx + (b.tx - b.sx) * k; b.y = b.sy + (b.ty - b.sy) * k;
-      if (b.life <= 0) { explode(b.x, b.y, b.aoe, b.dmg, 'ground', b.col); sfx('boom'); b.dead = true; }
+      if (b.life <= 0) { explode(b.x, b.y, b.aoe, b.dmg, 'ground', b.col); sfx('groundBoom', { x: b.x, y: b.y, size: b.aoe }); b.dead = true; }
       continue;
     }
     if (b.kind === 'missile') {
@@ -377,8 +378,8 @@ function updatePB(dt: number) {
       if (Math.random() < 0.7) addFx({ type: 'smoke', x: b.x, y: b.y, vx: rnd(-8, 8), vy: rnd(-8, 8), life: 0.55, max: 0.55, size: 3, grow: 2.2, a: 0.4 });
     }
     b.x += b.vx * dt; b.y += b.vy * dt;
-    if (b.kind === 'bomb') { b.vy *= 1 - dt * 1.6; if (b.life <= 0) { explode(b.x, b.y, b.aoe, b.dmg, 'ground', b.col); sfx('boom'); b.dead = true; } continue; }
-    if (b.life <= 0) { if (b.kind === 'flak') explode(b.x, b.y, b.aoe, b.dmg, 'air', b.col); b.dead = true; continue; }
+    if (b.kind === 'bomb') { b.vy *= 1 - dt * 1.6; if (b.life <= 0) { explode(b.x, b.y, b.aoe, b.dmg, 'ground', b.col); sfx('groundBoom', { x: b.x, y: b.y, size: b.aoe }); b.dead = true; } continue; }
+    if (b.life <= 0) { if (b.kind === 'flak') { explode(b.x, b.y, b.aoe, b.dmg, 'air', b.col); sfx('flakPop', { x: b.x, y: b.y }); } b.dead = true; continue; }
     if (b.y < -30 || b.x < -30 || b.x > W + 30 || b.y > H + 30) { b.dead = true; continue; }
     for (const e of S.enemies) { if (e.dead || !layerOk(b.layer, e.layer)) continue; if ((e.x - b.x) ** 2 + (e.y - b.y) ** 2 < (e.r + b.r) ** 2) { hitWith(b, e); break; } }
     const B = S.boss;
@@ -490,15 +491,16 @@ function updateEB(dt: number) {
     if (b.dead) continue;
     b.t += dt; b.life -= dt;
     if (b.kind === 'beam') {
+      if (!b.charged) { b.charged = true; sfx('railCharge', { x: b.x, y: b.y, layer: 'air' }); }
       if (b.t >= b.warn && !b.fired) {
-        b.fired = true; sfx('rail'); V.shake = Math.min(10, V.shake + 5); V.flashA = Math.max(V.flashA, 0.12);
+        b.fired = true; sfx('rail', { x: b.x, layer: 'air' }); V.shake = Math.min(10, V.shake + 5); V.flashA = Math.max(V.flashA, 0.12);
         for (let i = 0; i < 22; i++) addFx({ type: 'spark', x: b.x + rnd(-b.w / 2, b.w / 2), y: rnd(b.y, H), vx: rnd(-220, 220), vy: rnd(-80, 80), life: rnd(0.2, 0.5), max: 0.5, size: 1.8, drag: 3, tint: '#e3d0ff' });
         if (canHit && Math.abs(P.x - b.x) < b.w / 2 + P.dv.width * 0.35 && P.y > b.y) damagePlayer(b.dmg);
       }
       if (b.t > b.warn + b.dur) b.dead = true; continue;
     }
     if (b.kind === 'strike') {
-      if (b.t >= b.delay) { boomFx(b.x, b.y, b.rad * 0.8, '#ff7a4e'); sfx('boom'); if (canHit && shipHit(b.x, b.y, b.rad * 0.7, P.x, P.y, P.dv, 1, 1)) damagePlayer(b.dmg); b.dead = true; }
+      if (b.t >= b.delay) { boomFx(b.x, b.y, b.rad * 0.8, '#ff7a4e'); sfx('boom', { x: b.x, y: b.y, size: b.rad }); if (canHit && shipHit(b.x, b.y, b.rad * 0.7, P.x, P.y, P.dv, 1, 1)) damagePlayer(b.dmg); b.dead = true; }
       continue;
     }
     if (b.kind === 'missile') {
@@ -539,7 +541,7 @@ function updatePickups(dt: number) {
     if (d < 20 && S.mode !== 'dying') {
       if (p.kind === 'repair') { P.hp = Math.min(P.dv.maxHp, P.hp + P.dv.maxHp * p.val); spark(P.x, P.y, '#8fe39a', 12); setBanner('REPAIR KIT', `+${Math.round(P.dv.maxHp * p.val)} hull`, 0.9, '#8fe39a'); }
       else { S.scrap += p.val; onScrap(p.val); }
-      p.dead = true; sfx('pick');
+      p.dead = true; sfx('pick', { x: P.x, layer: 'ship' });
     }
     if (p.y > H + 20) p.dead = true;
   }
@@ -571,7 +573,7 @@ export function updateCombat(rawDt: number) {
   for (const b of S.beams) b.life -= dt; S.beams = S.beams.filter((b) => b.life > 0);
   if (S.mode === 'bossdown' && S.boss) {
     S.chain -= dt;
-    if (S.chain <= 0) { const b = S.boss; S.chain = 0.12; boomFx(b.x + rnd(-b.halfW, b.halfW), b.y + rnd((-b.dv.len * b.s) / 2, (b.dv.len * b.s) / 2), rnd(14, 30), pick(['#ffb347', '#ff6a3d', '#fff1c1'])); sfx('boom'); V.shake = Math.min(10, V.shake + 2); }
+    if (S.chain <= 0) { const b = S.boss; S.chain = 0.12; boomFx(b.x + rnd(-b.halfW, b.halfW), b.y + rnd((-b.dv.len * b.s) / 2, (b.dv.len * b.s) / 2), rnd(14, 30), pick(['#ffb347', '#ff6a3d', '#fff1c1'])); sfx('boom', { x: b.x, y: b.y, size: 26 }); V.shake = Math.min(10, V.shake + 2); }
   }
   if (S.mode === 'play') checkEnd();
   else { S.endT -= dt; if (S.endT <= 0) { S.outcome = S.mode === 'dying' ? 'dead' : 'win'; S.mode = 'done'; } }
