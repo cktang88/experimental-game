@@ -112,7 +112,7 @@ export function buildTurret(id: string, tier: number, uid: number, x: number, y:
       // Ventral bomb bay seen through the deck: a glowing well under two hinged doors.
       block(hb, octagon(-6, -6, 6, 6, 1.6), -0.4, 0.5, { side: B.ribs, top: B.ribs, col: L.paint.dark, bevel: 0.3, capTop: false });
       hb.get('black').quad([-5, 0.1, -5], [5, 0.1, -5], [5, 0.1, 5], [-5, 0.1, 5], [0, 0], [1, 0], [1, 1], [0, 1], L.paint.dark, [0, 1, 0]);
-      hb.get('core').quad([-3.6, 0.15, -3.8], [3.6, 0.15, -3.8], [3.6, 0.15, 3.8], [-3.6, 0.15, 3.8], [0, 0], [1, 0], [1, 1], [0, 1], L.paint.full.clone().multiplyScalar(0.3), [0, 1, 0]);
+      hb.get('core').quad([-3.6, 0.15, -3.8], [3.6, 0.15, -3.8], [3.6, 0.15, 3.8], [-3.6, 0.15, 3.8], [0, 0], [1, 0], [1, 1], [0, 1], L.paint.full.clone().multiplyScalar(0.07), [0, 1, 0]);
       for (const side of [-1, 1]) {
         const door = new THREE.Group(); door.position.set(side * 5, 0.55, 0);
         const db = new Buckets(); box(db, B.brackets, 5, 0.35, 10, L.paint.plate, T(-side * 2.5, 0, 0));

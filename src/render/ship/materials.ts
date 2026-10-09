@@ -76,6 +76,13 @@ function softMap() {
   g.putImageData(d, 0, 0); return tex(c, false, false);
 }
 
+/** Radial falloff (light pools). */
+function glowMap() {
+  const S = 64, c = canvas(S, S), g = c.getContext('2d')!, gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+  gr.addColorStop(0, '#fff'); gr.addColorStop(0.35, '#8a8a8a'); gr.addColorStop(0.7, '#262626'); gr.addColorStop(1, '#000');
+  g.fillStyle = gr; g.fillRect(0, 0, S, S); return tex(c, false, false);
+}
+
 /** Burn scars for battle damage: blotchy soot with a hot rim. */
 function scorchMap() {
   // Luminance is coverage (alphaMap reads green): white soot blotches on black.
@@ -89,8 +96,8 @@ function scorchMap() {
   return tex(c, false, false);
 }
 
-let shared: null | { hazard: THREE.Texture; window: THREE.Texture; soft: THREE.Texture; scorch: THREE.Texture } = null;
-function sharedMaps() { return (shared ??= { hazard: hazardMap(), window: windowMap(), soft: softMap(), scorch: scorchMap() }); }
+let shared: null | { hazard: THREE.Texture; window: THREE.Texture; soft: THREE.Texture; scorch: THREE.Texture; glow: THREE.Texture } = null;
+function sharedMaps() { return (shared ??= { hazard: hazardMap(), window: windowMap(), soft: softMap(), scorch: scorchMap(), glow: glowMap() }); }
 
 /* ---------------- kit textures ---------------- */
 interface TrimSet { map: THREE.Texture | null; red: THREE.Texture | null; normal: THREE.Texture | null; orm: THREE.Texture | null }
@@ -188,7 +195,7 @@ export function livery(hostile: boolean, renderer: THREE.WebGLRenderer | null): 
     glow: glowBasic(L.energy, 3.2),
     core: glowBasic(L.engine, 4.5),
     shadow: new THREE.MeshBasicMaterial({ color: '#000000', alphaMap: M.soft, transparent: true, opacity: 0.75, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
-    pool: new THREE.MeshBasicMaterial({ color: hostile ? '#ff5a3a' : '#ffb870', vertexColors: true, alphaMap: M.soft, transparent: true, opacity: hostile ? 0.35 : 0.5, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+    pool: new THREE.MeshBasicMaterial({ color: hostile ? '#ff5a3a' : '#ffb870', vertexColors: true, alphaMap: M.glow, transparent: true, opacity: hostile ? 0.3 : 0.4, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
     scorch: new THREE.MeshBasicMaterial({ color: '#000000', alphaMap: M.scorch, transparent: true, opacity: 0.85, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }),
   };
   if (hostile) {

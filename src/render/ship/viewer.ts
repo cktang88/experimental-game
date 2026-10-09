@@ -39,6 +39,9 @@ if (ghost) {
   S.P = { x, y, build, dv, hp: dv.maxHp * hp, shield: 0, cds: {}, lastHit: 9, flash: 0, tx: null, ty: null, droneCd: [] };
 }
 S.mode = 'play'; S.enemies = []; S.eb = [];
+if (q.get('enemies') === '1') S.enemies = [
+  { x: x + 260, y: y - 260, layer: 'air', dead: false }, { x: x - 300, y: y - 60, layer: 'ground', dead: false },
+] as unknown as typeof S.enemies;
 // Zoom: pull the camera toward the ship.
 const look = new THREE.Vector3(); eng.toFlight(x, y, 0, look);
 const off = eng.camPos.clone().sub(eng.camLook);

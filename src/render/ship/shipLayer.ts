@@ -292,18 +292,25 @@ export class ShipLayer implements Layer {
       for (let k = 0; k < 4; k++) { const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 160; addFx({ type: 'spark', x: w.x, y: w.z, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.25 + Math.random() * 0.2, max: 0.45, size: 1.2, drag: 3, tint: '#ffd27a' }); }
     }
     if (frac >= 0.3) return;
-    const nf = Math.min(n, 2 + Math.floor(((0.3 - frac) / 0.3) * 7));
+    const nf = Math.min(n, 3 + Math.floor(((0.3 - frac) / 0.3) * 10));
+    d.set(0, 0, 1).transformDirection(m.root.matrixWorld);
     for (let i = 0; i < nf; i++) {
       const p = pts[i];
-      v.set(p[0], p[1] + 1, p[2]).applyMatrix4(m.root.matrixWorld);
-      const fl = 0.7 + 0.3 * Math.sin(t * (11 + i) + i * 7);
-      e.glow.add(v.x, v.y + 2, v.z, 0, (9 + 4 * fl) * s, (9 + 4 * fl) * s, rgb(FIRE[2]), 0.6 * fl, Shape.Soft);
-      e.glow.add(v.x, v.y + 2.5, v.z, 0, 4 * s, 4 * s, rgb(FIRE[1]), 0.8 * fl, Shape.Hot);
+      v.set(p[0], p[1], p[2]).applyMatrix4(m.root.matrixWorld);
+      const fl = 0.7 + 0.3 * Math.sin(t * (11 + i) + i * 7), fl2 = 0.8 + 0.2 * Math.sin(t * 23 + i * 3);
+      // Smoke column first (alpha-blended), then the fire on top (additive).
+      for (let k = 0; k < 3; k++) {
+        const q = (t * 0.55 + k / 3 + i * 0.29) % 1, sz = (6 + q * 18) * s;
+        e.dark.add(v.x + d.x * q * 34 * s + Math.sin(i * 1.7 + q * 4) * 3 * s, v.y + 6 + q * 12, v.z + d.z * q * 34 * s, q * 3 + i, sz, sz, rgb('#26262a'), (1 - q) * Math.min(1, q * 4) * 0.6, DarkShape.Soft);
+      }
+      e.glow.add(v.x, v.y + 3, v.z, 0, 26 * s * fl2, 26 * s * fl2, rgb(FIRE[3]), 0.22 * fl, Shape.Soft);
+      e.glow.add(v.x, v.y + 3.5, v.z, i, (11 + 5 * fl) * s, (9 + 4 * fl) * s, rgb(FIRE[2]), 0.75 * fl, Shape.Soft);
+      e.glow.add(v.x, v.y + 4, v.z, 0, 5 * s * fl2, 5 * s * fl2, rgb(FIRE[1]), 0.9 * fl, Shape.Hot);
       // Venting: pale jets from the hull side nearest the fire.
       if (i % 3 === 1) {
         w.set(Math.sign(p[0] || 1) * 1, 0, 0).transformDirection(m.root.matrixWorld);
-        const vl = (14 + 8 * Math.sin(t * 9 + i)) * s;
-        e.glow.add(v.x + w.x * vl * 0.6, v.y, v.z + w.z * vl * 0.6, Math.atan2(w.z, w.x), vl, 3 * s, rgb(hostile ? '#ff9a7a' : '#cfe3f0'), 0.22, Shape.Streak);
+        const vl = (16 + 8 * Math.sin(t * 9 + i)) * s;
+        e.glow.add(v.x + w.x * vl * 0.6, v.y + 2, v.z + w.z * vl * 0.6, Math.atan2(w.z, w.x), vl, 3.4 * s, rgb(hostile ? '#ff9a7a' : '#cfe3f0'), 0.3 * fl2, Shape.Streak);
       }
     }
     r.smokeAcc += dt * nf * 3;

@@ -205,6 +205,9 @@ function hull(c: Ctx, st: Station[]) {
         c.bk.get(band.m).quad([sx * pa[k][0], pa[k][1], a.z], [sx * pb[k][0], pb[k][1], b.z], [sx * pb[k + 1][0], pb[k + 1][1], b.z], [sx * pa[k + 1][0], pa[k + 1][1], a.z],
           [a.z / tile, band.v0], [b.z / tile, band.v0], [b.z / tile, band.v1], [a.z / tile, band.v1], col(k === 1 ? P.plate : P.hull, PROFILE_SHADE[k]), out);
       }
+      // Safety line inboard of the deck edge.
+      { const ia = terrace(a.hw) - 1.6, ib = terrace(b.hw) - 1.6, y = DECK + 0.03;
+        c.bk.get('paint').quad([sx * ia, y, a.z], [sx * (ia - 0.45), y, a.z], [sx * (ib - 0.45), y, b.z], [sx * ib, y, b.z], [0, a.z / 30], [0.02, a.z / 30], [0.02, b.z / 30], [0, b.z / 30], col(P.accent, 0.55), [0, 1, 0]); }
       // Life along the hull: main-deck edge lamps, terrace portholes, gallery walkway lamps, belt portholes.
       const T0 = terrace(a.hw), T1 = terrace(b.hw);
       c.lights.row([sx * (T0 - 0.4), DECK + 0.2, a.z], [sx * (T1 - 0.4), DECK + 0.2, b.z], 3.4, LL.edge, 1.2, 0.7, 0.9, LMode.Steady, c.rnd);
@@ -341,40 +344,41 @@ function bridgeSection(c: Ctx, r: HullRect, first: boolean) {
     c.lights.add(-3, DECK + 0.5, z0 + 2, LL.port, 2.4, 1.1, LMode.Beacon, 0); c.lights.add(3, DECK + 0.5, z0 + 2, LL.star, 2.4, 1.1, LMode.Beacon, 0.5);
     c.lights.row([0, DECK + 0.1, z0 + 6], [0, DECK + 0.1, zc - 11], 2.2, LL.deck, 1.6, 0.8, 1, LMode.Chase, c.rnd);
   }
-  // Tower stack aft of the forward gun: base, hab block, bridge wings, flag bridge, mast.
-  const t0 = zc + 9, a = Math.min(W * 0.27, 26);
-  tower(c, octagon(-a, t0, a, z1 - 1, 3), DECK, DECK + 5, { side: B.darkPanel, top: B.brackets, win: [[DECK + 1.2, DECK + 3.6]] });
-  tower(c, octagon(-a * 0.7, t0 + 3, a * 0.7, z1 - 4, 2.5), DECK + 5, DECK + 11, { side: B.panels, top: B.darkPanel, win: [[DECK + 6, DECK + 7.8], [DECK + 8.3, DECK + 10]], claim: false });
-  tower(c, octagon(-a * 1.2, t0 + 5, a * 1.2, t0 + 11, 2.2), DECK + 11, DECK + 14.5, { side: B.lightbar, top: B.panels, win: [[DECK + 11.6, DECK + 13.6]], claim: false });
-  tower(c, octagon(-a * 0.38, t0 + 7, a * 0.38, z1 - 8, 1.5), DECK + 14.5, DECK + 20, { side: B.darkPanel, top: B.brackets, win: [[DECK + 15.4, DECK + 17]], claim: false });
-  // Wing-tip lights and the bridge glass (bright).
-  c.lights.add(-a * 1.2 - 0.5, DECK + 13, t0 + 8, LL.port, 2.4, 1.1, LMode.Beacon, 0.2);
-  c.lights.add(a * 1.2 + 0.5, DECK + 13, t0 + 8, LL.star, 2.4, 1.1, LMode.Beacon, 0.7);
-  mast(c, 0, DECK + 20, t0 + 9.5, 13);
-  radar(c, -a * 0.45, DECK + 11, z1 - 6.5, 4.2, 1.1);
-  radar(c, a * 0.5, DECK + 11, z1 - 7, 2.6, -1.9);
+  // Tower stack aft of the forward gun: plinth, hab block, bridge wings, flag bridge, crown, mast.
+  const t0 = zc + 9, a = Math.min(W * 0.27, 26), L = z1 - 1 - t0;
+  tower(c, octagon(-a, t0, a, z1 - 1, 3), DECK, DECK + 6, { side: B.darkPanel, top: B.brackets, win: [[DECK + 1.2, DECK + 2.8], [DECK + 3.4, DECK + 5]] });
+  tower(c, octagon(-a * 0.72, t0 + L * 0.1, a * 0.72, z1 - 3, 2.5), DECK + 6, DECK + 14, { side: B.panels, top: B.darkPanel, win: [[DECK + 7, DECK + 8.8], [DECK + 9.6, DECK + 11.4], [DECK + 12, DECK + 13.4]], claim: false });
+  tower(c, octagon(-a * 1.25, t0 + L * 0.16, a * 1.25, t0 + L * 0.42, 2.2), DECK + 14, DECK + 18, { side: B.lightbar, top: B.panels, win: [[DECK + 14.6, DECK + 17.2]], claim: false, roof: false });
+  tower(c, octagon(-a * 0.45, t0 + L * 0.2, a * 0.45, z1 - L * 0.3, 1.8), DECK + 18, DECK + 25, { side: B.darkPanel, top: B.brackets, win: [[DECK + 19, DECK + 20.6], [DECK + 21.4, DECK + 23]], claim: false });
+  tower(c, octagon(-a * 0.22, t0 + L * 0.3, a * 0.22, z1 - L * 0.45, 1), DECK + 25, DECK + 29, { side: B.ribs, top: B.darkPanel, win: [[DECK + 25.8, DECK + 27.4]], claim: false, roof: false });
+  // Wing-tip lights.
+  c.lights.add(-a * 1.25 - 0.5, DECK + 17, t0 + L * 0.29, LL.port, 2.4, 1.1, LMode.Beacon, 0.2);
+  c.lights.add(a * 1.25 + 0.5, DECK + 17, t0 + L * 0.29, LL.star, 2.4, 1.1, LMode.Beacon, 0.7);
+  mast(c, 0, DECK + 29, t0 + L * 0.42, 15);
+  radar(c, -a * 0.5, DECK + 14, z1 - 6, 4.2, 1.1);
+  radar(c, a * 0.52, DECK + 14, z1 - 6.5, 2.8, -1.9);
   // Exhaust stacks aft with heat haze.
   for (const sx of [-1, 1]) {
-    lathe(c.bk, B.ribs, [[0, 0], [2.3, 0], [2.3, 4.5], [1.8, 5], [1.5, 5]], 10, P.dark, new THREE.Matrix4().makeTranslation(sx * a * 0.55, DECK + 11, t0 + 15));
+    lathe(c.bk, B.ribs, [[0, 0], [2.3, 0], [2.3, 4.5], [1.8, 5], [1.5, 5]], 10, P.dark, new THREE.Matrix4().makeTranslation(sx * a * 0.55, DECK + 11, t0 + 15 + 0 * L));
     c.bk.get('core').quad([sx * a * 0.55 - 1.2, DECK + 15.9, t0 + 13.8], [sx * a * 0.55 + 1.2, DECK + 15.9, t0 + 13.8], [sx * a * 0.55 + 1.2, DECK + 15.9, t0 + 16.2], [sx * a * 0.55 - 1.2, DECK + 15.9, t0 + 16.2], [0, 0], [1, 0], [1, 1], [0, 1], col(P.full, 0.35), [0, 1, 0]);
     c.vents.push([sx * a * 0.55, DECK + 16, t0 + 15]);
   }
-  for (let i = 0; i < 3; i++) c.dmg.push([(c.rnd() - 0.5) * a * 1.4, DECK + 5 + c.rnd() * 6, t0 + c.rnd() * (z1 - t0 - 3)]);
+  c.dmg.push([-a * 0.45, DECK + 14.1, t0 + L * 0.8], [a * 0.82, DECK + 6.1, t0 + 2.5], [-a * 0.8, DECK + 6.1, z1 - 3], [a * 0.3, DECK + 25.1, t0 + L * 0.55]);
 }
 
 function gundeckSection(c: Ctx, r: HullRect) {
   const W = r.w, z0 = r.y, z1 = r.y + r.h, zc = (z0 + z1) / 2, P = c.L.paint;
   const hx = Math.min(W * 0.1, 11);
-  tower(c, octagon(-hx, z0 + 5, hx, z1 - 4, 2.5), DECK, DECK + 4.5, { side: B.darkPanel, top: B.doors, win: [[DECK + 1, DECK + 3]] });
-  flat(c.bk, 'window', -0.6, z0 + 7, 0.6, z1 - 6, DECK + 4.55, P.full, [[0, 0.25], [0, 0.5], [0.4, 0.5], [0.4, 0.25]]);
-  flatRect(c.bk, R.grate, -hx + 2, z0 + 7, -1.4, zc, DECK + 4.55, P.hull, true);
-  flatRect(c.bk, R.grate, 1.4, zc, hx - 2, z1 - 6, DECK + 4.55, P.hull, true);
+  tower(c, octagon(-hx, z0 + 5, hx, z1 - 4, 2.5), DECK, DECK + 5, { side: B.darkPanel, top: B.doors, win: [[DECK + 1, DECK + 2.6], [DECK + 3.1, DECK + 4.4]], roof: false });
+  tower(c, octagon(-hx * 0.62, z0 + 9, hx * 0.62, z1 - 9, 1.5), DECK + 5, DECK + 9, { side: B.panels, top: B.brackets, win: [[DECK + 5.8, DECK + 7.6]], claim: false });
+  flatRect(c.bk, R.grate, -hx + 1.6, z0 + 6.5, -hx * 0.62 - 0.6, z1 - 5.5, DECK + 5.05, P.hull, true);
+  flatRect(c.bk, R.grate, hx * 0.62 + 0.6, z0 + 6.5, hx - 1.6, z1 - 5.5, DECK + 5.05, P.hull, true);
   for (const sx of [-1, 1]) {
     const tx = sx * W * 0.27;
     tower(c, octagon(tx - 3, zc + 10, tx + 3, Math.min(z1 - 1.5, zc + 16), 1), DECK, DECK + 2.6, { side: B.ribs, top: B.brackets, edgeLights: false });
     hazardStrip(c, tx - 3.2, zc + 8.6, tx + 3.2, zc + 9.6);
   }
-  c.dmg.push([-hx * 2, DECK + 0.5, zc], [hx * 2, DECK + 0.5, zc + 5], [0, DECK + 4.6, zc]);
+  c.dmg.push([-hx * 2, DECK + 0.4, zc], [hx * 2, DECK + 0.4, zc + 5], [0, DECK + 9.1, zc]);
 }
 
 function batterySection(c: Ctx, r: HullRect) {
@@ -392,7 +396,7 @@ function batterySection(c: Ctx, r: HullRect) {
     const sxp = sx * hwS;
     tower(c, octagon(Math.min(sxp - sx * 1, sxp + sx * 4.5), zc - 13, Math.max(sxp - sx * 1, sxp + sx * 4.5), zc + 13, 1.6), DECK - 7.5, DECK - 0.8, { side: B.grille, top: B.ribs, shadow: false, claim: false, edgeLights: false });
     c.lights.row([sxp + sx * 4.8, DECK - 3.5, zc - 11], [sxp + sx * 4.8, DECK - 3.5, zc + 11], 1.2, c.L.light.window, 1.4, 0.7, 0.85, LMode.Steady, c.rnd);
-    c.dmg.push([sx * W * 0.2, DECK + 3.5, zc], [sxp, DECK, zc + 6]);
+    c.dmg.push([sx * W * 0.2, DECK + 3.5, zc], [sx * hwS * 0.78, DECK + 0.4, zc + 6]);
   }
 }
 
@@ -438,7 +442,7 @@ function spineSection(c: Ctx, r: HullRect) {
     for (let x = x0 + 0.8; x < x1; x += 1.7) box(c.bk, B.rail, 0.45, 2.6, zb - za, P.dark, new THREE.Matrix4().makeTranslation(x, DECK + 1.3, (za + zb) / 2));
     flat(c.bk, 'core', x0, za, x1, zb, DECK + 0.08, col(P.full, 0.12));
     dropShadow(c, x0, za, x1, zb, DECK + 0.06, 2.6); claim(c, x0, za, x1, zb);
-    c.dmg.push([(x0 + x1) / 2, DECK + 2, (za + zb) / 2]);
+    c.dmg.push([(x0 + x1) / 2, DECK + 2.7, (za + zb) / 2]);
   }
 }
 
@@ -449,7 +453,9 @@ function engineSection(c: Ctx, r: HullRect, last: boolean) {
     const x = sx * nx;
     // Engine nacelle: armoured barrel housing lying along z.
     const m = new THREE.Matrix4().makeTranslation(x, yc, z0 + 3).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-    lathe(c.bk, B.panels, [[0, 0], [rad * 0.7, 0], [rad, 2.5], [rad, z1 - z0 - 6], [rad * 1.05, z1 - z0 - 3.5]], 14, P.hull, m);
+    lathe(c.bk, B.panels, [[0, 0], [rad * 0.7, 0], [rad, 2.5], [rad, z1 - z0 - 6], [rad * 1.05, z1 - z0 - 3.5]], 16, col(P.hull, 1.25), m, false, 3);
+    for (let zz = 5; zz < z1 - z0 - 6; zz += 4.5) lathe(c.bk, B.ribs, [[rad * 1.04, zz], [rad * 1.04, zz + 1.2]], 16, P.dark, m, false, 4);
+    box(c.bk, B.brackets, rad * 0.9, 0.8, z1 - z0 - 10, col(P.hull, 1.3), new THREE.Matrix4().makeTranslation(x, yc + rad + 0.2, (z0 + z1) / 2 + 1));
     // Nozzle bell flaring past the stern.
     const mb = new THREE.Matrix4().makeTranslation(x, yc, z1 - 3.5).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
     lathe(c.bk, B.ribs, [[rad * 1.05, 0], [rad * 0.92, 1.2], [rad * 0.98, 4], [rad * 1.2, 8.5], [rad * 1.08, 8.6]], 16, P.dark, mb);
@@ -577,6 +583,19 @@ function greebles(c: Ctx, rects: HullRect[]) {
       const x0 = x - it.w / 2, x1 = x + it.w / 2, z0 = z - it.d / 2, z1 = z + it.d / 2;
       if (!onDeck(c, x0, z0, x1, z1) || occupied(c, x0, z0, x1, z1, 1.2)) continue;
       it.f(x, z); claim(c, x0, z0, x1, z1);
+    }
+    // Micro clutter: lockers, bollards, crates, small vents.
+    const micro = Math.round(area / 16);
+    for (let i = 0; i < micro; i++) {
+      const x = (c.rnd() * 2 - 1) * (r.w / 2), z = r.y + 2 + c.rnd() * (r.h - 4), k = Math.floor(c.rnd() * 5);
+      const hw0 = k === 3 ? 1.6 : 1.1;
+      if (!onDeck(c, x - hw0, z - hw0, x + hw0, z + hw0, 0.5) || occupied(c, x - hw0, z - hw0, x + hw0, z + hw0, 0.5)) continue;
+      if (k === 0) { box(c.bk, B.ribs, 1.6, 0.9, 1.1, col(P.hull, 1.1), new THREE.Matrix4().makeTranslation(x, DECK + 0.45, z)); }
+      else if (k === 1) { for (const dz of [-0.6, 0.6]) lathe(c.bk, B.rail, [[0.35, 0], [0.35, 0.8], [0.5, 0.9], [0, 1]], 6, P.dark, new THREE.Matrix4().makeTranslation(x, DECK, z + dz)); }
+      else if (k === 2) kit(c, 'Prop_Crate3', x, DECK + 0.7, z, c.rnd() * 3, 1.4);
+      else if (k === 3) kit(c, 'Prop_Vent_Small', x, DECK + 0.02, z, c.rnd() < 0.5 ? 0 : Math.PI / 2, 2.6);
+      else flatRect(c.bk, R.dots, x - 1, z - 0.5, x + 1, z + 0.5, DECK + 0.04, P.hull);
+      claim(c, x - hw0, z - hw0, x + hw0, z + hw0);
     }
     // Deck floodlights in pairs along the deck edges.
     for (let z = r.y + 6; z < r.y + r.h - 4; z += 19) for (const sx of [-1, 1]) {
