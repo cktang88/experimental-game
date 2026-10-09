@@ -7,6 +7,18 @@ A vertical-scrolling shmup roguelite in one HTML file. You fly a modular flying 
 - **Every 3 stages there's a boss.** The boss is the **ghost of a pilot who died in that sector**, flying their exact build at boss scale. Beat it and you salvage one of its parts.
 - **When you die, you become a boss.** Your build is saved to the wreck registry for that sector. Other pilots who reach that sector may face it.
 
+## Rendering
+
+The game renders in WebGL with Three.js (r147, loaded from jsDelivr):
+
+- Ships are extruded 3D hulls generated from your actual sections and mounts.
+- Enemies are low-poly models with spinning rotors and turrets that track you.
+- Terrain has instanced buildings and a scrolling ground texture.
+- A sun light casts shadows, and a pool of point lights follows the explosions.
+- Bullets, trails, beams and particles are drawn as GPU-instanced glow quads, then run through an UnrealBloom pass.
+
+If WebGL or the CDN isn't available, the game falls back to the 2D canvas renderer automatically.
+
 ## Play
 
 Open `index.html` in a browser. Steer with WASD/arrows or drag (touch works). Guns fire on their own. Press `P` to pause and `M` to mute.
