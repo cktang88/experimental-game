@@ -34,7 +34,7 @@ describe('ship stats', () => {
     expect(buildToGhost(back)).toEqual(buildToGhost(b));
   });
   it('every relic has a name, description and known rarity', () => {
-    for (const [id, r] of Object.entries(RELICS)) { expect(r.name, id).toBeTruthy(); expect(['common', 'rare', 'boss', 'curse']).toContain(r.rarity); }
+    for (const [id, r] of Object.entries(RELICS)) { expect(r.name, id).toBeTruthy(); expect(['common', 'rare', 'boss', 'curse', 'perk']).toContain(r.rarity); }
     expect(neutralMods().hullMul).toBe(1);
   });
 });

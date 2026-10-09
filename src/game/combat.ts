@@ -81,6 +81,7 @@ export interface CombatSetup {
   enc: Encounter; level: number; sector: number; build: Build; hp: number; relics: string[]; mods: Mods;
   ghost?: Ghost; cheatDeathAvailable: boolean;
   overdrive?: OverdriveKind; heat?: HeatFx;
+  /** Overdrive charge to start with (0..1), from rank perks. */ odCharge?: number;
 }
 export type CombatMode = 'play' | 'clear' | 'bossdown' | 'dying' | 'done';
 
@@ -139,6 +140,7 @@ export function startCombat(c: CombatSetup) {
     volley: [{ wait: 0, queue: [] }, { wait: 0, queue: [] }],
   });
   keys.od = false;
+  S.overdrive.charge = Math.max(0, Math.min(0.99, c.odCharge ?? 0));
   S.P = { x: W / 2, y: H - 190, build: c.build, dv, hp: Math.min(c.hp, dv.maxHp), shield: dv.shieldMax, cds: {}, lastHit: 9, flash: 0, tx: null, ty: null, droneCd: [0, 0, 0], vx: 0, vy: 0, bank: 0 };
   seedDecor();
   if (c.enc.kind === 'boss' && c.ghost) {
@@ -316,7 +318,7 @@ function damageBoss(d: number) {
   const b = S.boss; if (!b || !b.alive || S.mode !== 'play') return;
   d *= S.P!.dv.mods.dmgAir;
   if (b.shield > 0) { const a = Math.min(b.shield, d); b.shield -= a; d -= a; b.shieldHitT = 0; }
-  b.hp -= d; b.flash = 0.06; S.stats.dmgDealt += d; S.stats.dmgToTarget += d;
+  const dealt = Math.min(d, Math.max(0, b.hp)); b.hp -= d; b.flash = 0.06; S.stats.dmgDealt += dealt; S.stats.dmgToTarget += dealt;
   feedOverdrive((d / b.maxHp) * 1.6);
   if (b.hp <= 0) bossDown();
 }
@@ -681,7 +683,7 @@ export function damageTarget(e: Ent, d: number) {
   if (e.dead) return;
   const m = S.P!.dv.mods;
   const dd = d * (e.layer === 'air' ? m.dmgAir : m.dmgGround);
-  e.hp -= dd; e.flash = 0.07; S.stats.dmgDealt += dd; if (e === S.elite) S.stats.dmgToTarget += dd;
+  const dealt = Math.min(dd, Math.max(0, e.hp)); e.hp -= dd; e.flash = 0.07; S.stats.dmgDealt += dealt; if (e === S.elite) S.stats.dmgToTarget += dealt;
   if (e.hp <= 0) killEnemy(e as Enemy);
 }
 /** Global scrap tuning: kill and salvage values in data/enemies.ts are multiplied by this before carnage. */

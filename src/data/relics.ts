@@ -1,7 +1,8 @@
 import type { Mods } from './parts';
 import { neutralMods } from './parts';
 
-export type Rarity = 'common' | 'rare' | 'boss' | 'curse';
+/** 'perk' relics come from Admiralty rank, never from loot pools. */
+export type Rarity = 'common' | 'rare' | 'boss' | 'curse' | 'perk';
 export interface RelicDef {
   name: string; rarity: Rarity; col: string; desc: string;
   mods?: (m: Mods) => void;
@@ -31,6 +32,7 @@ export const RELICS: Record<string, RelicDef> = {
   war_engine: { name: 'War Engine', rarity: 'boss', col: '#ff7a6b', desc: '+25% fire rate, but merchants charge 25% more.', mods: (m) => { m.fireMul *= 1.25; m.priceMul *= 1.25; } },
   titan_frame: { name: 'Titan Frame', rarity: 'boss', col: '#9aa7b4', desc: '+30% max hull.', mods: (m) => { m.hullMul *= 1.3; } },
   parasitic_ai: { name: 'Parasitic AI', rarity: 'curse', col: '#b05cff', desc: 'Curse: 10% less max hull.', mods: (m) => { m.hullMul *= 0.9; } },
+  veteran_crews: { name: 'Veteran Crews', rarity: 'perk', col: '#8fe39a', desc: 'Rear Admiral perk: +8% max hull.', mods: (m) => { m.hullMul *= 1.08; } },
   leaking_core: { name: 'Leaking Core', rarity: 'curse', col: '#b05cff', desc: 'Curse: 8% slower.', mods: (m) => { m.speedMul *= 0.92; } },
 };
 
@@ -40,4 +42,4 @@ export function relicMods(ids: string[]): Mods {
   return m;
 }
 export const hasFlag = (ids: string[], flag: string) => ids.some((id) => RELICS[id]?.flag === flag);
-export const relicCost = (id: string) => ({ common: 110, rare: 170, boss: 260, curse: 0 })[RELICS[id].rarity];
+export const relicCost = (id: string) => ({ common: 110, rare: 170, boss: 260, curse: 0, perk: 0 })[RELICS[id].rarity];
