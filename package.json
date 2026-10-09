@@ -17,6 +17,9 @@
     "three": "0.170.0"
   },
   "devDependencies": {
+    "@fontsource/chakra-petch": "^5.2.5",
+    "@fontsource/saira-stencil-one": "^5.2.5",
+    "@fontsource/share-tech-mono": "^5.2.5",
     "@gltf-transform/cli": "^4.5.1",
     "@gltf-transform/core": "^4.5.1",
     "@gltf-transform/extensions": "^4.5.1",
