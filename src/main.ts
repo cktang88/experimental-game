@@ -63,6 +63,10 @@ if (webglAvailable()) {
     const eng = new Engine(glCanvas);
     eng.add(new TerrainLayer(eng)); eng.add(new UnitLayer(eng)); eng.add(new ShipLayer(eng)); eng.add(new FxLayer(eng));
     renderer = eng;
+    // Graphics quality and screen shake from the settings panel, live.
+    V.shakeScale = uiSettings.shake;
+    let quality = uiSettings.quality;
+    onSettings((st) => { V.shakeScale = st.shake; if (st.quality !== quality) { quality = st.quality; eng.setQuality(st.quality); } });
   } catch (e) { console.error(e); renderer = null; }
 }
 // Kitbash pieces for the ship hulls (the ship layer rebuilds once they arrive).

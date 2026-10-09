@@ -48,6 +48,8 @@ export const V = {
   flashA: 0, hurt: 0,
   /** Camera trauma 0..1 (shake amplitude grows with trauma^1.5). */
   trauma: 0,
+  /** Player's screen-shake setting, 0..1 (settings panel). Scales the camera only, not the sim. */
+  shakeScale: 1,
   /** Directional camera shove in field units, eased back to zero. */
   kickX: 0, kickY: 0,
   /** Chromatic aberration pulse 0..1, decays on its own. */
@@ -104,10 +106,10 @@ export function cameraShake(dtReal: number, nowMs: number) {
   absorbLegacyShake();
   V.trauma = Math.max(0, V.trauma - dtReal / 0.75);
   const kf = Math.exp(-dtReal / 0.12); V.kickX *= kf; V.kickY *= kf;
-  const k = MAX_SHAKE * V.trauma ** 1.5;
-  shakeOut.x = k * wobble(nowMs, 1) + V.kickX;
-  shakeOut.y = k * wobble(nowMs, 5) + V.kickY;
-  shakeOut.roll = MAX_ROLL * V.trauma ** 2 * wobble(nowMs, 9);
+  const k = MAX_SHAKE * V.trauma ** 1.5 * V.shakeScale;
+  shakeOut.x = k * wobble(nowMs, 1) + V.kickX * V.shakeScale;
+  shakeOut.y = k * wobble(nowMs, 5) + V.kickY * V.shakeScale;
+  shakeOut.roll = MAX_ROLL * V.trauma ** 2 * wobble(nowMs, 9) * V.shakeScale;
   return shakeOut;
 }
 
