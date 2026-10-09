@@ -9,7 +9,8 @@ import { V, boomFx, spark, muzzle, addFx, updateFx, resetFx } from './vfx';
 import { sfx } from './audio';
 import type { Ghost } from './ghosts';
 
-export const W = 480, H = 800;
+import { FIELD_W, FIELD_H } from './field';
+export const W = FIELD_W, H = FIELD_H;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export interface Ent { [k: string]: any; x: number; y: number; r: number; dead: boolean }
@@ -24,7 +25,8 @@ export interface Boss extends Ent {
   speedMul: number; fireMul: number; cdMul: number; t: number; phase: number; flash: number; entered: boolean;
   weps: { part: Part; ox: number; oy: number; cd: number }[];
 }
-export interface Decor { type: 'road' | 'crater' | 'block' | 'pad' | 'field'; x: number; y: number; w: number; h: number; r: number; hgt: number }
+export type { Decor } from './worldgen';
+import type { Decor } from './worldgen';
 export interface Pickup { x: number; y: number; vx: number; vy: number; val: number; t: number; kind: 'scrap' | 'repair'; dead?: boolean }
 export interface Beam { x1: number; y1: number; x2: number; y2: number; col: string; life: number; max: number; w: number; zig?: boolean }
 
@@ -78,29 +80,10 @@ export function startCombat(c: CombatSetup) {
   }
 }
 
-/* ---------------- decor ---------------- */
-function makeDecor(y: number): Decor {
-  const r = Math.random();
-  const d: Decor = { type: 'crater', x: rnd(0, W), y, w: 0, h: 0, r: rnd(8, 26), hgt: 0 };
-  if (r < 0.12) Object.assign(d, { type: 'road', h: rnd(14, 22) });
-  else if (r < 0.45) d.type = 'crater';
-  else if (r < 0.8) Object.assign(d, { type: 'block', w: rnd(26, 70), h: rnd(22, 60), hgt: rnd(8, 34) });
-  else if (r < 0.9) Object.assign(d, { type: 'pad', x: rnd(30, W - 30), r: rnd(14, 20) });
-  else Object.assign(d, { type: 'field', w: rnd(80, 180), h: rnd(50, 110) });
-  return d;
-}
-export function seedDecor() {
-  S.decor = []; for (let y = -60; y < H + 60; y += 42) S.decor.push(makeDecor(y + rnd(-15, 15)));
-  S.clouds = []; for (let i = 0; i < 4; i++) S.clouds.push({ x: rnd(0, W), y: rnd(0, H), w: rnd(120, 240), h: rnd(40, 80) });
-}
-let decorAcc = 0;
-export function updateBg(dt: number) {
-  const dy = S.scroll * dt; S.scrollY += dy; decorAcc += dy;
-  while (decorAcc > 42) { decorAcc -= 42; S.decor.push(makeDecor(-70)); }
-  for (const d of S.decor) d.y += dy;
-  S.decor = S.decor.filter((d) => d.y < H + 120);
-  for (const c of S.clouds) { c.y += dy * 2.6; if (c.y - c.h > H) { c.y = -c.h - rnd(0, 200); c.x = rnd(0, W); } }
-}
+/* ---------------- world ---------------- */
+// World generation (city, roads, clouds) lives in ./worldgen; re-exported for existing callers.
+export { seedDecor, updateBg } from './worldgen';
+import { seedDecor, updateBg, worldBlast } from './worldgen';
 
 /* ---------------- spawning ---------------- */
 function spawnEnemy(type: EnemyType, x: number, y: number, o: Record<string, any> = {}): Enemy {
@@ -154,7 +137,7 @@ function spawnElite(type: EnemyType) {
 const BOSS_CD: Record<string, number> = { pulse: 1.3, spread: 2.3, flak: 2.7, missile: 3.4, bomb: 2.9, artillery: 3.2, rail: 4.6, tesla: 2.4, pd: 0.45 };
 function spawnBoss(g: Ghost) {
   const sec = S.sector, build = ghostToBuild(g.sections), dv = derive(build);
-  const s = Math.min(2.3, 240 / dv.len, 300 / dv.width);
+  const s = Math.min(1.9, 560 / dv.len, 760 / dv.width);
   const maxHp = (500 + dv.maxHp * 2.2) * (0.8 + 0.35 * sec) * S.P!.dv.mods.bossHpMul;
   const u = dv.u, shield = u.shield * 40 * (0.8 + 0.35 * sec);
   S.boss = {
@@ -372,6 +355,7 @@ function killEnemy(e: Enemy) {
 }
 function explode(x: number, y: number, r: number, d: number, layer: string, col: string) {
   boomFx(x, y, r * 0.7, col, layer === 'ground');
+  if (layer !== 'air') { const sc = worldBlast(x, y, r, d); if (sc > 0) dropScrap(x, y, sc * S.P!.dv.scrapMult, Math.min(6, Math.ceil(sc / 4))); }
   for (const e of S.enemies) if (!e.dead && layerOk(layer, e.layer) && Math.hypot(e.x - x, e.y - y) < r + e.r) damageTarget(e, d);
   const B = S.boss; if (B && B.alive && shipHit(x, y, r * 0.6, B.x, B.y, B.dv, B.s, -1)) damageBoss(d);
 }

@@ -137,8 +137,10 @@ test('boss fight leads to salvage, relic and the next sector', async ({ page }) 
   await gd(page, "(() => { const r = g.run; const n = Object.values(r.map.nodes).find(n => n.floor === 9); r.at = n.id; r.visited.push(n.id); })()");
   await expect.poll(() => gd<boolean>(page, '!!g.run.bossGhost'), { timeout: 15_000 }).toBe(true);
   await gd(page, "g.travelTo('boss')");
-  await expect.poll(() => gd<boolean>(page, '!!(g.S.boss && g.S.boss.entered)'), { timeout: 60_000 }).toBe(true);
-  await gd(page, '(g.god(true), g.debug.timeScale = 2)');
+  await expect.poll(() => gd<string>(page, 'g.S.mode'), { timeout: 30_000 }).toBe('play');
+  await gd(page, '(g.god(true), g.debug.timeScale = 6)');
+  await expect.poll(() => gd<boolean>(page, '!!(g.S.boss && g.S.boss.entered)'), { timeout: 90_000 }).toBe(true);
+  await gd(page, '(g.god(true), g.debug.timeScale = 6)');
   await page.waitForTimeout(4000);
   await page.screenshot({ path: `${SHOTS}/10-boss.png` });
   await gd(page, 'g.winNow()');

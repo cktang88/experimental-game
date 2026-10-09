@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 
 const procs = [
-  spawn(process.execPath, ['server/server.mjs'], { stdio: 'inherit' }),
+  spawn(process.execPath, ['server/server.mjs'], { stdio: 'inherit', env: { ...process.env, PORT: process.env.GD_API_PORT || '8787' } }),
   spawn(process.execPath, ['node_modules/vite/bin/vite.js', ...process.argv.slice(2)], { stdio: 'inherit' }),
 ];
 const stop = () => { for (const p of procs) p.kill('SIGTERM'); process.exit(0); };

@@ -1,5 +1,10 @@
 import './styles.css';
-import { Renderer, webglAvailable } from './render/renderer';
+import { Engine, webglAvailable } from './render/engine';
+import { TerrainLayer } from './render/world/terrain';
+import { ShipLayer } from './render/ship/shipLayer';
+import { UnitLayer } from './render/units/unitLayer';
+import { FxLayer } from './render/fx/fxLayer';
+import { V } from './game/vfx';
 import { drawHud } from './render/hud';
 import { drawBlueprint } from './render/shipPreview';
 import { S, W, H, keys, startCombat, updateCombat, updateBg, endCombat, seedDecor, setScrapHandler, damagePlayer } from './game/combat';
@@ -24,7 +29,7 @@ const glCanvas = document.getElementById('gl') as HTMLCanvasElement;
 const hudCanvas = document.getElementById('hud') as HTMLCanvasElement;
 const hctx = hudCanvas.getContext('2d')!;
 const stageEl = document.getElementById('stage')!;
-let renderer: Renderer | null = null;
+let renderer: Engine | null = null;
 let SCALE = 1, DPR = 1;
 function resize() {
   SCALE = Math.min(window.innerWidth / W, window.innerHeight / H);
@@ -34,7 +39,13 @@ function resize() {
   hudCanvas.width = Math.round(cw * DPR); hudCanvas.height = Math.round(ch * DPR);
   renderer?.resize(cw, ch);
 }
-if (webglAvailable()) { try { renderer = new Renderer(glCanvas); } catch (e) { console.error(e); renderer = null; } }
+if (webglAvailable()) {
+  try {
+    const eng = new Engine(glCanvas);
+    eng.add(new TerrainLayer(eng)); eng.add(new UnitLayer(eng)); eng.add(new ShipLayer(eng)); eng.add(new FxLayer(eng));
+    renderer = eng;
+  } catch (e) { console.error(e); renderer = null; }
+}
 window.addEventListener('resize', resize);
 resize();
 seedDecor();
@@ -87,7 +98,7 @@ function frame(now: number) {
   const hideStage = mode === 'menu';
   if (stageEl.hidden !== hideStage) stageEl.hidden = hideStage;
   if (mode === 'combat' || mode === 'title') {
-    renderer?.render(mode === 'combat' && S.mode !== 'dying' && S.mode !== 'done');
+    renderer?.render({ dt, t: S.t, S, V, showPlayer: mode === 'combat' && S.mode !== 'dying' && S.mode !== 'done' });
     if (mode === 'combat') drawHud(hctx, SCALE, DPR, run?.scrap ?? 0); else { hctx.setTransform(1, 0, 0, 1, 0, 0); hctx.clearRect(0, 0, hudCanvas.width, hudCanvas.height); }
   }
   requestAnimationFrame(frame);
@@ -106,7 +117,7 @@ function setPaused(v: boolean) {
 /* ---------------- title ---------------- */
 function titleScreen() {
   mode = 'title'; paused = false; S.P = null; S.enemies = []; S.eb = []; S.pb = []; S.pickups = []; S.boss = null; S.theme = 0;
-  renderer?.clearCombat();
+  renderer?.clearLayers();
   const saved = loadRun();
   const input = el('input', { type: 'text', id: 'callsign', maxlength: 16, autocomplete: 'off', spellcheck: false });
   let stored = ''; try { stored = localStorage.getItem('gd.callsign') || ''; } catch { /* ignore */ }
@@ -160,7 +171,7 @@ function intelCard(): HTMLElement {
 }
 function mapScreen() {
   if (!run) return titleScreen();
-  mode = 'menu'; renderer?.clearCombat(); saveRun(run);
+  mode = 'menu'; renderer?.clearLayers(); saveRun(run);
   const r = run;
   const info = el('section', 'card', el('div', 'eyebrow', `Sector ${r.sector} route`), el('p', { 'data-testid': 'node-info' }, 'Hover a node to see what it is. Pick one of the glowing nodes to travel there.'));
   const setInfo = (id: string | null) => {
@@ -225,7 +236,7 @@ function fight(enc: Encounter, after: () => void, ghost?: Ghost) {
   onCombatDone = (o) => {
     r.stats.kills += S.kills; r.stats.score += S.score;
     if (S.cheatDeathUsed) r.jumpUsed = true;
-    endCombat(); mode = 'menu'; renderer?.clearCombat();
+    endCombat(); mode = 'menu'; renderer?.clearLayers();
     if (o === 'dead') { onDeath(); return; }
     r.hp = clamp(S.P!.hp, 1, maxHp(r));
     if (hasFlag(r.relics, 'heal_after_fight')) heal(r, 0.1);

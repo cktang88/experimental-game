@@ -9,7 +9,7 @@ export default defineConfig({
   workers: 1,
   reporter: [['list']],
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: `http://localhost:${process.env.GD_WEB_PORT || 5173}`,
     viewport: { width: 1280, height: 900 },
     screenshot: 'only-on-failure',
     launchOptions: {
@@ -19,7 +19,7 @@ export default defineConfig({
   },
   webServer: {
     command: 'GHOST_DATA_DIR=test-results/ghost-data npm run dev',
-    url: 'http://localhost:5173',
+    url: `http://localhost:${process.env.GD_WEB_PORT || 5173}`,
     reuseExistingServer: true,
     timeout: 60_000,
   },
