@@ -3,7 +3,7 @@ import { layerTag, rankPips } from './cards';
 import { icon } from './icons';
 import { gauge, lamp, legend } from './kit';
 import { guardedSwitch } from './screens/pause';
-import { SECTIONS, WEAPONS, partName, partDesc, partSlot, partDef, TIER } from '../data/parts';
+import { SECTIONS, WEAPONS, ARC_INFO, partName, partDesc, partSlot, partDef, TIER, type Arc } from '../data/parts';
 import { has } from '../util/rng';
 import { changeBuild, dv, type RunState } from '../game/run';
 import { drawBlueprint } from '../render/shipPreview';
@@ -25,6 +25,8 @@ export function refitPanel(run: RunState, onChange: () => void) {
       gauge(d.shieldMax / 200, 'Shield', d.shieldMax ? String(d.shieldMax) : 'none', { memo: 'rf-shield' }),
       gauge((d.speed - 120) / 260, 'Speed', String(Math.round(d.speed)), { memo: 'rf-speed', red: true }),
       gauge((d.fireMult - 0.8) / 1.2, 'Fire rate', `${Math.round(d.fireMult * 100)}%`, { memo: 'rf-fire' }));
+    const arcCount = (a: Arc) => weps.filter((m) => m.arc === a).length;
+    const arcBank = (a: Arc) => el('div', { class: 'bank arc', style: `--arc:${ARC_INFO[a].col}`, title: ARC_INFO[a].desc }, el('span', 'plate-k', ARC_INFO[a].label), el('span', 'lamps', ...Array.from({ length: Math.max(6, arcCount(a)) }, (_, i) => el('i', { class: 'lamp' + (i < arcCount(a) ? ' arc-on' : '') }))), el('b', 'mono', String(arcCount(a))));
     const bank = (label: string, n: number) => el('div', 'bank', el('span', 'plate-k', label), el('span', 'lamps', ...Array.from({ length: Math.max(6, n) }, (_, i) => lamp(i < n ? (label.startsWith('Anti-air') ? 'plasma' : 'warn') : 'off'))), el('b', 'mono', String(n)));
     const stats = el('dl', 'stats');
     for (const [k, v] of [['Mass · thrust', `${d.mass} · ${d.thrust}`], ['Repair', d.regen ? `${d.regen.toFixed(1)}/s` : 'none'], ['Drones', String(d.drones)], ['Length', `${Math.round(d.len * 1.6)} m`]] as const)
@@ -51,6 +53,9 @@ export function refitPanel(run: RunState, onChange: () => void) {
         const b = el('button', { class: 'slot' + (p ? ' full' : ' empty') + (target ? ' target' : '') + (k === 'W' ? ' w' : ' u'), 'data-slot': `${si}-${i}`, onclick: () => clickSlot(si, i) });
         b.addEventListener('pointerenter', () => { hl = { si, i }; drawBlueprint(canvas, d, false, hl); });
         b.addEventListener('pointerleave', () => { hl = null; drawBlueprint(canvas, d, false, null); });
+        const arc = d.mounts.find((m) => m.si === si && m.i === i)?.arc ?? 'internal';
+        b.style.setProperty('--arc', ARC_INFO[arc].col);
+        b.append(el('em', { class: 'arc-tag', title: ARC_INFO[arc].desc }, ARC_INFO[arc].short));
         const sock = el('span', 'sock', p ? icon(p.id) : el('i', null, k === 'W' ? 'W' : 'U'));
         if (p) b.append(sock, el('span', 'slot-txt', el('span', null, partDef(p.id).name, layerTag(p)), el('small', null, el('span', null, `Mk ${TIER[p.tier]}`), ' · click to unmount')));
         else b.append(sock, el('span', 'slot-txt', el('span', null, k === 'W' ? 'Weapon mount' : 'Utility bay'), el('small', null, target ? 'Click to mount' : 'Empty')));
@@ -76,7 +81,7 @@ export function refitPanel(run: RunState, onChange: () => void) {
           el('div', 'title-block', el('span', null, el('small', null, 'Dwg no.'), `GD-${String(run.seed % 10000).padStart(4, '0')}-${run.build.sections.length}`), el('span', null, el('small', null, 'Vessel'), run.callsign), el('span', null, el('small', null, 'Sections'), String(run.build.sections.length))),
           el('div', 'bp-wrap', canvas, el('span', 'bow', 'Bow'), el('span', 'dim-line', el('i'), `${Math.round(d.len * 1.6)} m`, el('i')))),
         meters,
-        el('div', 'banks', bank('Anti-air', air), bank('Anti-ground', gnd)),
+        el('div', 'banks', arcBank('bow'), arcBank('broadside'), arcBank('ventral'), arcCount('omni') ? arcBank('omni') : null, bank('Anti-air', air), bank('Anti-ground', gnd)),
         stats, warn),
       el('div', 'col', legend('Hull sections', 'bow at top'), list),
       el('div', 'col', legend('Cargo hold', 'pick a part, then a mount'), inv, info, el('div', { class: 'toast', role: 'status' }, toast)),

@@ -24,10 +24,18 @@ export const RELIC_ICON: Record<string, string> = {
   parasitic_ai: 'tentacles-skull', leaking_core: 'radioactive',
 };
 
+export const HULL_ICON: Record<string, string> = { vanguard: 'battleship', leviathan: 'delivery-drone', lance: 'hypersonic-bolt', bastion: 'layered-armor' };
+export const OVERDRIVE_ICON: Record<string, string> = { lance: 'laser-burst', wing: 'jet-fighter', spear: 'hypersonic-bolt', bulwark: 'energy-shield' };
+export const ENEMY_ICON: Record<string, string> = {
+  heli: 'helicopter', jet: 'jet-fighter', drone: 'delivery-drone', gunship: 'helicopter', bomber: 'stealth-bomber', tank: 'battle-tank', infantry: 'person',
+  turret: 'laser-turret', sam: 'missile-launcher', bunker: 'guarded-tower', cache: 'cargo-crate', wreck: 'sinking-ship', canister: 'chemical-tank',
+  ace: 'jet-fighter', crawler: 'great-war-tank', carrier: 'battleship',
+};
+
 /** Resolve any game id (part, relic, section, node) or raw icon id to a drawable icon id. */
 export function iconId(id: string, fallback = 'medal') {
   if (has(id)) return id;
-  const m = PART_ICON[id] || RELIC_ICON[id] || SECTION_ICON[id] || NODE_ICON[id];
+  const m = PART_ICON[id] || RELIC_ICON[id] || SECTION_ICON[id] || NODE_ICON[id] || HULL_ICON[id] || ENEMY_ICON[id];
   return m && has(m) ? m : fallback;
 }
 

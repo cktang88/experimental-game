@@ -18,7 +18,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: 'GHOST_DATA_DIR=test-results/ghost-data npm run dev',
+    command: 'GHOST_DATA_DIR=${TMPDIR:-/tmp}/gd-e2e-ghosts npm run dev',
     url: `http://localhost:${process.env.GD_WEB_PORT || 5173}`,
     reuseExistingServer: true,
     timeout: 60_000,

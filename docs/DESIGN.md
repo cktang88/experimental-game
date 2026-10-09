@@ -37,3 +37,9 @@ You command a dreadnought the size of an aircraft carrier, crewed by thousands. 
 - **Ghost ledger**: other players' ships you destroyed, and how many players your own ghosts have killed. The asynchronous rivalry is the long-term hook.
 - **Heat levels**: harder runs after your first victory, each adding a named modifier.
 - Daily strike: one seeded route a day for everyone, with a shared leaderboard.
+
+## Environments (after all mechanics are in)
+Owner's direction: **gameplay first.** Environment work that doesn't affect gameplay starts only once every mechanic is in place.
+- Stylized, not literal. A night city reads as lit rectangles: building masses with window grids, street-light lines and traffic streams. No need for real building models.
+- Many distinct biomes, each with its own silhouette and color story: desert (dunes, convoys, dust), snow-covered mountains (ridges, pass forts), forests (canopy, firebreaks, logging rail), ports (docks, cranes, ships), airfields (runways, hangars, taxiing jets), plus the night city.
+- Biomes should be unique and creative. Pick each sector's biome from the route so the run reads as a journey.

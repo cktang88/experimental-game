@@ -12,6 +12,8 @@ export interface TitleOpts {
   noGl: boolean;
   registry: Promise<{ online: boolean; total: number }>;
   sound: { on: boolean; set: (on: boolean) => void };
+  /** Fleet loop: rank, hull class, heat and the daily strike (src/game/metaScreens.ts). */
+  launchPanel?: HTMLElement;
   onStart: (callsign: string) => void;
   onContinue: () => void;
 }
@@ -90,12 +92,13 @@ export function titleView(o: TitleOpts) {
         el('label', { class: 'cs-plate', for: 'callsign' }, plateK('Callsign'), el('span', 'cs-field', input)),
         el('div', { class: 'cs-hint', id: 'cs-hint' }, 'Stencilled on your hull, and on your ghost.'),
         o.noGl ? el('p', 'fatal', 'WebGL is not available in this browser, so combat cannot be drawn. Try a current Chrome, Edge, Firefox or Safari.') : null,
+        o.launchPanel ?? null,
         el('div', 'switches', launch, cont),
         reg,
       ),
     ),
     el('div', 'letterbox bottom',
-      el('span', 'keys', keycap('WASD'), ' / ', keycap('Arrows'), ' or drag to steer · guns fire on their own · ', keycap('P'), ' pause · ', keycap('M'), ' mute'),
+      el('span', 'keys', keycap('WASD'), ' / ', keycap('Arrows'), ' or drag to steer · batteries fire on their own · ', keycap('Space'), ' overdrive · ', keycap('P'), ' pause · ', keycap('M'), ' mute'),
       el('span', 'spacer'),
       el('span', 'mono dim', 'BUILD 0.2 · ICONS GAME-ICONS.NET (CC BY 3.0)')),
   );

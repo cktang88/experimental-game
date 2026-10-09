@@ -1,17 +1,14 @@
 // Combat HUD: a 2D canvas over the WebGL view, drawn in field units (1600x900). Same instrument language as
-// the menus: riveted plates, stencil legends, segmented bars with a damage trail, a split-flap scrap counter,
-// battery lamps, a stamped banner, and off-screen threat chevrons (ported from Dead Air's threat-indicators.js).
-//
-// HOOK for the gameplay workstream: if S.carnage and/or S.overdrive exist, their gauges appear bottom-right.
-// Accepted shapes (any of):
-//   number in 0..1 (or 0..100)
-//   { value | charge | level | t: number, max?: number, mult? | multiplier?: number, ready?: boolean, active?: boolean, key?: string }
-// Carnage reads as a VU ladder with the scrap multiplier; overdrive as a needle gauge with a READY lamp and keycap.
+// the menus: riveted plates, stencil legends, segmented bars with a damage trail, a split-flap scrap counter with a
+// pickup streak, battery lamps grouped by firing arc, the Overdrive gauge (with a SPACE prompt that cannot be missed),
+// the carnage ladder, a boss/elite nameplate, a stamped banner, a slow-mo letterbox and off-screen threat chevrons
+// (ported from Dead Air's threat-indicators.js). Reads S.overdrive, S.carnage, S.events, S.pickStreak, S.slowFx.
 import { S, W, H } from '../game/combat';
 import { V } from '../game/vfx';
 import { clamp } from '../util/rng';
 import { EN } from '../data/enemies';
-import { WEAPONS, wCd } from '../data/parts';
+import { WEAPONS, wCd, ARC_INFO, type Arc } from '../data/parts';
+import { OVERDRIVES, type OverdriveKind } from '../data/hulls';
 import { drawIcon } from '../ui/icons';
 
 const F_MONO = '"Share Tech Mono", ui-monospace, monospace';
@@ -33,7 +30,7 @@ const st = {
   hpLag: 1, shLag: 1, bossLag: 1, eliteLag: 1,
   scrapShown: 0, digits: [] as { ch: string; flip: number }[], gains: [] as { v: number; t: number }[], lastScrap: -1,
   fired: new Map<number, number>(), lastCd: new Map<number, number>(),
-  bannerKey: '',
+  bannerKey: '', odNeedle: 0, tierAt: -9, lastEvent: 0,
 };
 
 /* ---------------- primitives ---------------- */
@@ -143,6 +140,8 @@ function scrapCluster(c: CanvasRenderingContext2D, total: number) {
   // this-fight tally and floating gains
   c.font = `12px ${F_MONO}`; c.fillStyle = C.good; c.textAlign = 'right'; c.textBaseline = 'alphabetic';
   c.fillText(`+${Math.floor(S.scrap)}`, x + w - 12, y + 22);
+  const streak = S.pickStreak?.n ?? 0;
+  if (streak >= 3) { const pk = clamp(1 - (S.pickStreak.t / 0.5), 0, 1); c.save(); c.globalAlpha = 0.5 + 0.5 * pk; label(c, `STREAK ×${streak}`, x + w - 12, y + 50, C.scrap, 10 + Math.min(4, streak / 6), 'right'); c.restore(); }
   st.gains = st.gains.filter((g) => st.t - g.t < 0.9);
   for (const g of st.gains) { const a = st.t - g.t; c.globalAlpha = 1 - a / 0.9; c.fillText(`+${g.v}`, x + w - 12, y + 70 + a * 18); c.globalAlpha = 1; }
 }
@@ -198,72 +197,134 @@ function nameplate(c: CanvasRenderingContext2D, B: NonNullable<typeof S.boss> | 
   if (B && !B.ghost.ai) label(c, `FELL ON FLOOR ${B.ghost.floor + 1}`, x + w - 16, y + 62, C.faint, 9, 'right');
 }
 
+/* ---------------- batteries: one lamp bank per firing arc ---------------- */
+const ARC_ORDER: Arc[] = ['bow', 'broadside', 'ventral', 'omni'];
 function batteries(c: CanvasRenderingContext2D) {
   const P = S.P!;
   const mounts = P.dv.mounts.filter((m) => m.part && WEAPONS[m.part.id]);
   if (!mounts.length) return;
-  const cell = 46, w = 22 + mounts.length * cell, h = 64, x = 14, y = H - 14 - h;
+  const groups = ARC_ORDER.map((a) => ({ arc: a, ms: mounts.filter((m) => m.arc === a) })).filter((g) => g.ms.length);
+  const cell = 40, gap = 14;
+  const w = 20 + groups.reduce((a, g) => a + Math.max(64, g.ms.length * cell) + gap, -gap), h = 74, x = 14, y = H - 14 - h;
   plate(c, x, y, w, h);
-  label(c, 'BATTERIES', x + 12, y + 16, C.faint, 10);
-  mounts.forEach((m, i) => {
-    const p = m.part!, def = WEAPONS[p.id], col = LAYER_COL[def.layer] ?? C.fg;
-    const cd = P.cds[p.uid] ?? 0, full = wCd(p) * (p.id === 'rail' ? P.dv.mods.railCdMul : 1) / Math.max(0.2, P.dv.fireMult);
-    const prev = st.lastCd.get(p.uid) ?? cd;
-    if (cd > prev + 0.02) st.fired.set(p.uid, st.t);
-    st.lastCd.set(p.uid, cd);
-    const ready = clamp(1 - cd / Math.max(0.05, full), 0, 1);
-    const flash = clamp(1 - (st.t - (st.fired.get(p.uid) ?? -9)) / 0.12, 0, 1);
-    const cx = x + 22 + i * cell + cell / 2 - 12, cy = y + 34;
-    lampDot(c, cx, cy, 6, flash > 0 ? '#ffffff' : col, flash > 0 ? 1 : 0.2 + 0.7 * ready * ready);
-    label(c, CODE[p.id] ?? p.id.slice(0, 3).toUpperCase(), cx, cy + 22, ready > 0.98 ? C.dim : C.faint, 10, 'center');
-  });
+  const odBoost = S.overdrive.active;
+  let gx = x + 12;
+  for (const g of groups) {
+    const info = ARC_INFO[g.arc], gw = Math.max(64, g.ms.length * cell);
+    c.fillStyle = info.col; c.fillRect(gx, y + 9, 3, 10);
+    label(c, info.short, gx + 7, y + 18, info.col, 10);
+    g.ms.forEach((m, i) => {
+      const p = m.part!;
+      const cd = P.cds[p.uid] ?? 0, full = wCd(p) * (p.id === 'rail' ? P.dv.mods.railCdMul : 1) / Math.max(0.2, P.dv.fireMult);
+      const prev = st.lastCd.get(p.uid) ?? cd;
+      const fired = (Number.isFinite(cd) && Number.isFinite(prev) && cd > prev + 0.02) || (!Number.isFinite(prev) && Number.isFinite(cd));
+      if (fired) st.fired.set(p.uid, st.t);
+      st.lastCd.set(p.uid, cd);
+      const armed = !Number.isFinite(cd);
+      const ready = armed ? 1 : clamp(1 - cd / Math.max(0.05, full), 0, 1);
+      const flash = clamp(1 - (st.t - (st.fired.get(p.uid) ?? -9)) / 0.14, 0, 1);
+      const col = LAYER_COL[WEAPONS[p.id].layer] ?? C.fg;
+      const cx = gx + i * cell + cell / 2 - 4, cy = y + 40;
+      const k = flash > 0 ? 1 : armed ? (Math.floor(st.t * 10) % 2 ? 0.95 : 0.55) : 0.2 + 0.7 * ready * ready;
+      lampDot(c, cx, cy, odBoost ? 7 : 6, flash > 0 ? '#ffffff' : col, k);
+      label(c, CODE[p.id] ?? p.id.slice(0, 3).toUpperCase(), cx, cy + 25, ready > 0.98 ? C.dim : C.faint, 10, 'center');
+      if (m.side) label(c, m.side < 0 ? 'P' : 'S', cx + 10, cy - 8, C.faint, 8, 'center');
+    });
+    gx += gw + gap;
+  }
 }
 
-/* ---------------- gameplay hooks: carnage + overdrive ---------------- */
-interface Meter { k: number; mult?: number; ready?: boolean; active?: boolean; key?: string }
-function readMeter(v: unknown): Meter | null {
-  if (v == null) return null;
-  if (typeof v === 'number') return { k: clamp(v > 1 ? v / 100 : v, 0, 1) };
-  if (typeof v === 'object') {
-    const o = v as Record<string, unknown>;
-    const raw = Number(o.value ?? o.charge ?? o.level ?? o.t ?? 0), max = Number(o.max ?? (raw > 1 ? 100 : 1)) || 1;
-    return { k: clamp(raw / max, 0, 1), mult: typeof o.mult === 'number' ? o.mult : typeof o.multiplier === 'number' ? o.multiplier : undefined, ready: !!o.ready, active: !!o.active, key: typeof o.key === 'string' ? o.key : undefined };
+/* ---------------- overdrive: the unmissable gauge ---------------- */
+function overdrive(c: CanvasRenderingContext2D) {
+  const o = S.overdrive; if (!o) return;
+  const def = OVERDRIVES[o.kind as OverdriveKind] ?? OVERDRIVES.lance;
+  const ready = o.charge >= 1 && !o.active;
+  const k = o.active ? clamp(o.t / Math.max(0.01, o.dur), 0, 1) : clamp(o.charge, 0, 1);
+  const w = 236, h = 112, x = W - 14 - w, y = H - 14 - h;
+  const pulse = 0.5 + 0.5 * Math.sin(st.t * 9);
+  if (ready) { c.save(); c.globalAlpha = 0.35 + 0.35 * pulse; c.fillStyle = def.col; c.fillRect(x - 5, y - 5, w + 10, h + 10); c.restore(); }
+  plate(c, x, y, w, h, { stripe: ready || o.active ? def.col : undefined });
+  label(c, 'OVERDRIVE', x + 14, y + 24, ready ? def.col : C.faint, 10);
+  c.font = `13px ${F_STEN}`; c.fillStyle = o.active || ready ? def.col : C.dim; c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  c.fillText(def.name.toUpperCase(), x + 14, y + 42);
+  // needle gauge (right side)
+  const gx = x + w - 62, gy = y + 80, r = 46;
+  c.fillStyle = '#e9e2cf'; c.beginPath(); c.arc(gx, gy, r, Math.PI, 0); c.closePath(); c.fill();
+  c.strokeStyle = def.col; c.lineWidth = 5; c.beginPath(); c.arc(gx, gy, r - 7, -Math.PI * 0.12, 0); c.stroke();
+  c.strokeStyle = '#2b2a26'; c.lineWidth = 1.4;
+  for (let i = 0; i <= 10; i++) { const a = Math.PI + (i / 10) * Math.PI, r0 = i % 5 ? r - 6 : r - 11; c.beginPath(); c.moveTo(gx + Math.cos(a) * r0, gy + Math.sin(a) * r0); c.lineTo(gx + Math.cos(a) * (r - 2), gy + Math.sin(a) * (r - 2)); c.stroke(); }
+  st.odNeedle += (k - st.odNeedle) * (o.active ? 0.3 : 0.12);
+  const jitter = ready ? Math.sin(st.t * 47) * 0.012 : o.active ? Math.sin(st.t * 63) * 0.02 : 0;
+  const a = Math.PI + clamp(st.odNeedle + jitter, 0, 1.03) * Math.PI;
+  c.strokeStyle = '#b6271b'; c.lineWidth = 2.2; c.beginPath(); c.moveTo(gx, gy); c.lineTo(gx + Math.cos(a) * (r - 6), gy + Math.sin(a) * (r - 6)); c.stroke();
+  c.fillStyle = '#20262c'; c.beginPath(); c.arc(gx, gy, 4.5, 0, Math.PI * 2); c.fill();
+  // readout and prompt (left side)
+  if (o.active) {
+    c.font = `26px ${F_MONO}`; c.fillStyle = def.col; c.fillText(`${o.t.toFixed(1)}s`, x + 14, y + 80);
+    label(c, 'BATTERIES 1.5×', x + 14, y + 98, C.dim, 9);
+  } else if (ready) {
+    // the SPACE keycap, punched in and flashing
+    const kx = x + 14, ky = y + 56, kw = 84, kh = 32, on = Math.floor(st.t * 4) % 2 === 0;
+    c.fillStyle = '#05080b'; c.fillRect(kx, ky + 4, kw, kh);
+    c.fillStyle = on ? def.col : shade(def.col, 0.55); c.fillRect(kx, ky + (on ? 2 : 0), kw, kh);
+    c.strokeStyle = '#000'; c.strokeRect(kx + 0.5, ky + 0.5 + (on ? 2 : 0), kw - 1, kh - 1);
+    c.font = `15px ${F_MONO}`; c.fillStyle = '#120c04'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('SPACE', kx + kw / 2, ky + kh / 2 + (on ? 2 : 0)); c.textBaseline = 'alphabetic';
+    label(c, 'READY', x + 14, y + 104, def.col, 10);
+  } else {
+    c.font = `26px ${F_MONO}`; c.fillStyle = C.fg; c.textAlign = 'left'; c.fillText(`${Math.floor(k * 100)}%`, x + 14, y + 80);
+    label(c, 'CHARGE ON KILLS', x + 14, y + 98, C.faint, 9);
   }
-  return null;
+  // a prompt near the ship too, so it is never missed in the thick of it
+  if (ready && S.P && S.mode === 'play') {
+    const px = S.P.x, py = Math.min(H - 40, S.P.y + P_PROMPT_DY);
+    c.save(); c.globalAlpha = 0.55 + 0.45 * pulse;
+    c.font = `14px ${F_STEN}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    const t = `SPACE · ${def.name.toUpperCase()}`, tw = c.measureText(t).width + 26;
+    c.fillStyle = 'rgba(8,10,13,.75)'; c.fillRect(px - tw / 2, py - 13, tw, 26);
+    c.strokeStyle = def.col; c.lineWidth = 2; c.strokeRect(px - tw / 2, py - 13, tw, 26);
+    c.fillStyle = def.col; c.fillText(t, px, py + 1);
+    c.restore();
+  }
 }
-function hooks(c: CanvasRenderingContext2D) {
-  const s = S as unknown as Record<string, unknown>;
-  const carnage = readMeter(s.carnage), od = readMeter(s.overdrive);
-  let x = W - 14;
-  if (od) {
-    const w = 168, h = 112, y = H - 14 - h; x -= w;
-    plate(c, x, y, w, h, { stripe: od.ready || od.active ? C.hazard : undefined });
-    label(c, 'OVERDRIVE', x + 14, y + 22, od.ready ? C.hazard : C.faint, 10);
-    const gx = x + w / 2, gy = y + 84, r = 46;
-    c.fillStyle = '#e9e2cf'; c.beginPath(); c.arc(gx, gy, r, Math.PI, 0); c.closePath(); c.fill();
-    c.strokeStyle = '#c43a2c'; c.lineWidth = 4; c.beginPath(); c.arc(gx, gy, r - 7, -Math.PI * 0.18, 0); c.stroke();
-    c.strokeStyle = '#2b2a26'; c.lineWidth = 1.4;
-    for (let i = 0; i <= 10; i++) { const a = Math.PI + (i / 10) * Math.PI, r0 = i % 5 ? r - 6 : r - 10; c.beginPath(); c.moveTo(gx + Math.cos(a) * r0, gy + Math.sin(a) * r0); c.lineTo(gx + Math.cos(a) * (r - 2), gy + Math.sin(a) * (r - 2)); c.stroke(); }
-    const jitter = od.active ? Math.sin(st.t * 60) * 0.02 : 0, a = Math.PI + clamp(od.k + jitter, 0, 1.02) * Math.PI;
-    c.strokeStyle = '#b6271b'; c.lineWidth = 2; c.beginPath(); c.moveTo(gx, gy); c.lineTo(gx + Math.cos(a) * (r - 6), gy + Math.sin(a) * (r - 6)); c.stroke();
-    c.fillStyle = '#20262c'; c.beginPath(); c.arc(gx, gy, 4, 0, Math.PI * 2); c.fill();
-    lampDot(c, x + w - 18, y + 18, 5, C.hazard, od.ready ? (Math.floor(st.t * 4) % 2 ? 1 : 0.4) : 0);
-    if (od.ready) label(c, `${od.key ?? 'SPACE'}`, x + w / 2, y + 104, C.hazard, 11, 'center');
-    x -= 10;
+const P_PROMPT_DY = 120;
+
+/* ---------------- carnage: VU ladder and multiplier, punches on tier-up ---------------- */
+function carnage(c: CanvasRenderingContext2D) {
+  const cg = S.carnage; if (!cg) return;
+  const w = 120, h = 112, x = W - 14 - 236 - 10 - w, y = H - 14 - h;
+  const punch = clamp(1 - (st.t - st.tierAt) / 0.45, 0, 1);
+  plate(c, x, y, w, h, { stripe: punch > 0 ? C.hazard : undefined });
+  label(c, 'CARNAGE', x + 12, y + 24, cg.mult > 1.05 ? C.hazard : C.faint, 10);
+  const n = 12, sx = x + 14, sy = y + 32, fill = clamp((cg.mult - 1) / 2, 0, 1);
+  for (let i = 0; i < n; i++) {
+    const on = fill * n > i + 0.01, col = i >= 9 ? C.hostile : i >= 5 ? C.hazard : C.good;
+    c.fillStyle = on ? col : '#18212a'; c.fillRect(sx, sy + (n - 1 - i) * 6, 20, 4);
   }
-  if (carnage) {
-    const w = 96, h = 112, y = H - 14 - h; x -= w;
-    plate(c, x, y, w, h);
-    label(c, 'CARNAGE', x + 12, y + 22, C.faint, 10);
-    const n = 10, sx = x + 14, sy = y + 32;
-    for (let i = 0; i < n; i++) {
-      const on = carnage.k * n > i, col = i >= 8 ? C.hostile : i >= 5 ? C.hazard : C.good;
-      c.fillStyle = on ? col : '#18212a'; c.fillRect(sx, sy + (n - 1 - i) * 7, 18, 5);
-    }
-    c.font = `22px ${F_MONO}`; c.fillStyle = carnage.k > 0.8 ? C.hostile : C.crt; c.textAlign = 'center'; c.textBaseline = 'alphabetic';
-    c.fillText(carnage.mult != null ? `×${carnage.mult.toFixed(1)}` : `${Math.round(carnage.k * 100)}`, x + 62, y + 76);
-    label(c, 'SCRAP', x + 62, y + 94, C.faint, 9, 'center');
+  const s = 1 + punch * 0.5;
+  c.save(); c.translate(x + 76, y + 70); c.scale(s, s);
+  c.font = `26px ${F_MONO}`; c.fillStyle = punch > 0 ? '#fff1d6' : cg.mult >= 2.5 ? C.hostile : cg.mult > 1.05 ? C.crt : C.dim;
+  c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(`×${cg.mult.toFixed(1)}`, 0, 0);
+  c.restore();
+  label(c, 'SCRAP', x + 76, y + 98, C.faint, 9, 'center');
+}
+
+/** Fold sim events into HUD state: carnage tier-ups. */
+function consumeEvents() {
+  const ev = (S as unknown as { events?: { id: number; type: string; n?: number }[] }).events;
+  if (!ev) return;
+  for (const e of ev) {
+    if (e.id <= st.lastEvent) continue;
+    st.lastEvent = e.id;
+    if (e.type === 'carnageTier') st.tierAt = st.t;
   }
+}
+
+/* ---------------- slow-mo letterbox ---------------- */
+function letterbox(c: CanvasRenderingContext2D) {
+  const k = (S as unknown as { slowFx?: number }).slowFx ?? 0;
+  if (k <= 0.01) return;
+  const bh = 64 * k;
+  c.fillStyle = '#000'; c.fillRect(0, 0, W, bh); c.fillRect(0, H - bh, W, bh);
 }
 
 /* ---------------- off-screen threats ---------------- */
@@ -348,18 +409,21 @@ export function drawHud(c: CanvasRenderingContext2D, scale: number, dpr: number,
   if (V.flashA > 0) { c.globalCompositeOperation = 'lighter'; c.globalAlpha = V.flashA; c.fillStyle = '#fff1d6'; c.fillRect(0, 0, W, H); c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1; }
   const P = S.P; if (!P) return;
   // new encounter: snap the lagging bars instead of draining from the last fight
-  if (st.enc !== S.enc) { st.enc = S.enc; st.hpLag = P.hp / P.dv.maxHp; st.shLag = 1; st.bossLag = 1; st.eliteLag = 1; st.lastScrap = -1; st.gains = []; st.scrapShown = totalScrap; st.fired.clear(); st.lastCd.clear(); }
+  if (st.enc !== S.enc) { st.enc = S.enc; st.hpLag = P.hp / P.dv.maxHp; st.shLag = 1; st.bossLag = 1; st.eliteLag = 1; st.lastScrap = -1; st.gains = []; st.scrapShown = totalScrap; st.fired.clear(); st.lastCd.clear(); st.odNeedle = S.overdrive?.charge ?? 0; st.lastEvent = (S as unknown as { eventId?: number }).eventId ?? 0; }
   const ease = (lag: number, v: number) => (v >= lag ? v : Math.max(v, lag - dt * 0.35 * (lag - v < 0.02 ? 4 : 1)));
   st.hpLag = ease(st.hpLag, clamp(P.hp / P.dv.maxHp, 0, 1));
   st.shLag = ease(st.shLag, P.dv.shieldMax ? clamp(P.shield / P.dv.shieldMax, 0, 1) : 0);
   if (S.boss) st.bossLag = ease(st.bossLag, clamp(S.boss.hp / S.boss.maxHp, 0, 1));
   if (S.elite) st.eliteLag = ease(st.eliteLag, clamp(S.elite.hp / S.elite.maxHp, 0, 1));
+  consumeEvents();
+  letterbox(c);
   threats(c);
   hullCluster(c);
   encounterPlate(c);
   scrapCluster(c, totalScrap);
   pauseKey(c);
   batteries(c);
-  hooks(c);
+  carnage(c);
+  overdrive(c);
   banner(c);
 }

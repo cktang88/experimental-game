@@ -4,13 +4,41 @@ import { RELICS, relicMods, type Rarity } from '../data/relics';
 import { generateMap, type SectorMap } from './map';
 import { mulberry32, pick, rint, clamp, has, type Rng } from '../util/rng';
 import type { Ghost } from './ghosts';
+import { HULLS, isHullId, type HullId } from '../data/hulls';
+import { heatFx, MAX_HEAT } from '../data/heat';
+import { noPerks, type RankPerks } from '../data/goals';
+
+/** Per-run counters, shown in the wreck report and folded into the profile when the run ends. */
+export interface RunStats {
+  kills: number; elites: number; bosses: number; scrapEarned: number; nodes: number; score: number;
+  structures: number; broadsides: number; maxVolley: number; overdrives: number; lanceStructures: number;
+  peakCarnage: number; flawless: number; maxScrapHeld: number; fights: number; dmgTaken: number; dmgDealt: number;
+}
+export const emptyRunStats = (): RunStats => ({
+  kills: 0, elites: 0, bosses: 0, scrapEarned: 0, nodes: 0, score: 0, structures: 0, broadsides: 0, maxVolley: 0, overdrives: 0,
+  lanceStructures: 0, peakCarnage: 1, flawless: 0, maxScrapHeld: 0, fights: 0, dmgTaken: 0, dmgDealt: 0,
+});
+/** What this run has met, for the codex. */
+export interface RunSeen { enemies: Record<string, number>; ghosts: { id: string; name: string; sector: number; ai: boolean; outcome: 'killed' | 'lost' }[] }
+/** Sectors in a campaign. Clearing the last one is a victory; the run may then continue in endless mode. */
+export const CAMPAIGN_SECTORS = 3;
 
 export interface RunState {
-  v: 2; seed: number; pilot: string; callsign: string; sector: number; map: SectorMap; at: string | null; visited: string[];
+  v: 3; seed: number; pilot: string; callsign: string; sector: number; map: SectorMap; at: string | null; visited: string[];
   build: Build; inv: Part[]; scrap: number; hp: number; relics: string[]; jumpUsed: boolean;
-  stats: { kills: number; elites: number; bosses: number; scrapEarned: number; nodes: number; score: number };
+  stats: RunStats;
   rngCalls: number; bossGhost: Ghost | null; bossGhostCount: number;
+  /** Hull class flown, heat level, daily date key (null for a normal run). */
+  hull: HullId; heat: number; daily: string | null;
+  /** Campaign won (sector 3 cleared); endless: the pilot chose to push on past the victory. */
+  won: boolean; endless: boolean;
+  /** 'victory' while the victory screen is waiting for a choice (survives reloads). */
+  phase: 'map' | 'victory';
+  /** Overdrive charge each fight starts with (rank perk). */
+  odStart: number;
+  seen: RunSeen;
 }
+export interface RunOptions { hull?: HullId; heat?: number; daily?: string | null; perks?: RankPerks }
 
 export function getPilotId(): string {
   try {
@@ -20,14 +48,20 @@ export function getPilotId(): string {
   } catch { return 'anon'; }
 }
 
-export function newRun(callsign: string, seed = (Math.random() * 2 ** 31) | 0): RunState {
-  const build = starterBuild();
+export function newRun(callsign: string, seed = (Math.random() * 2 ** 31) | 0, opts: RunOptions = {}): RunState {
+  const hull = HULLS[opts.hull ?? 'vanguard'], perks = opts.perks ?? noPerks(), heat = Math.max(0, Math.min(MAX_HEAT, opts.heat ?? 0));
   const run: RunState = {
-    v: 2, seed, pilot: getPilotId(), callsign, sector: 1, map: generateMap(1, seed), at: null, visited: [],
-    build, inv: [mkPart('plate', 1)], scrap: 60, hp: 0, relics: [], jumpUsed: false,
-    stats: { kills: 0, elites: 0, bosses: 0, scrapEarned: 0, nodes: 0, score: 0 }, rngCalls: 0, bossGhost: null, bossGhostCount: 0,
+    v: 3, seed, pilot: getPilotId(), callsign, sector: 1, map: generateMap(1, seed), at: null, visited: [],
+    build: hull.build(), inv: hull.hold(), scrap: hull.scrap + perks.startScrap, hp: 0, relics: [], jumpUsed: false,
+    stats: emptyRunStats(), rngCalls: 0, bossGhost: null, bossGhostCount: 0,
+    hull: hull.id, heat, daily: opts.daily ?? null, won: false, endless: false, phase: 'map', odStart: perks.odStart,
+    seen: { enemies: {}, ghosts: [] },
   };
-  run.hp = maxHp(run);
+  const rng = runRng(run);
+  for (let i = 0; i < perks.extraPart; i++) run.inv.push(mkPart(pick([...Object.keys(WEAPONS), ...Object.keys(UTILS)], rng), 1));
+  if (perks.startRelic) { const [r] = relicChoices(run, 1, ['common']); if (r) run.relics.push(r); }
+  if (perks.hullPct) run.relics.push('veteran_crews');
+  run.hp = maxHp(run) * heatFx(heat).startHp;
   return run;
 }
 export const mods = (run: RunState) => relicMods(run.relics);
@@ -42,7 +76,8 @@ export function runRng(run: RunState): Rng {
   const r = mulberry32(run.seed + 7919 * ++run.rngCalls);
   return r;
 }
-export function heal(run: RunState, frac: number) { run.hp = Math.min(maxHp(run), run.hp + maxHp(run) * frac); }
+/** Repairs scale with heat (No Quarter). */
+export function heal(run: RunState, frac: number) { run.hp = Math.min(maxHp(run), run.hp + maxHp(run) * frac * heatFx(run.heat).heal); }
 export function hurt(run: RunState, amount: number) { run.hp = Math.max(1, run.hp - amount); }
 /** Keep missing hull constant when the max changes (adding sections fills them). */
 export function rebuildHp(run: RunState, oldMax: number) { const missing = oldMax - run.hp; run.hp = clamp(maxHp(run) - missing, 1, maxHp(run)); }
@@ -82,18 +117,35 @@ export function deathGhost(run: RunState): Ghost {
 }
 
 /* ---- save / load ---- */
-const SAVE_KEY = 'gd.run.v2';
+export const SAVE_KEY = 'gd.run.v3';
+const LEGACY_KEYS = ['gd.run.v2'];
 export function saveRun(run: RunState) {
   try { localStorage.setItem(SAVE_KEY, JSON.stringify({ ...run, build: buildToGhost(run.build), inv: run.inv.map((p) => [p.id, p.tier]) })); } catch { /* storage full or blocked */ }
 }
-export function clearSave() { try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ } }
+export function clearSave() { try { localStorage.removeItem(SAVE_KEY); for (const k of LEGACY_KEYS) localStorage.removeItem(k); } catch { /* ignore */ } }
+/**
+ * Run-save migrations, one step per version: v2 (before hull classes and the meta loop) -> v3 adds the hull
+ * (Vanguard), heat 0, no daily, the new stats counters and the codex tally.
+ */
+export function migrateRunSave(o: any): any | null {
+  if (!o || typeof o !== 'object' || !o.map?.nodes) return null;
+  if (o.v === 2) o = { ...o, v: 3, hull: 'vanguard', heat: 0, daily: null, won: false, endless: false, phase: 'map', odStart: 0, seen: { enemies: {}, ghosts: [] }, stats: { ...emptyRunStats(), ...(o.stats || {}) } };
+  if (o.v !== 3) return null;
+  return o;
+}
 export function loadRun(): RunState | null {
   try {
-    const raw = localStorage.getItem(SAVE_KEY); if (!raw) return null;
-    const o = JSON.parse(raw);
-    if (o?.v !== 2 || !o.map?.nodes) return null;
+    let raw = localStorage.getItem(SAVE_KEY);
+    for (const k of LEGACY_KEYS) if (!raw) raw = localStorage.getItem(k);
+    if (!raw) return null;
+    const o = migrateRunSave(JSON.parse(raw)); if (!o) return null;
     const run: RunState = { ...o, build: ghostToBuild(o.build), inv: (Array.isArray(o.inv) ? o.inv : []).filter((v: unknown) => Array.isArray(v) && isPart(v[0])).map((v: [string, number]) => mkPart(v[0], clamp(Number(v[1]) || 1, 1, 5))) };
     run.relics = (run.relics || []).filter((r) => has(RELICS, r));
+    run.hull = isHullId(run.hull) ? run.hull : 'vanguard';
+    run.heat = clamp(Math.floor(Number(run.heat) || 0), 0, MAX_HEAT);
+    run.stats = { ...emptyRunStats(), ...(run.stats || {}) };
+    run.seen = { enemies: { ...(run.seen?.enemies || {}) }, ghosts: Array.isArray(run.seen?.ghosts) ? run.seen.ghosts : [] };
+    run.phase = run.phase === 'victory' ? 'victory' : 'map';
     run.hp = clamp(Number(run.hp) || 1, 1, maxHp(run));
     return run;
   } catch { return null; }

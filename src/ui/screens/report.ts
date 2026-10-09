@@ -1,17 +1,19 @@
-// Wreck report: the run's end as a casualty form, with totals that feel enormous and the ghost's fate
-// arriving on the registry teletype.
+// Wreck report: the run's end as a casualty form. Totals and the Admiralty pay slip come from the fleet loop
+// (src/game/metaScreens.ts wreckReport); the ghost's fate arrives on the registry teletype.
 import type { RunState } from '../../game/run';
+import type { Settlement } from '../../game/meta';
+import { wreckReport as reportBody } from '../../game/metaScreens';
+import { HULLS } from '../../data/hulls';
 import { el } from '../h';
 import { icon } from '../icons';
-import { flap, stamp, teletype } from '../kit';
+import { stamp, teletype } from '../kit';
 import { pin } from '../cards';
 
-export interface WreckOpts { run: RunState; floor: number; crew: number; onAgain: () => void }
+export interface WreckOpts { run: RunState; floor: number; settlement: Settlement | null; onAgain: () => void }
 
 export function wreckReport(o: WreckOpts) {
-  const r = o.run, s = r.stats;
+  const r = o.run;
   const status = el('p', { class: 'reg-line', 'data-testid': 'ghost-status' }, 'Recording your wreck…');
-  const row = (k: string, v: number, ic: string, w = 4) => el('div', 'wr-cell', el('span', 'wr-ico', icon(ic)), el('span', 'wr-k', k), flap(v, w));
   const node = el('div', { class: 'page wreck-page', 'data-screen': 'wreck' },
     el('div', 'screen center',
       el('section', 'report-sheet',
@@ -21,15 +23,9 @@ export function wreckReport(o: WreckOpts) {
         el('div', 'wr-fields',
           el('span', null, el('small', null, 'Commander'), r.callsign),
           el('span', null, el('small', null, 'Lost in'), `Sector ${r.sector}, floor ${o.floor + 1}`),
-          el('span', null, el('small', null, 'Hull sections'), String(r.build.sections.length)),
-          el('span', null, el('small', null, 'Crew aboard'), o.crew.toLocaleString('en-US'))),
-        el('div', 'wr-grid',
-          row('Score', Math.floor(s.score), 'medal', 6),
-          row('Kills', s.kills, 'skull-crack'),
-          row('Elites', s.elites, 'crowned-skull', 2),
-          row('Ghosts laid', s.bosses, 'spectre', 2),
-          row('Scrap earned', Math.floor(s.scrapEarned), 'metal-bar'),
-          row('Nodes charted', s.nodes, 'compass', 2)),
+          el('span', null, el('small', null, 'Hull'), `${HULLS[r.hull]?.name ?? 'Vanguard'}${r.heat ? ` · heat ${r.heat}` : ''}`),
+          el('span', null, el('small', null, 'Sections lost'), String(r.build.sections.length))),
+        reportBody(r, o.settlement),
         r.relics.length ? el('div', 'wr-pins', el('small', null, 'Insignia recovered from the wreck'), el('span', 'pinrow', ...r.relics.map((id) => pin(id, 34)))) : null,
         el('div', 'wr-reg crt', el('div', 'crt-k', 'Registry transmission'), status),
         el('div', 'foot', el('button', { class: 'switch primary', id: 'btn-again', onclick: o.onAgain },
