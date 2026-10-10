@@ -616,11 +616,11 @@ function collapse(b: Bldg) {
   const sz = Math.max(b.w, b.h);
   const big = b.hgt > 60 * CITY_K;
   // Dust plume rolling out from the base, debris and a lingering smoke column.
-  for (let i = 0; i < (big ? 9 : 5); i++) {
+  for (let i = 0; i < (big ? 7 : sz > 9 ? 3 : 2); i++) {
     const a = Math.random() * 6.28, s = rnd(4, 16) * (big ? 1.5 : 1);
     addFx({ type: 'smoke', x: b.x + Math.cos(a) * sz * 0.3, y: b.y + Math.sin(a) * sz * 0.3, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rnd(1.6, 3), max: 3, size: Math.max(4, sz * rnd(0.5, 0.8)), grow: 1.6, a: 0.5, drag: 0.8, ground: true });
   }
-  for (let i = 0; i < (big ? 10 : 5); i++) {
+  for (let i = 0; i < (big ? 8 : sz > 9 ? 3 : 2); i++) {
     const a = Math.random() * 6.28, s = rnd(15, 60);
     addFx({ type: 'debris', x: b.x, y: b.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rnd(0.5, 1.1), max: 1.1, size: rnd(0.8, 1.8), rot: rnd(0, 6.28), vr: rnd(-10, 10), drag: 1.8, col: '#4a4540', ground: true });
   }
