@@ -185,7 +185,7 @@ export function genCity(ch: Chunk, c0: number, c1: number) {
       fb(ch, 'mast', cx + sx * (w / 2 - 1), cy + sy * (h / 2 - 1), 1.6, 1.6, 18, Style.Metal, { lit: 0 });
       L(ch, cx + sx * (w / 2 - 1), cy + sy * (h / 2 - 1), 18.4, 1.6, LC.Flood, 1, 2);
     }
-    L(ch, cx, cy, 0.5, w * 0.8, LC.Flood, 0.035, 4);
+    L(ch, cx, cy, 0.5, w * 0.8, LC.Flood, 0.02, 4);
     claim(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2);
   } else {
     // TV tower: a needle with a lit pod and a beacon, over a small plaza.
@@ -258,7 +258,7 @@ export function genPort(ch: Chunk, c0: number, c1: number) {
       const y = rnd(c0, c1), x = coastX(y) + rnd(90, 600);
       if (ok(B, x, y, 3)) fb(ch, 'house', x, y, rnd(4, 7), rnd(3, 5), rnd(1.2, 3), Style.House, { lit: rnd(0.2, 0.6), rot: rnd(-0.4, 0.4) });
     }
-    district(ch, B, coastX(mid) + 640, X1, c0, c1);
+    district(ch, B, coastX(mid) + 300, X1, c0, c1);
   }
   // On the water: channel buoys, anchored ships, traffic with wakes.
   for (let y = c0 + rnd(0, 40); y < c1; y += 80) {
@@ -646,7 +646,7 @@ export function genForest(ch: Chunk, c0: number, c1: number) {
   }
   if (Math.random() < 0.3) { const y = rnd(c0, c1); if (inBiome(B, forestRoad(y), y)) mover(ch, { k: 'car', x: forestRoad(y), cy: y, v: (Math.random() < 0.5 ? -1 : 1) * rnd(6, 10), path: 4, a: 0, len: 0, n: Math.random() < 0.3 ? 3 : 1 }); }
   // Logging spurs off the main road to clear-cut landings.
-  if (Math.random() < 0.55) {
+  for (let sp2 = 0; sp2 < 2; sp2++) if (Math.random() < 0.5) {
     const y = rnd(c0 + 10, c1 - 10), x0 = forestRoad(y), dir = Math.random() < 0.5 ? -1 : 1;
     let x = x0, yy = y;
     const len = rnd(140, 320);

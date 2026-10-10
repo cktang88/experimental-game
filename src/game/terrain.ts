@@ -70,7 +70,7 @@ export function coastX(cy: number) {
 }
 export const QUAY_X = 400;
 /** 1 along a container terminal's straight quay, 0 on a natural shore. */
-export function quayK(cy: number) { return smooth(-0.15, 0.25, Math.sin(cy * 0.0012 + BIO.ph[4])); }
+export function quayK(cy: number) { return smooth(-0.55, -0.15, Math.sin(cy * 0.0012 + BIO.ph[4])); }
 /** Forest river and mountain valley floor. */
 export const riverX = (cy: number) => pathX(560, 260, 5, cy);
 export const valleyX = (cy: number) => pathX(820, 300, 6, cy);

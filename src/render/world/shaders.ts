@@ -402,7 +402,7 @@ const TER_FRAG = /* glsl */ `
       } else if (age > 0.0) {
         float on = smoothstep(0.0, 1.2, age) * (1.0 - smoothstep(dur * 0.55, dur, age));
         float flick = 0.6 + 0.4 * sin(uTime * 9.0 + n3 * 30.0) * sin(uTime * 6.3 + n2 * 17.0);
-        float tongues = smoothstep(0.35, 0.8, vnoise(fq * 0.35 + vec2(0.0, -uTime * 1.4)));
+        float tongues = smoothstep(0.3, 0.85, vnoise(fq * 0.16 + vec2(uTime * 0.3, -uTime * 0.7)) * 0.6 + n3 * 0.45);
         vec3 fc = f.y > 1.5 && f.y < 2.5 ? vec3(1.0, 0.42, 0.08) : vec3(1.0, 0.36, 0.06);
         float charK = smoothstep(0.0, 3.0, age);
         alb *= 1.0 - 0.8 * charK;
