@@ -3,7 +3,7 @@
 // pickup streak, battery lamps grouped by firing arc, the Overdrive gauge (with a SPACE prompt that cannot be missed),
 // the carnage ladder, a boss/elite nameplate, a stamped banner, a slow-mo letterbox and off-screen threat chevrons
 // (ported from Dead Air's threat-indicators.js). Reads S.overdrive, S.carnage, S.events, S.pickStreak, S.slowFx.
-import { S, W, H } from '../game/combat';
+import { S, W, H, BOSS_PHASES } from '../game/combat';
 import { V } from '../game/vfx';
 import { clamp } from '../util/rng';
 import { EN } from '../data/enemies';
@@ -191,8 +191,8 @@ function nameplate(c: CanvasRenderingContext2D, B: NonNullable<typeof S.boss> | 
   const g = c.createLinearGradient(0, by, 0, by + bh); g.addColorStop(0, '#ffb3a8'); g.addColorStop(0.35, C.hostile); g.addColorStop(1, '#8c241c');
   c.fillStyle = g; c.fillRect(bx, by, bw * k, bh);
   c.fillStyle = 'rgba(0,0,0,.55)'; for (let i = 1; i < 20; i++) c.fillRect(bx + (bw * i) / 20, by, 1, bh);
-  // phase notch at half hull
-  c.fillStyle = C.fg; c.fillRect(bx + bw * 0.5 - 1, by - 5, 2, bh + 10);
+  // phase notches: a ghost escalates at each (BOSS_PHASES); elites enrage at half hull
+  c.fillStyle = C.fg; for (const f of B ? BOSS_PHASES : [0.5]) c.fillRect(bx + bw * f - 1, by - 5, 2, bh + 10);
   if (B && B.shieldMax) { c.fillStyle = C.plasma; c.fillRect(bx, by - 1, (bw * B.shield) / B.shieldMax, 3); }
   if (B && !B.ghost.ai) label(c, `FELL ON FLOOR ${B.ghost.floor + 1}`, x + w - 16, y + 62, C.faint, 9, 'right');
 }

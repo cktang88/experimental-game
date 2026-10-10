@@ -295,6 +295,20 @@ export class FxLayer implements Layer {
       const R = (24 + 90 * (1 - tl)) * sk;
       H.add(v.x, v.y, v.z, 0, R, R, HOSTILE, 1.6, FxShape.Ring, tl * 0.8, 0.06);
     }
+    // Ghost broadside wind-up: every gun on the flank glows, and its lane (or the arc it will rake) is marked out.
+    const B = S.boss;
+    if (B && B.alive && B.glints) for (const g of B.glints) {
+      const tl = g.tele, fl = 0.75 + 0.25 * Math.sin(t * 34 + g.y);
+      e.toFlight(g.x, g.y, AIR + 6, v);
+      const s = (18 + 50 * tl * tl) * fl;
+      H.add(v.x, v.y, v.z, t * 2.5, s, s, HOSTILE_HOT, 2 + 3 * tl, FxShape.Star, 0.35 + 0.65 * tl, 0, 0.6);
+      H.add(v.x, v.y, v.z, 0, s * 0.4, s * 0.4, WHITE, 3, FxShape.Hot, tl);
+      const lanes = g.spread > 0 ? [g.ang - g.spread, g.ang, g.ang + g.spread] : [g.ang];
+      for (let i = 0; i < lanes.length; i++) {
+        const an = lanes[i], main = lanes.length === 1 || i === 1, L = g.len * (main ? 1 : 0.75);
+        this.streak(H, g.x, g.y, g.x + Math.cos(an) * L, g.y + Math.sin(an) * L, AIR + 1, main ? 2 + 4 * tl : 1.5 + 2 * tl, HOSTILE, 1.3, (main ? 0.2 + 0.45 * tl : 0.12 + 0.25 * tl) * fl, FxShape.Beam);
+      }
+    }
   }
 
   /* ---------------- particles ---------------- */
@@ -473,20 +487,22 @@ export class FxLayer implements Layer {
       return;
     }
     if (bl.kind === 'beam') {
+      // Vertical beams run down the screen from (x, y); ghost broadside rails carry their own end point.
+      const x2 = bl.x2 ?? bl.x, y2 = bl.y2 ?? FIELD_H + 80;
       if (bl.t < bl.warn) {
         const q = bl.t / bl.warn, fl = 0.4 + 0.6 * Math.abs(Math.sin(bl.t * 26));
-        this.streak(H, bl.x, bl.y, bl.x, FIELD_H + 80, AIR, 3 + 5 * q, HOSTILE, 1.4, (0.25 + 0.5 * q) * fl, FxShape.Beam);
+        this.streak(H, bl.x, bl.y, x2, y2, AIR, 3 + 5 * q, HOSTILE, 1.4, (0.25 + 0.5 * q) * fl, FxShape.Beam);
         e.toFlight(bl.x, bl.y, AIR + 4, v);
         H.add(v.x, v.y, v.z, 0, 24 + 80 * q, 24 + 80 * q, HOSTILE, 1.5 + 2 * q, FxShape.Hot, 0.9);
         H.add(v.x, v.y, v.z, t * 4, 140 * (1 - q) + 30, 140 * (1 - q) + 30, HOSTILE, 1.4, FxShape.Ring, q, 0.05);
       } else {
-        if (!this.seen.has(bl)) { this.seen.add(bl); railFx(bl.x, bl.y, bl.x, FIELD_H + 60, '#ff6a5a', true); }
+        if (!this.seen.has(bl)) { this.seen.add(bl); railFx(bl.x, bl.y, x2, y2, '#ff6a5a', true); }
         const q = clamp(1 - (bl.t - bl.warn) / bl.dur, 0, 1);
-        this.streak(H, bl.x, bl.y, bl.x, FIELD_H + 80, AIR, bl.w * 4.2, HOSTILE, 1.3, 0.55 * q, FxShape.Beam);
-        this.streak(H, bl.x, bl.y, bl.x, FIELD_H + 80, AIR + 1, bl.w * 1.4, HOSTILE_HOT, 2.6, q, FxShape.Beam);
-        this.streak(H, bl.x, bl.y, bl.x, FIELD_H + 80, AIR + 2, bl.w * 0.5, WHITE, 3, q, FxShape.Beam);
-        e.toFlight(bl.x, (bl.y + FIELD_H) / 2, AIR, v);
-        D.add(v.x, v.y, v.z, Math.PI / 2, FIELD_H - bl.y + 80, bl.w * 6, DistShape.Line, q, 0, 0.2);
+        this.streak(H, bl.x, bl.y, x2, y2, AIR, bl.w * 4.2, HOSTILE, 1.3, 0.55 * q, FxShape.Beam);
+        this.streak(H, bl.x, bl.y, x2, y2, AIR + 1, bl.w * 1.4, HOSTILE_HOT, 2.6, q, FxShape.Beam);
+        this.streak(H, bl.x, bl.y, x2, y2, AIR + 2, bl.w * 0.5, WHITE, 3, q, FxShape.Beam);
+        e.toFlight((bl.x + x2) / 2, (bl.y + y2) / 2, AIR, v);
+        D.add(v.x, v.y, v.z, Math.atan2(y2 - bl.y, x2 - bl.x), Math.hypot(x2 - bl.x, y2 - bl.y), bl.w * 6, DistShape.Line, q, 0, 0.2);
       }
       return;
     }

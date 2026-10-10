@@ -78,7 +78,12 @@ function steer(bot: Bot) {
   // threats: telegraphed strikes and charging beams that would land on the hull
   for (const b of S.eb) {
     if (b.kind === 'strike' && Math.abs(b.x - p.x) < p.dv.width / 2 + b.rad && Math.abs(b.y - p.y) < p.dv.len / 2 + b.rad) gx = p.x + (p.x > b.x ? 1 : -1) * (p.dv.width + b.rad);
-    if (b.kind === 'beam' && !b.fired && Math.abs(b.x - p.x) < p.dv.width / 2 + b.w) gx = p.x + (p.x > b.x ? 1 : -1) * (p.dv.width + b.w * 2);
+    if (b.kind === 'beam' && !b.fired && b.x2 === undefined && Math.abs(b.x - p.x) < p.dv.width / 2 + b.w) gx = p.x + (p.x > b.x ? 1 : -1) * (p.dv.width + b.w * 2);
+    // ghost broadside rails run across the field: step off the line, up or down
+    if (b.kind === 'beam' && !b.fired && b.x2 !== undefined && (p.x - b.x) * (b.x2 - b.x) > 0) {
+      const k = (p.x - b.x) / (b.x2 - b.x), ly = b.y + (b.y2 - b.y) * k;
+      if (Math.abs(ly - p.y) < p.dv.len / 2 + b.w) gy = p.y + (p.y > ly ? 1 : -1) * (p.dv.len / 2 + b.w * 2);
+    }
   }
   p.tx = gx; p.ty = gy;
   if (S.overdrive.charge >= 1 && (foes.length >= 6 || S.boss?.alive || S.elite)) keys.od = true;

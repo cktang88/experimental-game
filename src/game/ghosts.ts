@@ -74,13 +74,16 @@ export async function submitGhost(g: Ghost): Promise<'shared' | 'local'> {
 const AI_NAMES = ['IRON WARDEN', 'HOLLOW REGENT', 'CINDER MATRON', 'GREY TITHE', 'LAST BASTION', 'PALE ARBITER', 'RUST SOVEREIGN', 'NULL CHOIR'];
 export function aiGhost(sector: number): Ghost {
   const n = Math.min(MAX_SECTIONS, 3 + sector);
-  const order: SectionType[] = ['gundeck', 'armor', 'gundeck', 'engine', 'battery', 'spine', 'armor', 'battery'];
+  // Every defense core is a dreadnought: a Broadside Battery right behind the bridge, a second one from sector 3.
+  const order: SectionType[] = ['battery', 'gundeck', 'armor', 'engine', 'battery', 'spine', 'gundeck', 'armor'];
   const maxT = Math.min(5, 1 + Math.floor(sector / 2));
   const wids = Object.keys(WEAPONS).filter((k) => k !== 'pd'), uids = Object.keys(UTILS);
+  /** Flank mounts of a battery get guns that can fire a broadside; its centre may be anything. */
+  const sideGuns = ['pulse', 'pulse', 'spread', 'flak', 'missile', 'rail'];
   const sections: GhostSections = [{ type: 'bridge', slots: [['pulse', maxT]] }];
   for (let i = 1; i < n; i++) {
-    const type = order[(i - 1 + sector) % order.length];
-    sections.push({ type, slots: SECTIONS[type].slots.map((k) => [k === 'W' ? pick(wids) : pick(uids), rint(Math.max(1, maxT - 1), maxT)] as [string, number]) });
+    const type = order[(i - 1) % order.length];
+    sections.push({ type, slots: SECTIONS[type].slots.map((k, j) => [k === 'W' ? pick(type === 'battery' && j !== 1 ? sideGuns : wids) : pick(uids), rint(Math.max(1, maxT - 1), maxT)] as [string, number]) });
   }
   return { id: `ai-${sector}`, pilot: 'ai', name: AI_NAMES[(sector - 1) % AI_NAMES.length], sector, floor: 10, sections, relics: [], score: 0, ai: true };
 }

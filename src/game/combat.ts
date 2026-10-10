@@ -2,13 +2,13 @@
 // Gameplay state that renderers, HUD and audio read is documented in docs/TECH.md under "Gameplay state".
 import { clamp, rnd, pick, has, angDiff } from '../util/rng';
 import {
-  WEAPONS, derive, wCd, wDmg, type Build, type Derived, type Part, type Mods, type Mount, ghostToBuild,
+  WEAPONS, derive, wCd, wDmg, type Build, type Derived, type Part, type Mods, type Mount, type Arc, ghostToBuild,
 } from '../data/parts';
 import { EN, type EnemyType, type Encounter } from '../data/enemies';
 import { hasFlag } from '../data/relics';
 import { OVERDRIVES, type OverdriveKind } from '../data/hulls';
 import { neutralHeat, type HeatFx } from '../data/heat';
-import { V, boomFx, spark, muzzle, addFx, updateFx, resetFx } from './vfx';
+import { V, boomFx, spark, muzzle, addFx, updateFx, resetFx, broadsideFx } from './vfx';
 import { sfx } from './audio';
 import type { Ghost } from './ghosts';
 import {
@@ -38,8 +38,12 @@ export interface Player {
 export interface Boss extends Ent {
   ghost: Ghost; build: Build; dv: Derived; s: number; homeY: number; halfW: number; layer: 'both'; isBoss: true; alive: boolean;
   hp: number; maxHp: number; shield: number; shieldMax: number; shieldHitT: number; regen: number; tractor: number; droneEvery: number; droneT: number;
-  speedMul: number; fireMul: number; cdMul: number; t: number; phase: number; flash: number; entered: boolean;
-  weps: { part: Part; ox: number; oy: number; cd: number }[];
+  speedMul: number; fireMul: number; cdMul: number; t: number; flash: number; entered: boolean;
+  /** 1..3 by hull (BOSS_PHASES): lanes, rake, full broadside. */ phase: number;
+  /** Lateral velocity (it moves like a ship, not a turret). */ vx: number;
+  weps: BossGun[];
+  /** Broadside state, index 0 port (screen left), 1 starboard. */ volley: [BossVolley, BossVolley];
+  /** Broadside wind-ups this frame, for the FX layer (hostile glint and lane markers). */ glints: BossGlint[];
 }
 export type { Decor } from './worldgen';
 import type { Decor } from './worldgen';
@@ -246,7 +250,36 @@ function spawnElite(type: EnemyType) {
 }
 
 /* ---------------- boss ---------------- */
+// A ghost flies the wreck it was recorded as, and every weapon keeps the arc its mount gives it, mirrored (its bow
+// points down the screen, at you):
+//  - bow guns cover a cone below it (BOSS_BROADSIDE.bowCone either side of straight down);
+//  - Broadside Battery guns fire telegraphed ripple volleys off its flanks, stern to bow, like ours;
+//  - bombs and mortars work ventrally (mines and telegraphed strikes), coils and point defense all round.
+// So it has zones, as the player does: under its bow you eat the bow guns, beside it the broadsides.
+// Three phases by hull (BOSS_PHASES): 1 "lanes" (each gun fires along one locked, telegraphed line), 2 "rake"
+// (the stream sweeps across your line with a hole in it, and the ghost comes about to keep you on its beam),
+// 3 "full broadside" (both flanks every volley, more rounds, a weave plus a slow second layer).
+export const BOSS_PHASES = [0.66, 0.33] as const;
+export const BOSS_BROADSIDE = {
+  /** Seconds between volleys on a side, before cdMul, the ghost's fire rate and the phase. */ period: 3.6,
+  /** Wind-up per phase: the guns glow and their lanes show before the ripple. */ tele: [0.85, 0.7, 0.6],
+  /** Seconds between rounds in the ripple (heavier than ours). */ stagger: 0.075,
+  /** Bow cone half-angle either side of straight down. */ bowCone: 0.6,
+  /** Phase 2 rake: total sweep (radians) and the hole left in it. */ rake: 0.9, hole: 0.34,
+  /** Phase 3 weave offset either side of the aimed line. */ weave: 0.15,
+} as const;
 const BOSS_CD: Record<string, number> = { pulse: 1.5, spread: 2.5, flak: 2.9, missile: 3.6, bomb: 3.1, artillery: 3.4, rail: 4.6, tesla: 2.6, pd: 0.45 };
+/** A ghost gun: mount offset in design units (scaled by Boss.s), arc and broadside side as on the player's ship. */
+export interface BossGun { part: Part; ox: number; oy: number; cd: number; arc: Arc; side: -1 | 0 | 1; /** Half width of its section: broadside muzzles sit on the hull side. */ edge: number }
+/** Broadside state for one flank: cooldown, wind-up (-1 idle) and the ripple's scheduled rounds. */
+export interface BossVolley { cd: number; wind: number; queue: { at: number; fire: () => void }[] }
+/** A wind-up glint for the FX layer: field point, 0..1 progress, lane angle, and the sweep half-angle (0: one line). */
+export interface BossGlint { x: number; y: number; tele: number; ang: number; spread: number; len: number }
+export const bossPhaseOf = (hpFrac: number) => (hpFrac > BOSS_PHASES[0] ? 1 : hpFrac > BOSS_PHASES[1] ? 2 : 3);
+/** Rounds each gun packs into a ghost broadside (ours is broadsideRounds; ghosts fire fewer, heavier-telegraphed rounds). */
+export const bossRounds = (p: Part, phase: number) =>
+  p.id === 'missile' || p.id === 'rail' ? 1 : p.id === 'flak' ? 2 : clamp(Math.round(broadsideRounds(p) * 0.4), 2, 5) + (phase - 1);
+
 function spawnBoss(g: Ghost) {
   const sec = S.sector, build = ghostToBuild(g.sections), dv = derive(build);
   const s = Math.min(1.6, 520 / dv.len, 700 / dv.width);
@@ -258,8 +291,10 @@ function spawnBoss(g: Ghost) {
     layer: 'both', isBoss: true, alive: true, dead: false, hp: maxHp, maxHp, shieldMax: shield, shield, shieldHitT: 9,
     regen: u.repair * 0.0025 * maxHp, tractor: u.magnet * 14, droneEvery: u.drones ? Math.max(5, 10 - u.drones) : 0, droneT: 6,
     speedMul: 1 + 0.12 * u.thruster, fireMul: (1 + 0.1 * u.reactor) * S.heat.bossFire, cdMul: clamp(1.15 - 0.06 * sec, 0.6, 1.1),
-    t: 0, phase: 1, flash: 0, entered: false,
-    weps: dv.mounts.filter((m) => m.part && has(WEAPONS, m.part.id)).map((m, i) => ({ part: m.part!, ox: m.ox, oy: m.oy, cd: 1.2 + i * 0.45 })),
+    t: 0, phase: 1, flash: 0, entered: false, vx: 0,
+    weps: dv.mounts.filter((m) => m.part && has(WEAPONS, m.part.id)).map((m, i) => ({ part: m.part!, ox: m.ox, oy: m.oy, cd: 1.2 + i * 0.45, arc: m.arc, side: m.side, edge: dv.rects[m.si].w / 2 })),
+    // first volleys come a beat after the bow guns open up, port and starboard out of step
+    volley: [{ cd: 2.2, wind: -1, queue: [] }, { cd: 3.4, wind: -1, queue: [] }], glints: [],
   };
 }
 const bossMount = (w: { ox: number; oy: number }) => ({ x: S.boss!.x + w.ox * S.boss!.s, y: S.boss!.y - w.oy * S.boss!.s });
@@ -269,17 +304,19 @@ function eShot(x: number, y: number, a: number, spd: number, o: Record<string, a
   S.eb.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: 4.5, dmg: edmg(), col: '#ff5a4e', kind: 'bullet', life: 8, t: 0, dead: false, src: shooter, ...o });
 }
 function ring(x: number, y: number, n: number, spd: number, o: Record<string, any> = {}) { const off = rnd(0, Math.PI * 2); for (let i = 0; i < n; i++) eShot(x, y, off + (i * Math.PI * 2) / n, spd, o); }
-function bossFire(w: Boss['weps'][number]) {
+/** Aim at the player, held inside the ghost's bow cone (its bow points down the screen). */
+const bowAim = (x: number, y: number) => Math.PI / 2 + clamp(angDiff(aimAng(x, y), Math.PI / 2), -BOSS_BROADSIDE.bowCone, BOSS_BROADSIDE.bowCone);
+function bossFire(w: BossGun) {
   const P = S.P!, { x, y } = bossMount(w), t = w.part.tier, dmg = edmg() * 0.65 * (1 + 0.15 * (t - 1)), spd = bspd(), sec = S.sector;
   if (w.part.id !== 'pd' && w.part.id !== 'artillery') muzzle(x, y + 8, '#ff7a5c', w.part.id === 'rail' ? 22 : 14);
   switch (w.part.id) {
-    case 'pulse': { const a = aimAng(x, y); for (let k = 0; k < 3 + (t >= 3 ? 1 : 0); k++) eShot(x, y, a + rnd(-0.04, 0.04), spd * (1 - 0.12 * k), { dmg }); break; }
+    case 'pulse': { const a = bowAim(x, y); for (let k = 0; k < 3 + (t >= 3 ? 1 : 0); k++) eShot(x, y, a + rnd(-0.04, 0.04), spd * (1 - 0.12 * k), { dmg }); break; }
     case 'spread': { const n = 7 + Math.min(4, t); for (let i = 0; i < n; i++) eShot(x, y, Math.PI / 2 + (i - (n - 1) / 2) * 0.17, spd * 0.85, { dmg, col: '#ff7a6b' }); break; }
-    case 'flak': { const a = aimAng(x, y), d = Math.hypot(P.x - x, P.y - y); eShot(x, y, a, 150, { kind: 'orb', r: 8, life: clamp(d / 150, 0.6, 2.4), col: '#ffd27a', dmg }); break; }
+    case 'flak': { const a = bowAim(x, y), d = Math.hypot(P.x - x, P.y - y); eShot(x, y, a, 150, { kind: 'orb', r: 8, life: clamp(d / 150, 0.6, 2.4), col: '#ffd27a', dmg }); break; }
     case 'missile': for (const s of [-1, 1]) eShot(x + s * 6, y, Math.PI / 2 + s * 0.7, 140, { kind: 'missile', turn: 1.6 + 0.2 * t, spd: 150 + 10 * t, hp: 5 * sec, life: 5, r: 5, col: '#ff9f5a', dmg: dmg * 1.5 }); break;
     case 'bomb': for (let i = -1; i <= 1; i++) eShot(x + i * 18, y, Math.PI / 2, 90 + rnd(0, 40), { kind: 'mine', r: 7, life: rnd(1.3, 2.1), col: '#f2a541', dmg }); break;
     case 'artillery': { const n = t >= 3 ? 4 : 2; for (let k = 0; k < n; k++) strike(P.x + (k ? rnd(-110, 110) : 0), P.y + (k ? rnd(-90, 90) : 0), dmg * 2.2, 46); break; }
-    case 'rail': S.eb.push({ kind: 'beam', x, y, warn: 1.0, dur: 0.3, w: 18 + 3 * t, dmg: dmg * 4, t: 0, life: 9, vx: 0, vy: 0, r: 0, col: '#c9a6ff', dead: false }); break;
+    case 'rail': S.eb.push({ kind: 'beam', x, y, warn: 1.0, dur: 0.3, w: 18 + 3 * t, dmg: dmg * 4, t: 0, life: 9, vx: 0, vy: 0, r: 0, col: '#c9a6ff', dead: false, src: 'boss' }); break;
     case 'tesla': ring(x, y, 12 + t, spd * 0.6, { r: 3.5, col: '#9be7ff', dmg: dmg * 0.8 }); sfx('zap', { x, y }); break;
     case 'pd': {
       let best: Ent | null = null, bd = 160 * 160;
@@ -291,31 +328,151 @@ function bossFire(w: Boss['weps'][number]) {
 }
 /** A telegraphed ground-to-air strike: a hostile ring grows for `delay` seconds, then detonates. */
 const strike = (x: number, y: number, dmg: number, rad = 42, delay = 1.2) => S.eb.push({ kind: 'strike', x: clamp(x, 20, W - 20), y: clamp(y, 20, H - 20), delay, rad, dmg, t: 0, life: 9, vx: 0, vy: 0, r: 0, dead: false });
+
+/* ---- ghost broadsides ---- */
+/** Where a broadside gun's muzzle is: on the hull side of its section, at its row (the ghost is mirrored, stern up). */
+const bossGunPos = (b: Boss, w: BossGun, side: number) => ({ x: b.x + side * (w.edge * b.s + 4), y: b.y - w.oy * b.s });
+/** Depression below the beam (radians, + toward the bottom of the screen) from (x, y) to the player, for a flank. */
+function depressionTo(x: number, y: number, side: number) {
+  const P = S.P!, base = side > 0 ? 0 : Math.PI;
+  return angDiff(Math.atan2(P.y - y, P.x - x), base) * side;
+}
+const sideAngle = (side: number, dep: number) => (side > 0 ? 0 : Math.PI) + side * dep;
+/** Broadside guns may train from a little above the beam to well below it; they cannot fire across their own hull. */
+const lockDep = (d: number) => clamp(d, -0.25, 0.95);
+/** Does a flank have the player in its arc? Phase 3 fires both flanks regardless. */
+function bossFlankEngaged(b: Boss, side: number) {
+  if (b.phase >= 3) return true;
+  const P = S.P!, dx = (P.x - b.x) * side;
+  if (dx < b.halfW * 0.5) return false;
+  const d = depressionTo(b.x + side * b.halfW, b.y, side);
+  return d > -0.6 && d < (b.phase === 2 ? 1.25 : 1.05);
+}
+function bossGuns(b: Boss, side: number) {
+  const pSide = S.P!.x >= b.x ? 1 : -1;
+  return b.weps.filter((w) => w.arc === 'broadside' && (w.side === side || (w.side === 0 && side === pSide)));
+}
+function updateBossBroadsides(b: Boss, dt: number, fm: number) {
+  const BS = BOSS_BROADSIDE;
+  b.glints.length = 0;
+  for (let si = 0; si < 2; si++) {
+    const side = si ? 1 : -1, v = b.volley[si];
+    if (v.queue.length) {
+      for (const q of v.queue) if (q.at <= S.time) { q.at = -1; q.fire(); }
+      v.queue = v.queue.filter((q) => q.at !== -1);
+    }
+    const guns = bossGuns(b, side);
+    if (!guns.length) { v.wind = -1; continue; }
+    if (v.wind >= 0) {
+      const tele = BS.tele[b.phase - 1];
+      v.wind += dt;
+      const k = clamp(v.wind / tele, 0, 1);
+      for (const w of guns) {
+        const p = bossGunPos(b, w, side), d = lockDep(depressionTo(p.x, p.y, side));
+        b.glints.push({ x: p.x, y: p.y, tele: k, ang: sideAngle(side, d), spread: b.phase === 2 ? BS.rake / 2 : b.phase === 3 ? BS.weave : 0, len: 220 + 260 * k });
+      }
+      if (v.wind >= tele) { v.wind = -1; v.cd = BS.period; releaseBossVolley(b, side, guns); }
+      continue;
+    }
+    if (v.queue.length) continue; // the ripple is still running down the hull
+    v.cd -= dt * fm;
+    if (v.cd > 0) continue;
+    if (!bossFlankEngaged(b, side)) { v.cd = 0.2; continue; }
+    v.wind = 0;
+  }
+}
+/** Schedule one flank's ripple: every gun's rounds, stern (top) to bow, `stagger` apart, aimed lines locked now. */
+function releaseBossVolley(b: Boss, side: number, guns: BossGun[]) {
+  const BS = BOSS_BROADSIDE, ph = b.phase;
+  const order = [...guns].sort((a, c) => c.oy - a.oy);
+  const rounds = order.map((w) => bossRounds(w.part, ph)), maxR = Math.max(...rounds);
+  const locks = order.map((w) => { const p = bossGunPos(b, w, side); return lockDep(depressionTo(p.x, p.y, side)); });
+  const hole = rnd(0.2, 0.8);
+  let k = 0;
+  for (let r = 0; r < maxR; r++) order.forEach((w, gi) => {
+    if (r >= rounds[gi]) return;
+    const R = rounds[gi], lock = locks[gi];
+    b.volley[side > 0 ? 1 : 0].queue.push({ at: S.time + (k++) * BS.stagger, fire: () => bossRound(b, w, side, r, R, lock, hole) });
+  });
+  const ys = order.map((w) => b.y - w.oy * b.s), y0 = Math.min(...ys), y1 = Math.max(...ys);
+  broadsideFx(b.x + side * b.halfW, (y0 + y1) / 2, side, order.length, Math.max(90, y1 - y0 + 90));
+  sfx('broadside', { x: side < 0 ? 100 : W - 100, y: (y0 + y1) / 2, size: Math.min(14, k), vol: 0.8 });
+}
+/** One round of a ghost broadside from gun w. The pattern depends on the phase; the weapon decides the projectile. */
+function bossRound(b: Boss, w: BossGun, side: number, r: number, R: number, lock: number, hole: number) {
+  if (!b.alive || S.mode !== 'play') return;
+  const BS = BOSS_BROADSIDE, P = S.P!, p = w.part, t = p.tier, ph = b.phase;
+  const { x, y } = bossGunPos(b, w, side);
+  const dmg = edmg() * 0.9 * (1 + 0.15 * (t - 1)), spd = bspd() * 0.9;
+  let d = lock;
+  if (ph === 2 && R > 1) {
+    // rake: sweep from above the line to below it, skipping a hole the player can sit in
+    const u = r / (R - 1);
+    if (Math.abs(u - hole) < BS.hole / BS.rake / 2) return;
+    d = lock + (u - 0.5) * BS.rake;
+  } else if (ph === 3) d = lock + (r % 2 ? BS.weave : -BS.weave);
+  const a = sideAngle(side, d);
+  shooter = 'boss';
+  switch (p.id) {
+    case 'spread': for (const o of [-0.08, 0, 0.08]) eShot(x, y, a + o, spd * 0.85, { dmg, col: '#ff7a6b' }); break;
+    case 'flak': { const dist = clamp(Math.hypot(P.x - x, P.y - y), 140, 700); eShot(x, y, a, 160, { kind: 'orb', r: 8, life: dist / 160, col: '#ffd27a', dmg, burst: 6 }); break; }
+    case 'missile': for (const o of [-1, 1]) eShot(x, y + o * 8, a + o * 0.25, 150, { kind: 'missile', turn: 1.5 + 0.2 * t, spd: 150 + 10 * t, hp: 5 * S.sector, life: 5, r: 5, col: '#ff9f5a', dmg: dmg * 2 }); break;
+    case 'rail': S.eb.push({ kind: 'beam', x, y, x2: x + Math.cos(a) * 1900, y2: y + Math.sin(a) * 1900, warn: 0.55, dur: 0.3, w: 16 + 3 * t, dmg: dmg * 6, t: 0, life: 9, vx: 0, vy: 0, r: 0, col: '#c9a6ff', dead: false, src: 'boss' }); break;
+    default: for (const o of [-7, 7]) eShot(x, y + o, a, spd, { dmg }); // twin barrels: pulse and anything else
+  }
+  // phase 3 adds a slow second layer under the fast one
+  if (ph === 3 && r % 2 === 0 && p.id !== 'rail' && p.id !== 'missile') eShot(x, y, sideAngle(side, lock + 0.42), spd * 0.55, { dmg, r: 5.5, col: '#ff7a6b' });
+  muzzle(x + side * 8, y, '#ff7a5c', 15);
+  addFx({ type: 'smoke', x: x + side * 14, y, vx: side * rnd(60, 120), vy: rnd(-10, 10), life: 0.9, max: 0.9, size: 7, grow: 2.2, a: 0.45, drag: 2 });
+  fireLog.set(p.uid, S.t);
+}
+/** A heavy ship: phase 1 sweeps the field; later it comes about to keep the player on its beam. */
+function moveBoss(b: Boss, dt: number) {
+  const P = S.P!, lo = b.halfW + 12, hi = W - b.halfW - 12;
+  let tx: number;
+  if (b.phase === 1) tx = W / 2 + Math.sin(b.t * 0.35 * b.speedMul) * Math.max(0, W / 2 - b.halfW - 12);
+  else { const side = P.x >= b.x ? 1 : -1; tx = P.x - side * (b.halfW + 260); }
+  tx = lo < hi ? clamp(tx, lo, hi) : W / 2;
+  const maxV = (b.phase === 1 ? 240 : 85) * b.speedMul;
+  b.vx += (clamp((tx - b.x) * 1.2, -maxV, maxV) - b.vx) * Math.min(1, dt * 1.6);
+  b.x += b.vx * dt;
+  const ty = b.homeY + (b.phase === 3 ? 40 : 0) + Math.sin(b.t * 0.7) * 24;
+  b.y += (ty - b.y) * Math.min(1, dt * 2);
+}
 function updateBoss(dt: number) {
   const b = S.boss; if (!b || !b.alive) return;
   const P = S.P!;
   b.t += dt; b.flash -= dt;
   if (!b.entered) { b.y += 70 * dt; if (b.y >= b.homeY) { b.y = b.homeY; b.entered = true; b.t = 0; } }
-  else { const span = Math.max(0, W / 2 - b.halfW - 12); b.x = W / 2 + Math.sin(b.t * 0.35 * b.speedMul) * span; b.y = b.homeY + Math.sin(b.t * 0.7) * 24; }
+  else moveBoss(b, dt);
   for (const r of b.dv.rects) if (r.type === 'engine') for (const sx of [-0.22, 0.22]) if (Math.random() < 0.6) addFx({ type: 'fire', x: b.x + r.w * sx * b.s, y: b.y - (r.y + r.h) * b.s - 10, vx: rnd(-10, 10), vy: rnd(-160, -110), life: 0.25, max: 0.25, size: rnd(5, 8), grow: 0.4 });
-  if (b.phase === 2 && Math.random() < dt * 22) {
+  if (b.phase >= 2 && Math.random() < dt * (b.phase === 3 ? 34 : 22)) {
     const r = pick(b.dv.rects), x = b.x + rnd(r.x, r.x + r.w) * b.s, y = b.y - (r.y + rnd(0, r.h)) * b.s;
     addFx({ type: 'fire', x, y, vx: rnd(-10, 10), vy: rnd(-30, 10), life: 0.45, max: 0.45, size: rnd(6, 10), grow: 0.8 });
     addFx({ type: 'smoke', x, y, vx: rnd(-10, 10), vy: rnd(40, 80), life: 1.4, max: 1.4, size: 7, grow: 2.4, a: 0.55 });
   }
   if (b.shieldMax) { b.shieldHitT += dt; if (b.shieldHitT > 3) b.shield = Math.min(b.shieldMax, b.shield + b.shieldMax * 0.12 * dt); }
   if (b.regen) b.hp = Math.min(b.maxHp, b.hp + b.regen * dt);
-  if (b.phase === 1 && b.hp < b.maxHp * 0.5) {
-    b.phase = 2; setBanner('HULL BREACHED', 'Its guns are running hot', 1.8, '#ff5a4e'); sfx('alarm');
-    requestStop(S.stop, 0.08, true); V.shake = Math.max(V.shake, 10);
+  const ph = bossPhaseOf(b.hp / b.maxHp);
+  if (ph > b.phase) {
+    b.phase = ph;
+    if (ph === 2) setBanner('HULL BREACHED', 'Its batteries are raking', 1.8, '#ff5a4e');
+    else setBanner('FULL BROADSIDE', 'Every gun it has, both flanks', 1.8, '#ff5a4e');
+    sfx('alarm'); requestStop(S.stop, 0.08, true); V.shake = Math.max(V.shake, ph === 3 ? 14 : 10);
+    boomFx(b.x + rnd(-b.halfW, b.halfW) * 0.6, b.y + rnd(-30, 30), 22, '#ffb347');
   }
   if (b.tractor && S.mode === 'play') P.vx += Math.sign(b.x - P.x) * b.tractor * 4 * dt;
   if (b.droneEvery && b.entered) { b.droneT -= dt; if (b.droneT <= 0) { b.droneT = b.droneEvery; for (let i = 0; i < 2; i++) spawnEnemy('drone', b.x, b.y - i * 24, { baseX: clamp(b.x, 80, W - 80), phase: i * 0.6 }); } }
   S.escortT -= dt; if (S.escortT <= 0) { S.escortT = rnd(8, 11); spawnGroup(pick(['heli', 'turret', 'tank', 'jet', 'infantry'] as EnemyType[])); }
   if (!b.entered) return;
-  const fm = b.fireMul * (b.phase === 2 ? 1.35 : 1);
+  const fm = b.fireMul * (b.phase === 1 ? 1 : b.phase === 2 ? 1.25 : 1.45);
   shooter = 'boss';
-  for (const w of b.weps) { w.cd -= dt * fm; if (w.cd > 0) continue; w.cd = BOSS_CD[w.part.id] * b.cdMul * rnd(0.85, 1.15); bossFire(w); fireLog.set(w.part.uid, S.t); }
+  for (const w of b.weps) {
+    if (w.arc === 'broadside') continue; // fired by the flank volleys
+    w.cd -= dt * fm; if (w.cd > 0) continue;
+    w.cd = BOSS_CD[w.part.id] * b.cdMul * rnd(0.85, 1.15); bossFire(w); fireLog.set(w.part.uid, S.t);
+  }
+  updateBossBroadsides(b, dt, fm);
 }
 function damageBoss(d: number) {
   const b = S.boss; if (!b || !b.alive || S.mode !== 'play') return;
@@ -923,7 +1080,7 @@ function updateEB(dt: number) {
       if (b.t >= b.warn && !b.fired) {
         b.fired = true; sfx('rail', { x: b.x, layer: 'air' }); V.shake = Math.min(10, V.shake + 5); V.flashA = Math.max(V.flashA, 0.12);
         for (let i = 0; i < 22; i++) addFx({ type: 'spark', x: b.x + rnd(-b.w / 2, b.w / 2), y: rnd(b.y, H), vx: rnd(-220, 220), vy: rnd(-80, 80), life: rnd(0.2, 0.5), max: 0.5, size: 1.8, drag: 3, tint: '#e3d0ff' });
-        if (canHit && Math.abs(P.x - b.x) < b.w / 2 + P.dv.width * 0.35 && P.y > b.y) damagePlayer(b.dmg, 'beam');
+        if (canHit && beamHits(b)) damagePlayer(b.dmg, 'beam');
       }
       if (b.t > b.warn + b.dur) b.dead = true; continue;
     }
@@ -939,12 +1096,20 @@ function updateEB(dt: number) {
       if (Math.random() < 0.7) addFx({ type: 'smoke', x: b.x, y: b.y, vx: rnd(-8, 8), vy: rnd(-8, 8), life: 0.6, max: 0.6, size: 3.2, grow: 2.2, a: 0.4 });
     }
     if (b.kind === 'mine') b.vy *= 1 - dt * 0.8;
-    if ((b.kind === 'mine' || b.kind === 'orb') && b.life <= 0) { ring(b.x, b.y, 8, bspd() * 0.75, { r: 4, col: b.col, dmg: b.dmg }); boomFx(b.x, b.y, 10, b.col); b.dead = true; continue; }
+    if ((b.kind === 'mine' || b.kind === 'orb') && b.life <= 0) { ring(b.x, b.y, b.burst ?? 8, bspd() * 0.75, { r: 4, col: b.col, dmg: b.dmg, src: b.src }); boomFx(b.x, b.y, 10, b.col); b.dead = true; continue; }
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (b.life <= 0 || b.y > H + 20 || b.y < -60 || b.x < -20 || b.x > W + 20) { b.dead = true; continue; }
     if (canHit && shipHit(b.x, b.y, b.r, P.x, P.y, P.dv, 1, 1)) { damagePlayer(b.dmg, b.src || 'unknown'); b.dead = true; spark(b.x, b.y, '#ff9f8a', 5); }
   }
   S.eb = S.eb.filter((b) => !b.dead);
+}
+/** Does a fired hostile beam cross the player's hull? Vertical beams (no x2) run straight down the screen from (x, y). */
+function beamHits(b: Ent) {
+  const P = S.P!;
+  if (b.x2 === undefined) return Math.abs(P.x - b.x) < b.w / 2 + P.dv.width * 0.35 && P.y > b.y;
+  const L = Math.hypot(b.x2 - b.x, b.y2 - b.y) || 1, n = Math.ceil(L / 16);
+  for (let i = 0; i <= n; i++) { const k = i / n; if (shipHit(b.x + (b.x2 - b.x) * k, b.y + (b.y2 - b.y) * k, b.w * 0.35, P.x, P.y, P.dv, 1, 1)) return true; }
+  return false;
 }
 function clearEnemyFire(all: boolean) {
   for (const b of S.eb) if (all || b.kind !== 'strike') { if (b.kind !== 'beam' && b.kind !== 'strike') spark(b.x, b.y, '#ffb36b', 1); }
