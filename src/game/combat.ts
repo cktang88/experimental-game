@@ -3,12 +3,13 @@
 import { clamp, rnd, pick, has, angDiff } from '../util/rng';
 import {
   WEAPONS, derive, wCd, wDmg, type Build, type Derived, type Part, type Mods, type Mount, type Arc, ghostToBuild,
+  weaponFamily, weaponGroups, HEAVY_FAMILIES, MAGNET, type WeaponGroup, type HeavyFamily,
 } from '../data/parts';
 import { EN, type EnemyType, type Encounter } from '../data/enemies';
 import { hasFlag } from '../data/relics';
 import { OVERDRIVES, type OverdriveKind } from '../data/hulls';
 import { neutralHeat, type HeatFx } from '../data/heat';
-import { V, boomFx, spark, muzzle, addFx, updateFx, resetFx, broadsideFx } from './vfx';
+import { V, boomFx, spark, muzzle, addFx, updateFx, resetFx, broadsideFx, addTrauma, kick } from './vfx';
 import { sfx } from './audio';
 import type { Ghost } from './ghosts';
 import {
@@ -47,7 +48,7 @@ export interface Boss extends Ent {
 }
 export type { Decor } from './worldgen';
 import type { Decor } from './worldgen';
-export interface Pickup { x: number; y: number; vx: number; vy: number; val: number; t: number; kind: 'scrap' | 'repair'; dead?: boolean }
+export interface Pickup { x: number; y: number; vx: number; vy: number; val: number; t: number; kind: 'scrap' | 'repair'; dead?: boolean; /** Seconds the magnet has held it. */ pull?: number }
 export interface Beam { x1: number; y1: number; x2: number; y2: number; col: string; life: number; max: number; w: number; zig?: boolean }
 
 /** Sim -> renderer/audio/UI event. Consumers remember the last `id` they handled. */
@@ -112,6 +113,8 @@ export const S = {
   timers: [] as { at: number; fn: () => void }[],
   /** Broadside volley state per side (index 0 = port, 1 = starboard). */
   volley: [{ wait: 0, queue: [] as { at: number; m: Mount }[] }, { wait: 0, queue: [] as { at: number; m: Mount }[] }],
+  /** Heavy weapon groups of the player's ship (keys 1..), see weaponGroups() in data/parts.ts. */
+  groups: [] as WeaponGroup[],
 };
 export const keys: Record<string, boolean> = {};
 /** Weapon uid -> S.t of its last shot (player and boss). Read by the ship renderer for recoil. */
@@ -146,6 +149,8 @@ export function startCombat(c: CombatSetup) {
     volley: [{ wait: 0, queue: [] }, { wait: 0, queue: [] }],
   });
   keys.od = false;
+  S.groups = weaponGroups(dv.mounts);
+  resetAim();
   S.overdrive.charge = Math.max(0, Math.min(0.99, c.odCharge ?? 0));
   S.P = { x: W / 2, y: H - 190, build: c.build, dv, hp: Math.min(c.hp, dv.maxHp), shield: dv.shieldMax, cds: {}, lastHit: 9, flash: 0, tx: null, ty: null, droneCd: [0, 0, 0], vx: 0, vy: 0, bank: 0 };
   seedDecor();
@@ -670,6 +675,126 @@ function updateOverdrive(dt: number) {
   if (o.t <= 0) endOverdrive();
 }
 
+/* ---------------- gunnery: AUTO batteries and manually aimed HEAVY groups ---------------- */
+/**
+ * Who aims the heavy weapons. `manual` false (the default: touch screens, the balance harness, headless tests) keeps
+ * every weapon on its own targeting; main.ts turns it on for a mouse. `family` remembers the selected group's family
+ * across fights. Ghost bosses fly their own fire control (bossFire / ghost broadsides) and are unaffected.
+ */
+export const gunnery = { manual: false, family: null as HeavyFamily | null };
+/** Manual fire numbers: cones a rail can train in, the heavy-shot damage bonus (a deliberate shot replaces the
+ *  broadside ripple's 1.2x), and how close to the reticle a missile lock reaches. */
+export const MANUAL = { bowCone: 0.75, sideCone: 0.7, dmgMul: 1.2, lockR: 170 } as const;
+/**
+ * The reticle (field units, the point under the mouse). `fire`: left mouse held (the selected group); `salvo`: right
+ * mouse held (every heavy group). `group` indexes S.groups. `lock` is the missile lock (target nearest the reticle
+ * while a missile group is selected or firing), `lockT` how long it has held. `bears[uid]` whether that heavy mount can
+ * bear on the reticle now; `shotAt` the S.t of the last heavy shot (HUD punch).
+ */
+export const aim = {
+  x: W / 2, y: H * 0.35, fire: false, salvo: false, group: 0,
+  lock: null as Ent | null, lockT: 0, bears: {} as Record<number, boolean>, shotAt: -9,
+};
+function resetAim() {
+  aim.fire = aim.salvo = false; aim.lock = null; aim.lockT = 0; aim.bears = {}; aim.shotAt = -9;
+  const i = gunnery.family ? S.groups.findIndex((g) => g.family === gunnery.family) : -1;
+  aim.group = Math.max(0, i);
+}
+/** Select heavy group `i` (0-based; key 1 is 0). Returns false if the ship has no such group. */
+export function selectGroup(i: number): boolean {
+  if (i < 0 || i >= S.groups.length) return false;
+  aim.group = i; gunnery.family = S.groups[i].family; return true;
+}
+export function cycleGroup(d: number): boolean {
+  const n = S.groups.length; if (n < 2) return false;
+  return selectGroup((aim.group + d + n) % n);
+}
+/** The groups the trigger is pulling this frame. */
+export function firingGroups(): WeaponGroup[] {
+  if (aim.salvo) return S.groups;
+  return aim.fire && S.groups[aim.group] ? [S.groups[aim.group]] : [];
+}
+/** Can heavy mount m bear on field point (ax, ay)? Rails train within a cone of their arc; ground ordnance has a reach;
+ *  missiles are guided and always launch. */
+export function heavyBears(m: Mount, ax: number, ay: number): boolean {
+  const P = S.P!, fam = m.part ? weaponFamily(m.part.id) : null; if (!fam) return false;
+  const x = P.x + m.ox, y = P.y + m.oy, def = HEAVY_FAMILIES[fam];
+  if (def.aim === 'lock') return true;
+  if (def.aim === 'ground') return Math.hypot(ax - x, ay - y) <= def.reach;
+  const a = Math.atan2(ay - y, ax - x);
+  if (m.arc === 'broadside') return (m.side ? [m.side] : [-1, 1]).some((s) => Math.abs(angDiff(a, s < 0 ? Math.PI : 0)) <= MANUAL.sideCone);
+  return Math.abs(angDiff(a, -Math.PI / 2)) <= MANUAL.bowCone;
+}
+/** Where a heavy turret should point (renderer hook): the reticle or the missile lock, or null when it aims itself. */
+export function manualAimFor(uid: number): { x: number; y: number } | null {
+  const P = S.P; if (!gunnery.manual || !P || !S.active) return null;
+  const m = P.dv.mounts.find((q) => q.part?.uid === uid);
+  const fam = m?.part ? weaponFamily(m.part.id) : null;
+  if (!fam) return null;
+  if (fam === 'missile' && aim.lock && !aim.lock.dead) return aim.lock;
+  return aim;
+}
+/** Missile lock: the target nearest the reticle (bosses by their hull), within MANUAL.lockR. */
+export function lockNear(x: number, y: number): Ent | null {
+  let best: Ent | null = null, bd: number = MANUAL.lockR;
+  for (const e of allTargets()) {
+    if (e.dead || EN[e.type as EnemyType]?.salvage) continue;
+    const d = e.isBoss ? Math.max(0, Math.abs(e.x - x) - e.halfW) + Math.max(0, Math.abs(e.y - y) - (e.dv.len * e.s) / 2) : Math.hypot(e.x - x, e.y - y) - e.r;
+    if (d < bd) { bd = d; best = e; }
+  }
+  return best;
+}
+function updateAim(dt: number) {
+  for (const g of S.groups) for (const m of g.mounts) aim.bears[m.part!.uid] = heavyBears(m, aim.x, aim.y);
+  const wantLock = S.groups[aim.group]?.family === 'missile' || (aim.salvo && S.groups.some((g) => g.family === 'missile'));
+  const tg = wantLock ? lockNear(aim.x, aim.y) : null;
+  if (tg !== aim.lock) { aim.lock = tg; aim.lockT = 0; } else if (tg) aim.lockT += dt;
+}
+/** One manually aimed heavy shot from mount m at the reticle. */
+function fireHeavy(m: Mount, x: number, y: number) {
+  const P = S.P!, p = m.part!, fam = weaponFamily(p.id)!, d = wDmg(p) * MANUAL.dmgMul, c = WEAPONS[p.id].col;
+  const ax = aim.x, ay = aim.y, dist = Math.hypot(ax - x, ay - y);
+  switch (fam) {
+    case 'rail': {
+      let a = Math.atan2(ay - y, ax - x), mx = x;
+      if (m.arc === 'broadside') { const s = m.side || (ax < x ? -1 : 1), base = s < 0 ? Math.PI : 0; a = base + clamp(angDiff(a, base), -MANUAL.sideCone, MANUAL.sideCone); mx = x + s * P.dv.width * 0.12; }
+      else a = -Math.PI / 2 + clamp(angDiff(a, -Math.PI / 2), -MANUAL.bowCone, MANUAL.bowCone);
+      railLine(mx, y, mx + Math.cos(a) * 1900, y + Math.sin(a) * 1900, d, c);
+      muzzle(mx + Math.cos(a) * 10, y + Math.sin(a) * 10, c, 24);
+      kick(-Math.cos(a) * 9, -Math.sin(a) * 9); addTrauma(0.2); V.flashA = Math.max(V.flashA, 0.05);
+      break;
+    }
+    case 'missile': {
+      const s0 = m.arc === 'broadside' ? (m.side || (ax < x ? -1 : 1)) : 0;
+      for (const s of [-1, 1]) {
+        const vx = s0 ? s0 * 300 : s * 150, vy = s0 ? s * 80 : -170;
+        const b = bolt(x + s * 5, y, vx, vy, d, 'both', c, 3);
+        Object.assign(b, { kind: 'missile', turn: 6, speed: 520, life: 3.2, manual: true, tg: aim.lock && !aim.lock.dead ? aim.lock : null, dest: { x: ax, y: ay } });
+        S.pb.push(b);
+      }
+      muzzle(x, y - 6, c, 14); sfx('missile', { x, layer: 'ship' }); addTrauma(0.07);
+      break;
+    }
+    case 'mortar': {
+      shell(x, y, ax + rnd(-8, 8), ay + rnd(-8, 8), d, c, 40, 0.42 + dist / 1300);
+      muzzle(x, y - 6, c, 18); sfx('mortar', { x, layer: 'ship' });
+      kick(((x - ax) / Math.max(1, dist)) * 6, ((y - ay) / Math.max(1, dist)) * 6); addTrauma(0.12);
+      break;
+    }
+    case 'bomb': {
+      const n = p.tier >= 3 ? 2 : 1;
+      for (let i = 0; i < n; i++) {
+        const life = 0.45 + dist / 1000 + i * 0.06, b = bolt(x, y, 0, 0, d, 'ground', c, 4);
+        Object.assign(b, { kind: 'bomb', life, max: life, aoe: 50, sx: x, sy: y, tx: ax + rnd(-16, 16), ty: ay + rnd(-16, 16) });
+        S.pb.push(b);
+      }
+      sfx('bombDrop', { x, layer: 'ship' }); addTrauma(0.05); kick(0, -3);
+      break;
+    }
+  }
+  aim.shotAt = S.t;
+}
+
 /* ---------------- player weapons: batteries by arc ---------------- */
 const bolt = (x: number, y: number, vx: number, vy: number, dmg: number, layer: string, col: string, r: number): Ent => ({ x, y, vx, vy, dmg, layer, col, r, kind: 'bolt', life: 2.5, dead: false });
 const layerOk = (bl: string, el: string) => bl === 'both' || el === 'both' || bl === el;
@@ -713,11 +838,22 @@ function arcTarget(m: Mount, x: number, y: number, layer: string): Ent | null {
 function fireWeapons(dt: number) {
   const P = S.P!, o = S.overdrive;
   const fm = P.dv.fireMult * (o.active ? 1.5 : 1);
+  const manual = gunnery.manual && S.groups.length > 0;
+  if (manual) updateAim(dt);
+  const pulling = manual ? firingGroups() : [];
   for (const m of P.dv.mounts) {
     const p = m.part; if (!p || !has(WEAPONS, p.id)) continue;
     if (P.cds[p.uid] === undefined) P.cds[p.uid] = rnd(0, 0.3);
     P.cds[p.uid] -= dt * fm; if (P.cds[p.uid] > 0) continue;
     const x = P.x + m.ox, y = P.y + m.oy;
+    if (manual && weaponFamily(p.id)) {
+      // HEAVY, manual: loaded and waiting until the trigger pulls its group and it can bear on the reticle.
+      P.cds[p.uid] = 0;
+      if (!pulling.some((g) => g.mounts.includes(m)) || !aim.bears[p.uid]) continue;
+      fireHeavy(m, x, y); fireLog.set(p.uid, S.t);
+      P.cds[p.uid] = wCd(p) * (p.id === 'rail' ? P.dv.mods.railCdMul : 1);
+      continue;
+    }
     if (m.arc === 'broadside') {
       const tg = arcTarget(m, x, y, 'both');
       if (!tg) { P.cds[p.uid] = 0.08; continue; }
@@ -935,9 +1071,13 @@ function updatePB(dt: number) {
       continue;
     }
     if (b.kind === 'missile') {
-      if (!b.tg || b.tg.dead) b.tg = nearest(b.x, b.y, () => true, 700);
+      // Manual missiles keep their lock; without one (or when it dies) they look for a target near the aim point,
+      // and failing that fly to the point itself and detonate there.
+      if (!b.tg || b.tg.dead) b.tg = b.manual ? lockNear(b.dest.x, b.dest.y) : nearest(b.x, b.y, () => true, 700);
+      if (b.manual && !b.tg && Math.hypot(b.dest.x - b.x, b.dest.y - b.y) < 22) { explode(b.x, b.y, 38, b.dmg, 'both', b.col); b.dead = true; continue; }
       const ca = Math.atan2(b.vy, b.vx);
-      const na = ca + clamp(angDiff(b.tg ? Math.atan2(b.tg.y - b.y, b.tg.x - b.x) : -Math.PI / 2, ca), -b.turn * dt, b.turn * dt);
+      const goal = b.tg ? Math.atan2(b.tg.y - b.y, b.tg.x - b.x) : b.manual ? Math.atan2(b.dest.y - b.y, b.dest.x - b.x) : -Math.PI / 2;
+      const na = ca + clamp(angDiff(goal, ca), -b.turn * dt, b.turn * dt);
       b.vx = Math.cos(na) * b.speed; b.vy = Math.sin(na) * b.speed;
       pushTrail(b, 12);
       if (Math.random() < 0.7) addFx({ type: 'smoke', x: b.x, y: b.y, vx: rnd(-8, 8), vy: rnd(-8, 8), life: 0.55, max: 0.55, size: 3, grow: 2.2, a: 0.4 });
@@ -1170,19 +1310,37 @@ export const setScrapHandler = (f: (v: number) => void) => { onScrap = f; };
 function updatePickups(dt: number) {
   const P = S.P!, vac = S.mode === 'clear' || S.mode === 'bossdown' || hasFlag(S.relics, 'vacuum');
   S.pickStreak.t += dt; if (S.pickStreak.t > 0.5) S.pickStreak.n = 0;
+  const reach = P.dv.magnet, alive = S.mode !== 'dying';
   for (const p of S.pickups) {
     p.t += dt;
-    const dx = P.x - p.x, dy = P.y - p.y, d = Math.hypot(dx, dy) || 1;
-    // Scrap streams to the hull on its own after a beat (sooner with magnets); repair kits only come inside the magnet.
+    const dx = P.x - p.x, dy = P.y - p.y, d = Math.hypot(dx, dy) || 1, hd = hullDist(p.x, p.y);
+    // Scrap magnet (MAGNET in data/parts.ts): inside the reach scrap is pulled in, accelerating the closer it gets and
+    // the longer it is held; every scrap drop also homes on its own after a beat, so none is lost off the bottom.
+    // Repair kits only come inside the reach.
     const homing = p.kind === 'scrap' && p.t > Math.max(0.25, 0.9 - 0.12 * P.dv.u.magnet);
-    if (S.mode !== 'dying' && (vac || homing || d < P.dv.magnet + P.dv.width / 2)) { const sp = vac ? 560 : Math.min(900, 260 + (homing ? p.t * 500 : 0) + Math.max(0, P.dv.magnet + P.dv.width / 2 - d) * 4); p.x += (dx / d) * Math.min(d, sp * dt); p.y += (dy / d) * Math.min(d, sp * dt); }
-    else { p.x += p.vx * dt; p.y += (p.vy + S.scroll) * dt; p.vx *= 1 - dt * 2; p.vy *= 1 - dt * 2; }
-    if (d < 28 && S.mode !== 'dying') {
+    if (alive && (vac || homing || hd < reach)) {
+      p.pull = (p.pull ?? 0) + dt;
+      const near = 1 - clamp(hd / Math.max(1, reach), 0, 1);
+      const acc = MAGNET.accel * (0.45 + 1.6 * near * near) * (vac ? 1.4 : 1) + p.pull * 2200;
+      const ux = dx / d, uy = dy / d;
+      p.vx += ux * acc * dt; p.vy += uy * acc * dt;
+      // bleed off sideways drift so it curls into the hull instead of orbiting it
+      const along = p.vx * ux + p.vy * uy, sx = p.vx - ux * along, sy = p.vy - uy * along, k = Math.min(1, dt * 7);
+      p.vx -= sx * k; p.vy -= sy * k;
+      const sp = Math.hypot(p.vx, p.vy);
+      if (sp > MAGNET.maxSpeed) { p.vx *= MAGNET.maxSpeed / sp; p.vy *= MAGNET.maxSpeed / sp; }
+      const step = Math.hypot(p.vx, p.vy) * dt;
+      if (step >= d) { p.x = P.x; p.y = P.y; } else { p.x += p.vx * dt; p.y += p.vy * dt; }
+      // a streak behind fast scrap: the stream whooshing into the hull
+      if (sp > 380 && p.kind === 'scrap' && Math.random() < 0.7) addFx({ type: 'spark', x: p.x, y: p.y, vx: p.vx * 0.35, vy: p.vy * 0.35, life: 0.16, max: 0.16, size: 1.4, drag: 6, tint: '#ffe08a' });
+    } else { p.x += p.vx * dt; p.y += (p.vy + S.scroll) * dt; p.vx *= 1 - dt * 2; p.vy *= 1 - dt * 2; }
+    if (alive && (hullDist(p.x, p.y) < MAGNET.collect || Math.hypot(P.x - p.x, P.y - p.y) < 28)) {
       if (p.kind === 'repair') { const amt = P.dv.maxHp * p.val * S.heat.heal; P.hp = Math.min(P.dv.maxHp, P.hp + amt); spark(P.x, P.y, '#8fe39a', 12); setBanner('REPAIR KIT', `+${Math.round(amt)} hull`, 0.9, '#8fe39a'); }
-      else { S.scrap += p.val; onScrap(p.val); S.pickStreak.n++; S.pickStreak.t = 0; }
+      else { S.scrap += p.val; onScrap(p.val); S.pickStreak.n++; S.pickStreak.t = 0; spark(p.x, p.y, '#ffe08a', 2); }
       p.dead = true; sfx('pick', { x: P.x, layer: 'ship', size: S.pickStreak.n });
     }
-    if (p.y > H + 20) p.dead = true;
+    // Repair kits can drift away; scrap only goes when the ship is lost.
+    if (p.y > H + 20 && (p.kind === 'repair' || !alive)) p.dead = true;
   }
   S.pickups = S.pickups.filter((p) => !p.dead);
 }

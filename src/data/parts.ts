@@ -21,6 +21,49 @@ export const WEAPONS: Record<string, WeaponDef> = {
   tesla: { name: 'Arc Coil', layer: 'both', cd: 0.5, dmg: 9, col: '#9be7ff', cost: 80, desc: 'All-round. Lightning jumps between nearby targets, air or ground.' },
   pd: { name: 'Point Defense', layer: 'none', cd: 0.3, dmg: 0, col: '#b8f2c8', cost: 65, desc: 'All-round. Shoots down enemy shots and missiles near your hull.' },
 };
+/**
+ * Weapon control. AUTO weapons (light guns, flak, arc coils, point defense) pick their own targets in their arc and keep
+ * the screen alive with constant fire. HEAVY weapons (rails, missiles, mortars, bombs) are the deliberate layer: they
+ * sit in numbered weapon groups by family and fire where the pilot puts the reticle (left mouse: the selected group;
+ * right mouse: every heavy group). On touch screens, in the balance harness and on ghosts they aim themselves.
+ */
+export type WeaponControl = 'auto' | 'heavy';
+export type HeavyFamily = 'rail' | 'missile' | 'mortar' | 'bomb';
+export interface FamilyDef {
+  name: string; short: string; icon: string; col: string;
+  /** How the reticle is used: 'line' fires toward it, 'lock' locks the target nearest it, 'ground' hits the ground under it. */
+  aim: 'line' | 'lock' | 'ground';
+  /** Ground weapons: max distance from the mount to the reticle (0 = no limit). */ reach: number;
+}
+/** Heavy families in group order: a ship's groups are numbered 1.. in this order, skipping families it does not carry. */
+export const HEAVY_FAMILIES: Record<HeavyFamily, FamilyDef> = {
+  rail: { name: 'Rail Cannons', short: 'RAIL', icon: 'hypersonic-bolt', col: '#c9a6ff', aim: 'line', reach: 0 },
+  missile: { name: 'Seeker Missiles', short: 'MSL', icon: 'missile-pod', col: '#ff9f5a', aim: 'lock', reach: 0 },
+  mortar: { name: 'Siege Mortars', short: 'MRT', icon: 'mortar', col: '#e88a3c', aim: 'ground', reach: 640 },
+  bomb: { name: 'Bomb Bays', short: 'BMB', icon: 'falling-bomb', col: '#f2a541', aim: 'ground', reach: 420 },
+};
+export const FAMILY_ORDER: HeavyFamily[] = ['rail', 'missile', 'mortar', 'bomb'];
+const PART_FAMILY: Record<string, HeavyFamily> = { rail: 'rail', missile: 'missile', artillery: 'mortar', bomb: 'bomb' };
+/** The heavy family of a weapon part, or null for AUTO weapons. */
+export const weaponFamily = (id: string): HeavyFamily | null => (has(PART_FAMILY, id) ? PART_FAMILY[id] : null);
+export const weaponControl = (id: string): WeaponControl => (weaponFamily(id) ? 'heavy' : 'auto');
+export interface WeaponGroup { key: number; family: HeavyFamily; def: FamilyDef; mounts: Mount[] }
+/** The ship's heavy weapon groups, keyed 1.. in FAMILY_ORDER (only the families it carries). */
+export function weaponGroups(mounts: Mount[]): WeaponGroup[] {
+  const out: WeaponGroup[] = [];
+  for (const f of FAMILY_ORDER) {
+    const ms = mounts.filter((m) => m.part && weaponFamily(m.part.id) === f);
+    if (ms.length) out.push({ key: out.length + 1, family: f, def: HEAVY_FAMILIES[f], mounts: ms });
+  }
+  return out;
+}
+/** AUTO weapon mounts: they fire on their own. */
+export const autoMounts = (mounts: Mount[]) => mounts.filter((m) => m.part && has(WEAPONS, m.part.id) && weaponControl(m.part.id) === 'auto');
+/**
+ * Scrap magnet (field units): scrap within `base + perTier · magnet tiers + relic magnetAdd` of the hull's edge is pulled
+ * in, accelerating; scrap within `collect` of the hull is taken at once. See combat.ts updatePickups.
+ */
+export const MAGNET = { base: 240, perTier: 80, collect: 26, accel: 2600, maxSpeed: 1500 } as const;
 export const droneCount = (t: number) => Math.min(3, 1 + Math.floor((t - 1) / 2));
 export const UTILS: Record<string, UtilDef> = {
   plate: { name: 'Armor Plating', col: '#9aa7b4', cost: 40, desc: (t) => `+${35 * t} max hull.` },
@@ -28,7 +71,7 @@ export const UTILS: Record<string, UtilDef> = {
   thruster: { name: 'Vector Thrusters', col: '#ffb86b', cost: 45, desc: (t) => `+${12 * t}% speed.` },
   reactor: { name: 'Overclock Reactor', col: '#ff7a6b', cost: 75, desc: (t) => `+${10 * t}% fire rate on every weapon.` },
   repair: { name: 'Repair Swarm', col: '#8fe39a', cost: 65, desc: (t) => `Repairs ${(1.2 * t).toFixed(1)} hull per second in combat.` },
-  magnet: { name: 'Salvage Magnet', col: '#e0c35c', cost: 35, desc: (t) => `Wider scrap pickup, +${10 * t}% scrap.` },
+  magnet: { name: 'Salvage Magnet', col: '#e0c35c', cost: 35, desc: (t) => `Scrap magnet reach +${MAGNET.perTier * t}, +${10 * t}% scrap.` },
   drones: { name: 'Drone Bay', col: '#7fb6ff', cost: 85, desc: (t) => `${droneCount(t)} escort drone${droneCount(t) > 1 ? 's' : ''} that shoot aircraft.` },
 };
 
@@ -69,28 +112,29 @@ export const neutralMods = (): Mods => ({ hullAdd: 0, hullMul: 1, speedMul: 1, f
 export interface Rect { x: number; y: number; w: number; h: number; type: SectionType }
 
 /**
- * Firing arcs. Every weapon mount belongs to one by its position on the hull, and the weapon in it decides how
- * that arc is used:
- *  - bow: the bridge and gun decks. Fires forward (up the screen) at aircraft and the ghost ahead.
- *  - broadside: Broadside Battery sections. The outer mounts fire to port (left) or starboard (right), the centre
- *    mount to whichever side has a target. Hits air AND ground targets level with the hull, in synchronized
- *    ripple volleys.
- *  - ventral: any bomb bay or mortar, wherever it is mounted. Drops ordnance on the city and ground units below
- *    and around the ship.
- *  - omni: arc coils and point defense work all around the hull.
+ * Firing arcs. Every weapon mount gets one from where it sits on the hull, and the weapon in it decides how it is used:
+ *  - bow: the Command Bridge, at the front. A forward cone; engages air AND ground targets ahead.
+ *  - dorsal: Gun Deck turrets on the top deck. Turn all the way round, but cannot depress below the hull, so they
+ *    engage AIR targets only (aircraft and ghost dreadnoughts).
+ *  - broadside: Broadside Battery sections. The outer mounts fire to port (left) or starboard (right) inside a flank
+ *    sector, the centre mount to whichever side has a target. Air AND ground, in synchronized ripple volleys.
+ *  - ventral: any bomb bay or mortar, wherever it is mounted. Drops ordnance on the ground only.
+ *  - omni: point defense (shoots enemy fire) and arc coils (lightning in every direction; air only from the top deck).
+ * mountTraverse() gives the exact sectors and target layers; combat, ghosts, the HUD and the ship renderer all read it.
  */
-export type Arc = 'bow' | 'broadside' | 'ventral' | 'omni' | 'internal';
+export type Arc = 'bow' | 'dorsal' | 'broadside' | 'ventral' | 'omni' | 'internal';
 export const ARC_INFO: Record<Arc, { label: string; short: string; col: string; desc: string }> = {
-  bow: { label: 'Bow', short: 'BOW', col: '#4fd1e8', desc: 'Fires forward at aircraft and ghosts ahead of the ship.' },
-  broadside: { label: 'Broadside', short: 'SIDE', col: '#f2a541', desc: 'Fires sideways in ripple volleys at anything level with the hull, air or ground.' },
-  ventral: { label: 'Ventral', short: 'BELLY', col: '#e88a3c', desc: 'Drops ordnance on the city and ground targets below and around the ship.' },
+  bow: { label: 'Bow', short: 'BOW', col: '#4fd1e8', desc: 'Front mount: a forward cone, air and ground targets ahead of the ship.' },
+  dorsal: { label: 'Top deck', short: 'TOP', col: '#7fb6ff', desc: 'Top-deck turret: turns all the way round but cannot depress below the hull, so air targets only.' },
+  broadside: { label: 'Broadside', short: 'SIDE', col: '#f2a541', desc: 'Side mount: fires into its flank in ripple volleys at anything level with the hull, air or ground.' },
+  ventral: { label: 'Ventral', short: 'BELLY', col: '#e88a3c', desc: 'Drops ordnance on the city and ground targets below and around the ship. Ground only.' },
   omni: { label: 'All-round', short: 'OMNI', col: '#9be7ff', desc: 'Works in every direction around the hull.' },
   internal: { label: 'Internal', short: 'BAY', col: '#9aa7b4', desc: 'Utility bay inside the hull.' },
 };
 /** The arc a mount position gives, before the weapon in it is considered. */
 export function positionArc(type: SectionType, kind: SlotKind): Arc {
   if (kind === 'U') return 'internal';
-  return type === 'battery' ? 'broadside' : 'bow';
+  return type === 'battery' ? 'broadside' : type === 'gundeck' ? 'dorsal' : 'bow';
 }
 /** The arc a part actually fires in from a mount: bombs and mortars always drop ventrally, coils and PD are omni. */
 export function mountArc(type: SectionType, kind: SlotKind, partId: string | null | undefined): Arc {
@@ -101,12 +145,78 @@ export function mountArc(type: SectionType, kind: SlotKind, partId: string | nul
   }
   return positionArc(type, kind);
 }
+/** What a mount can engage: 'shots' is point defense (enemy fire), 'none' a utility bay. */
+export type TargetLayers = 'air' | 'ground' | 'both' | 'shots' | 'none';
+/** One traverse sector in SHIP space: radians, 0 = dead ahead (the bow), +PI/2 = starboard, -PI/2 = port. */
+export interface Sector { c: number; h: number }
+export interface Traverse {
+  arc: Arc;
+  /** Sectors the mount can train in (empty for utility bays). A full circle is { c: 0, h: PI }. */ sectors: Sector[];
+  /** What it can engage from here. */ layers: TargetLayers;
+  /** Ventral ordnance falls; nothing to train. */ down: boolean;
+}
+/** Traverse half-widths by arc (radians). */
+export const TRAVERSE = { bow: 0.75, broadside: 1.0 } as const;
+const FULL: Sector[] = [{ c: 0, h: Math.PI }];
+/**
+ * The traverse of a weapon in a mount: sectors in ship space and the layers it can engage. `side` is the broadside
+ * side (-1 port, 1 starboard, 0 either). Ghosts and the player share it; the ship renderer clamps turret yaw to it.
+ */
+export function mountTraverse(type: SectionType, kind: SlotKind, partId: string | null | undefined, side: -1 | 0 | 1 = 0): Traverse {
+  const arc = mountArc(type, kind, partId), pos = positionArc(type, kind);
+  switch (arc) {
+    case 'internal': return { arc, sectors: [], layers: 'none', down: false };
+    case 'bow': return { arc, sectors: [{ c: 0, h: TRAVERSE.bow }], layers: 'both', down: false };
+    case 'dorsal': return { arc, sectors: FULL, layers: 'air', down: false };
+    case 'broadside': {
+      const h = TRAVERSE.broadside;
+      return { arc, sectors: side ? [{ c: (side * Math.PI) / 2, h }] : [{ c: -Math.PI / 2, h }, { c: Math.PI / 2, h }], layers: 'both', down: false };
+    }
+    case 'ventral': return { arc, sectors: FULL, layers: 'ground', down: true };
+    case 'omni': return { arc, sectors: FULL, layers: partId === 'pd' ? 'shots' : pos === 'dorsal' ? 'air' : 'both', down: false };
+  }
+}
+/** Field angle of a ship-space angle. The player's bow points up the screen; a ghost's (mirrored: y flipped) down. */
+export const shipToField = (a: number, mirrored = false) => (mirrored ? Math.PI / 2 - a : a - Math.PI / 2);
+export const fieldToShip = (a: number, mirrored = false) => (mirrored ? Math.PI / 2 - a : a + Math.PI / 2);
+const wrapPi = (a: number) => { a = (a + Math.PI) % (Math.PI * 2); if (a < 0) a += Math.PI * 2; return a - Math.PI; };
+/** Is a field-space bearing inside the traverse? */
+export function inTraverse(t: Traverse, fieldAngle: number, mirrored = false) {
+  const a = fieldToShip(fieldAngle, mirrored);
+  return t.sectors.some((s) => Math.abs(wrapPi(a - s.c)) <= s.h + 1e-9);
+}
+/** Clamp a field-space bearing into the nearest traverse sector (field angle out). */
+export function clampTraverse(t: Traverse, fieldAngle: number, mirrored = false) {
+  if (!t.sectors.length) return fieldAngle;
+  const a = fieldToShip(fieldAngle, mirrored);
+  let best = a, bd = Infinity;
+  for (const s of t.sectors) {
+    const d = wrapPi(a - s.c), k = Math.max(-s.h, Math.min(s.h, d)), off = Math.abs(d - k);
+    if (off < bd) { bd = off; best = s.c + k; }
+  }
+  return shipToField(best, mirrored);
+}
+/** Can a mount that engages `layers` hit a target on `layer` (enemy layers are 'air', 'ground' or 'both' for ships)? */
+export const layersHit = (layers: TargetLayers, layer: string) =>
+  layers === 'both' || layer === 'both' || layers === layer;
+/** Short HUD/refit tag for target layers. */
+export const LAYERS_TAG: Record<TargetLayers, string> = { air: 'AIR', ground: 'GND', both: 'ALL', shots: 'PD', none: '' };
+/** Where a weapon works, for part cards: what each placement lets it engage. */
+export function placementNote(id: string): string {
+  if (!has(WEAPONS, id)) return 'Utility bay.';
+  if (id === 'pd') return 'Any weapon mount: shoots down enemy fire all round.';
+  if (WEAPONS[id].layer === 'ground') return 'Any weapon mount: drops from the belly, ground only.';
+  if (id === 'tesla') return 'All round. Bow or side: air and ground. Top deck: air only.';
+  return 'Bow (forward cone) or side (flank): air and ground. Top deck: all round, air only.';
+}
 export interface Mount {
   ox: number; oy: number; kind: SlotKind; part: Part | null; si: number; i: number;
   /** Arc this mount fires in with its current part (see Arc). */
   arc: Arc;
   /** Broadside side: -1 port (left), 1 starboard (right), 0 either. 0 for other arcs. */
   side: -1 | 0 | 1;
+  /** Traverse sectors and target layers (mountTraverse). */
+  trav: Traverse;
 }
 export interface Derived {
   /** Top speed (field units/s), acceleration and braking (units/s²): mass makes all three worse, thrust better. */
@@ -130,7 +240,7 @@ export function derive(build: Build, mods: Mods = neutralMods()): Derived {
       const p = s.slots[i] ?? null;
       const arc = mountArc(s.type, k, p?.id);
       const side: -1 | 0 | 1 = arc === 'broadside' ? (ox < -1 ? -1 : ox > 1 ? 1 : 0) : 0;
-      mounts.push({ ox, oy: y + d.h / 2, kind: k, part: p, si, i, arc, side });
+      mounts.push({ ox, oy: y + d.h / 2, kind: k, part: p, si, i, arc, side, trav: mountTraverse(s.type, k, p?.id, side) });
       if (p && has(UTILS, p.id)) u[p.id] += p.tier;
     });
     y += d.h; width = Math.max(width, d.w);
@@ -149,7 +259,7 @@ export function derive(build: Build, mods: Mods = neutralMods()): Derived {
     accel, brake,
     maxHp: Math.round(hp), speed, shieldMax, shieldRegen: shieldMax ? 8 + 4 * u.shield + (u.shield ? 0 : 6) : 0,
     regen: 1.2 * u.repair + mods.regen, fireMult: (1 + 0.1 * u.reactor) * mods.fireMul,
-    magnet: 80 + 45 * u.magnet + mods.magnetAdd, scrapMult: (1 + 0.1 * u.magnet) * mods.scrapMul,
+    magnet: MAGNET.base + MAGNET.perTier * u.magnet + mods.magnetAdd, scrapMult: (1 + 0.1 * u.magnet) * mods.scrapMul,
     drones: u.drones ? droneCount(Math.min(5, u.drones)) : 0, droneTier: Math.min(5, u.drones),
     rects, mounts, len: y, width, mass, thrust, u, mods,
   };
