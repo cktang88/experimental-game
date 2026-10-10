@@ -46,7 +46,7 @@ function pathRoad(ch: Chunk, b: Biome, f: (cy: number) => number, c0: number, c1
 }
 
 /* ---------------- shared structures ---------------- */
-const CONTAINER_TINTS = ['#6a3a2a', '#2a4566', '#335c56', '#6e5a2c', '#6a7076', '#47395a', '#36503c', '#7a5226'];
+const CONTAINER_TINTS = ['#553226', '#243a55', '#2c4c47', '#5a4a26', '#565b60', '#3b3149', '#2f4233', '#62441f'];
 /** A parked aircraft, nose toward -x (rot turns it). Fuel: it burns and blows. */
 function plane(ch: Chunk, x: number, cy: number, len: number, span: number, rot = 0, tint = '#4b525a') {
   const c = Math.cos(rot), s = Math.sin(rot);
@@ -59,7 +59,7 @@ function plane(ch: Chunk, x: number, cy: number, len: number, span: number, rot 
 }
 /** A moored or anchored ship, bow toward -cy. Container ships carry coloured rows on deck. */
 function ship(ch: Chunk, x: number, cy: number, len: number, beam: number, kind: 'box' | 'tanker' | 'bulk', lights = true) {
-  const hull = fb(ch, 'ship', x, cy, beam, len, 3, Style.Hull, { tint: kind === 'tanker' ? '#2a211d' : '#1d2329', lit: 0.4, keepLit: true, fuel: kind === 'tanker' ? 1.3 : 0, spill: kind === 'tanker' ? Burn.Oil : 0 }, [
+  const hull = fb(ch, 'ship', x, cy, beam, len, 3, Style.Hull, { tint: kind === 'tanker' ? '#3a2e27' : '#2d343c', lit: 0.4, keepLit: true, fuel: kind === 'tanker' ? 1.3 : 0, spill: kind === 'tanker' ? Burn.Oil : 0 }, [
     tier(beam, len, 0, 3),
     tier(beam * 0.84, beam * 0.5, 3, 7, 0, len * 0.38),
     tier(beam * 0.5, len * 0.08, 0.5, 2.6, 0, -len * 0.47),
@@ -99,8 +99,8 @@ function compound(ch: Chunk, b: Biome, x: number, cy: number, s: number, style: 
 }
 /** Floodlight mast: a hot pinpoint and the pool of light it throws. */
 function flood(ch: Chunk, x: number, cy: number, h: number, pool: number, c = LC.Flood, a = 1) {
-  L(ch, x, cy, h, 0.9, c, 0.7 * a, 2);
-  L(ch, x, cy, 0.6, pool, c, 0.07 * a, 4);
+  L(ch, x, cy, h, 0.8, c, 0.4 * a, 2);
+  L(ch, x, cy, 0.6, pool, c, 0.06 * a, 4);
 }
 function cluster(ch: Chunk, b: Biome, cx: number, cy: number, n: number, rad: number, style: Style, roof: number, tint?: string, lamp = LC.Sodium) {
   for (let i = 0; i < n; i++) {
@@ -146,7 +146,8 @@ const SET_PIECES: Record<Biome, string[]> = {
 function setPieceDue(b: Biome, c0: number, c1: number): string | null {
   const mid = (c0 + c1) / 2;
   if (!inBiome(b, W / 2, mid)) return null;
-  if (forced && SET_PIECES[b].includes(forced)) { const f = forced; forced = null; CITY.sinceSet = 0; return f; }
+  // Forced pieces wait for a row near the top of the screen, so they scroll through the whole view.
+  if (forced && SET_PIECES[b].includes(forced)) { if (c1 + S.scrollY > 420) return null; const f = forced; forced = null; CITY.sinceSet = 0; return f; }
   if (CITY.sinceSet < 6 || Math.random() > 0.45) return null;
   CITY.sinceSet = 0;
   return pick(SET_PIECES[b]);
@@ -171,20 +172,20 @@ export function genCity(ch: Chunk, c0: number, c1: number) {
   if (!inBiome(Biome.City, cx, cy)) return;
   if (sp === 'stadium') {
     // A floodlit bowl: from up here a bright green rectangle in the dark grid.
-    const w = 64, h = 46;
+    const w = 96, h = 70;
     clearArea(ch, cx - w / 2 - 6, cy - h / 2 - 6, cx + w / 2 + 6, cy + h / 2 + 6);
     pad(ch, cx - w / 2 - 6, cy - h / 2 - 6, cx + w / 2 + 6, cy + h / 2 + 6, 'plaza');
     pad(ch, cx - w * 0.32, cy - h * 0.3, cx + w * 0.32, cy + h * 0.3, 'pitch');
     const o = { lit: 0.15, tint: '#2b2e33' };
-    fb(ch, 'stand', cx, cy - h / 2 + 3, w, 6, 4.5, Style.Concrete, o);
-    fb(ch, 'stand', cx, cy + h / 2 - 3, w, 6, 4.5, Style.Concrete, o);
-    fb(ch, 'stand', cx - w / 2 + 3, cy, 6, h - 12, 4.5, Style.Concrete, o);
-    fb(ch, 'stand', cx + w / 2 - 3, cy, 6, h - 12, 4.5, Style.Concrete, o);
+    fb(ch, 'stand', cx, cy - h / 2 + 4, w, 8, 5.5, Style.Concrete, o);
+    fb(ch, 'stand', cx, cy + h / 2 - 4, w, 8, 5.5, Style.Concrete, o);
+    fb(ch, 'stand', cx - w / 2 + 4, cy, 8, h - 16, 5.5, Style.Concrete, o);
+    fb(ch, 'stand', cx + w / 2 - 4, cy, 8, h - 16, 5.5, Style.Concrete, o);
     for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      fb(ch, 'mast', cx + sx * (w / 2 - 1), cy + sy * (h / 2 - 1), 1.4, 1.4, 14, Style.Metal, { lit: 0 });
-      L(ch, cx + sx * (w / 2 - 1), cy + sy * (h / 2 - 1), 14.4, 2.6, LC.Flood, 1, 2);
+      fb(ch, 'mast', cx + sx * (w / 2 - 1), cy + sy * (h / 2 - 1), 1.6, 1.6, 18, Style.Metal, { lit: 0 });
+      L(ch, cx + sx * (w / 2 - 1), cy + sy * (h / 2 - 1), 18.4, 1.6, LC.Flood, 1, 2);
     }
-    L(ch, cx, cy, 0.5, w * 0.9, LC.Flood, 0.12, 1);
+    L(ch, cx, cy, 0.5, w * 0.8, LC.Flood, 0.035, 4);
     claim(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2);
   } else {
     // TV tower: a needle with a lit pod and a beacon, over a small plaza.
@@ -215,14 +216,16 @@ export function genPort(ch: Chunk, c0: number, c1: number) {
       for (let y = Math.ceil(c0 / 12) * 12; y < c1; y += 12) L(ch, cx + 1, y, 1, 0.8, LC.Sodium, 0.5, 0);
       for (let y = c0 + rnd(4, 16); y < c1 - 6; y += rnd(26, 36)) {
         if (!ok(B, cx + 6, y)) continue;
-        const cr = fb(ch, 'crane', cx + 6, y, 12, 4, 13.5, Style.Shell, { tint: '#7a5a2a', lit: 0 }, [
-          tier(10, 3.2, 0, 12.2, 1, 0), tier(40, 2.2, 12.2, 1.4, -8, 0), tier(4, 4, 12.2, 3.5, 4, 0),
+        // Ship-to-shore gantry: a portal over the quay rails and a long boom out over the berth.
+        const cr = fb(ch, 'crane', cx + 8, y, 14, 6, 16, Style.Shell, { tint: '#8a6a34', lit: 0 }, [
+          tier(2, 6, 0, 15, -6, 0), tier(2, 6, 0, 15, 6, 0), tier(56, 2.6, 15, 1.6, -12, 0), tier(6, 5, 15, 4, 6, 0),
         ]);
-        L(ch, cx - 27, y, 13.8, 0.9, LC.Amber, 0.75, 3, Math.random(), cr);
-        L(ch, cx + 6, y, 1, 10, LC.Flood, 0.05, 1);
+        L(ch, cx - 39, y, 16.8, 0.9, LC.Amber, 0.8, 3, Math.random(), cr);
+        L(ch, cx + 8, y, 16.8, 0.8, LC.White, 0.7, 2, 0, cr);
+        L(ch, cx - 8, y, 0.6, 16, LC.Flood, 0.06, 4);
       }
       // Ship alongside.
-      if (Math.random() < 0.55 && free(cx - 12, mid)) ship(ch, cx - 12, mid + rnd(-20, 20), rnd(95, 140), 15, pick(['box', 'box', 'bulk']));
+      if (Math.random() < 0.7 && free(cx - 14, mid)) ship(ch, cx - 14, mid + rnd(-20, 20), rnd(110, 150), 18, pick(['box', 'box', 'bulk']));
     }
     // Container yard: coloured stacks in long blocks, floodlit.
     const yx0 = cx + 72, yx1 = cx + 255;
@@ -270,7 +273,7 @@ export function genPort(ch: Chunk, c0: number, c1: number) {
   const cy = mid, cx = coastX(cy);
   if (sp === 'lighthouse') {
     // Breakwater curving out into the water, a lighthouse sweeping its beam at the end.
-    const ex = cx - rnd(220, 300), ey = cy - rnd(60, 120);
+    const ex = cx - rnd(140, 200), ey = cy - rnd(50, 90);
     seg(ch, cx + 2, cy + 10, (cx + ex) / 2, cy - 10, 6, 'concrete');
     seg(ch, (cx + ex) / 2, cy - 10, ex, ey, 6, 'concrete');
     for (let i = 1; i < 6; i++) L(ch, cx + (ex - cx) * (i / 6), cy + 10 + (ey - cy - 10) * (i / 6), 1, 0.6, LC.Sodium, 0.35, 0);
@@ -392,7 +395,7 @@ export function genAirfield(ch: Chunk, c0: number, c1: number) {
     for (let y = Math.ceil(y0 / 70) * 70; y < y1; y += 70) flood(ch, ax1 - 4, y, 12, 32, LC.Flood, 0.8);
     for (let y = y0 + rnd(0, 20); y < y1 - 30; y += rnd(46, 60)) {
       if (!ok(B, ax1 + 30, y + 20)) continue;
-      const hg = fb(ch, 'hangar', ax1 + 30, y + 20, 46, 40, 7.5, Style.Hangar, { lit: rnd(0.3, 0.9), tint: '#2e3338' });
+      const hg = fb(ch, 'hangar', ax1 + 30, y + 20, 46, 40, 7.5, Style.Hangar, { lit: rnd(0.3, 0.9), tint: '#4a5056' });
       if (Math.random() < 0.4) L(ch, ax1 + 6, y + 20, 0.5, 16, LC.Flood, 0.08, 1, 0, hg);
     }
     // Operations: barracks and offices behind the hangars, a road.
@@ -526,15 +529,15 @@ export function genDesert(ch: Chunk, c0: number, c1: number) {
   if (sp === 'launchsite') {
     // A rocket on its pad under floodlights, steam rolling off the flame trench, a long road out.
     if (!inBiome(B, cx, cy)) return;
-    pad(ch, cx - 34, cy - 34, cx + 34, cy + 34, 'pad'); zone(ch, cx - 34, cy - 34, cx + 34, cy + 34, 'apron');
-    seg(ch, cx, cy + 6, cx, cy + 46, 5, 'basin');
-    const rk = fb(ch, 'rocket', cx, cy, 4.6, 4.6, 36, Style.Shell, { tint: '#9aa0a6', lit: 0, keepLit: true, fuel: 2.4, spill: Burn.Oil });
+    pad(ch, cx - 46, cy - 46, cx + 46, cy + 46, 'pad'); zone(ch, cx - 46, cy - 46, cx + 46, cy + 46, 'apron');
+    seg(ch, cx, cy + 8, cx, cy + 62, 7, 'basin');
+    const rk = fb(ch, 'rocket', cx, cy, 6.5, 6.5, 50, Style.Shell, { tint: '#9aa0a6', lit: 0, keepLit: true, fuel: 2.4, spill: Burn.Oil });
     rk.maxHp = rk.hp = 160; rk.value = 4;
-    fb(ch, 'gantry', cx + 6, cy, 5, 6, 40, Style.Metal, { lit: 0.6, keepLit: true, tint: '#3a3d40' });
-    for (let h = 6; h < 40; h += 6) L(ch, cx + 6, cy, h, 0.7, LC.Amber, 0.6, 2);
-    L(ch, cx + 6, cy, 40.6, 1.2, LC.White, 0.9, 3);
-    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { fb(ch, 'mast', cx + sx * 30, cy + sy * 30, 1.2, 1.2, 15, Style.Metal, { lit: 0 }); L(ch, cx + sx * 30, cy + sy * 30, 15.4, 2.6, LC.Flood, 1, 2); }
-    L(ch, cx, cy, 0.5, 80, LC.Flood, 0.14, 1);
+    fb(ch, 'gantry', cx + 8.5, cy, 7, 8, 54, Style.Metal, { lit: 0.6, keepLit: true, tint: '#3a3d40' });
+    for (let h = 6; h < 54; h += 6) L(ch, cx + 8.5, cy, h, 0.7, LC.Amber, 0.6, 2);
+    L(ch, cx + 8.5, cy, 54.6, 1.2, LC.White, 0.9, 3);
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { fb(ch, 'mast', cx + sx * 42, cy + sy * 42, 1.4, 1.4, 18, Style.Metal, { lit: 0 }); L(ch, cx + sx * 42, cy + sy * 42, 18.4, 1.6, LC.Flood, 1, 2); }
+    L(ch, cx, cy, 0.5, 90, LC.Flood, 0.04, 4);
     fb(ch, 'mid', cx + 70, cy + 40, 12, 8, 2, Style.Concrete, { lit: 0.6, keepLit: true, roof: 0.5 });
     seg(ch, cx, cy + 34, highwayX(cy + 120), cy + 120, 4, 'road');
     claim(cx - 40, cy - 40, cx + 80, cy + 50);

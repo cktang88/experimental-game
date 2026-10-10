@@ -115,7 +115,7 @@ const BLD_FRAG = /* glsl */ `
     // snow (roof 1) or sand (0.5) settles on the roofs of the mountains and the desert.
     float edge = min(vSz.x * 0.5 - abs(vObj.x), vSz.z * 0.5 - abs(vObj.z));
     float lip = 1.0 - smoothstep(0.15 * uK, 0.45 * uK, edge);
-    if (sty > 10.5) diffuseColor.rgb *= sty > 11.5 ? 0.5 : 0.9;
+    if (sty > 9.5) diffuseColor.rgb *= sty > 11.5 ? 0.5 : sty > 10.5 ? 0.9 : 0.7 + 0.25 * step(0.5, fract(vObj.x / (1.1 * uK)));
     else diffuseColor.rgb *= mix(0.2, 0.6, lip) * (0.88 + 0.24 * h12(vec2(seed * 71.0, seed * 13.0)));
     float roof = vS.w;
     if (roof > 0.01) {
