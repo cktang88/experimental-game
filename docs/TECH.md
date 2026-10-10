@@ -109,7 +109,7 @@ Kinds (`OVERDRIVES` in `src/data/hulls.ts`):
 8 + 35% of value per second. `mult = 1 + value / 80`, capped at 3. Every scrap drop is `base * SCRAP_SCALE (0.35) * scrapSectorMul(sector) * carnage.mult *
 heat.scrap * dv.scrapMult` (see "Scrap economy" below). Scrap pickups home to the hull on their own after ~0.9 s (sooner with magnets); `S.pickStreak = { n, t }`
 counts pickups landing within 0.5 s of each other (rising pitch for audio). City agent: `worldBlast()` should return about 1-4 scrap per
-building destroyed; combat applies the scaling and carnage, counts it as a structure and feeds Overdrive.
+building destroyed; combat (`groundBlast`) pays `STRUCTURE_SCRAP` (0.4) of it with the usual scaling, adds `2 + scrap` carnage, counts it as a structure and feeds Overdrive.
 
 ### City (`src/game/worldgen.ts`, rendering in `src/render/world/`)
 - The city is generated in rows (`CITY.chunks`) in a fixed city space: field y = `cy + S.scrollY`. `S.decor` holds every live
@@ -160,21 +160,25 @@ every fight (floors 2 and 6), elite and boss (plus the boss strip option) with t
 average route (4.3 fights, 0.9 elites, a derelict, a boss), and the price of an average merchant part and a merchant's
 whole stock (3 parts, 2 a tier better, 2 sections, a relic, patching half the hull).
 Before tuning, sector 3 paid 542 a fight against a 341 average part (1.59 parts per fight vs 0.84 in sector 1) and a
-sector's income bought 117% of a merchant's stock. Two levers fix it:
-- `SCRAP_SECTOR_TAX = 0.45` (combat.ts): every drop is divided by `1 + 0.45·(sector − 1)` (×0.69 in sector 2, ×0.53 in
-  sector 3, ×0.45 in 4); the boss's death scrap too.
-- Merchant repairs cost by the hull point: `REPAIR.hullPerScrap = 3` in sector 1, divided by `1 + 0.35·(sector − 1)`
-  (3, 2.2, 1.76 hull per scrap), times the heat repair factor.
+sector's income bought 117% of a merchant's stock. With city destruction merged (`worldBlast` pays 1-4 scrap per
+collapsed building) sectors 1 and 2 rose another ~55% (148 and 294 a fight). The levers, all in combat.ts:
+- `SCRAP_SECTOR_TAX = 0.45`: every drop is divided by `1 + 0.45·(sector − 1)` (×0.69 in sector 2, ×0.53 in sector 3,
+  ×0.45 in 4); the boss's death scrap too.
+- `STRUCTURE_SCRAP = 0.4`: a building pays 40% of `worldBlast`'s scrap, and adds `2 + scrap` carnage (was `3 + 1.5·scrap`,
+  which pinned the multiplier at x3 on any street).
+- Merchant repairs cost by the hull point (run.ts `REPAIR`): 3 hull per scrap in sector 1, divided by `1 + 0.35·(sector − 1)`
+  (3, 2.2, 1.76), times the heat repair factor.
 
 | Sector | Fight | Elite | Boss + strip | Route income | Avg part | Merchant stock | Half-hull repair | Parts / fight | Income / stock |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 93 | 116 | 265 | 821 | 111 | 1237 | 46 | 0.84 | 0.66 |
-| 2 | 187 | 129 | 286 | 1258 | 217 | 1883 | 77 | 0.86 | 0.67 |
-| 3 | 286 | 114 | 309 | 1689 | 341 | 2573 | 124 | 0.84 | 0.66 |
+| 1 | 124 | 117 | 288 | 976 | 111 | 1237 | 46 | 1.12 | 0.79 |
+| 2 | 229 | 142 | 321 | 1483 | 217 | 1883 | 77 | 1.05 | 0.79 |
+| 3 | 283 | 124 | 323 | 1703 | 341 | 2573 | 124 | 0.83 | 0.66 |
 
-A fight now buys the same 0.85 of an average part in every sector, and a whole sector buys about two thirds of one
-merchant's stock, so the last shop is a choice between parts, a section, a relic and repairs. The unit test fails if a
-sector 3 fight buys more than 15% more than a sector 1 fight, or if sector 3 income leaves the 0.35–0.85 stock band.
+Early rampages pay a little more (a fight buys about one part in sectors 1-2), and by sector 3 a fight buys 0.83 of an
+average part and a whole sector two thirds of one merchant's stock, so the last shop is a choice between parts, a
+section, a relic and repairs. The unit test fails if a sector 3 fight buys more than 15% more than a sector 1 fight, or
+if sector 3 income leaves the 0.35–0.85 stock band.
 
 ### Repairs and heat 8
 All out-of-combat repairs go through `run.ts`: `healAmount(run, frac)` (what a heal would restore now, after heat and

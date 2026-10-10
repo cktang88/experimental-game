@@ -171,8 +171,10 @@ export function groundBlast(x: number, y: number, r: number, d: number, lance = 
   const sc = worldBlast(x, y, r, d);
   if (sc > 0) {
     S.stats.structures++; if (lance) S.stats.lanceStructures++;
-    addCarnage(S.carnage, 3 + sc * 1.5); feedOverdrive(0.006 + sc * 0.0025);
-    dropScrap(x, y, sc, Math.min(6, Math.ceil(sc / 4)));
+    // Buildings feed the rampage, but less than kills: the city is dense, and at the old 3 + 1.5/scrap every street
+    // pinned carnage at x3. Their scrap is scaled by STRUCTURE_SCRAP (see docs/TECH.md "Scrap economy").
+    addCarnage(S.carnage, 2 + sc); feedOverdrive(0.006 + sc * 0.0025);
+    dropScrap(x, y, sc * STRUCTURE_SCRAP, Math.min(6, Math.ceil(sc / 4)));
     emit({ type: 'structure', x, y, n: sc });
   }
 }
@@ -879,6 +881,8 @@ export const SCRAP_SCALE = 0.35;
  * share of an average part in every sector (see docs/TECH.md "Scrap economy" and tests/unit/economy.test.ts).
  */
 export const SCRAP_SECTOR_TAX = 0.45;
+/** City destruction pays this share of worldBlast()'s 1-4 scrap per building (before SCRAP_SCALE and carnage). */
+export const STRUCTURE_SCRAP = 0.4;
 export const scrapSectorMul = (sector: number) => 1 / (1 + SCRAP_SECTOR_TAX * Math.max(0, sector - 1));
 function dropScrap(x: number, y: number, total: number, n: number) {
   S.stats.scrapRaw += total;
