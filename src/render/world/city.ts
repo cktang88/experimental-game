@@ -318,7 +318,7 @@ export class CityLayer implements Layer {
       const ph = t * (5 + i * 1.7) + seed * 40 + i * 2.1;
       const fl = 0.75 + 0.25 * Math.sin(ph) * Math.sin(ph * 1.7 + 1);
       const ox = Math.sin(seed * 91 + i * 2.4) * sz * 0.25, oz = Math.cos(seed * 57 + i * 1.9) * sz * 0.2;
-      glow.add(x + ox, y + 2 + i, z + oz, 0, sz * (0.45 + 0.25 * f) * fl, sz * (0.45 + 0.25 * f) * fl, i === 0 ? FIRE_B : FIRE_A, 0.55 * f * fl, Shape.Soft);
+      glow.add(x + ox, y + 2 + i, z + oz, 0, sz * (0.45 + 0.25 * f) * fl, sz * (0.45 + 0.25 * f) * fl, i === 0 ? FIRE_B : FIRE_A, 0.38 * f * fl, Shape.Soft);
     }
     glow.add(x, 2, z, 0, sz * 2.4, sz * 2.4, EMBER, 0.12 * f, Shape.Soft);
     for (let i = 0; i < 6; i++) {

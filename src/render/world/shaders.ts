@@ -85,8 +85,11 @@ const BLD_FRAG = /* glsl */ `
     float edge = min(vSz.x * 0.5 - abs(vObj.x), vSz.z * 0.5 - abs(vObj.z));
     float lip = 1.0 - smoothstep(0.5 * uK, 1.4 * uK, edge);
     diffuseColor.rgb *= mix(0.2, 0.75, lip) * (0.8 + 0.4 * h12(floor(vCity.xz / (6.0 * uK)) + seed));
-    totalEmissiveRadiance += vec3(1.0, 0.42, 0.12) * fire * flick * 0.5 * (1.0 - vFall);
+    float firePatch = smoothstep(0.55, 0.9, vnoise(vCity.xz / (3.5 * uK) + seed * 9.0 + vec2(uTime * 0.4, 0.0)));
+    diffuseColor.rgb *= 1.0 - 0.6 * fire;
+    totalEmissiveRadiance += vec3(1.0, 0.38, 0.08) * fire * flick * firePatch * 1.4 * (1.0 - vFall);
   } else if (n.y > -0.5) {
+    diffuseColor.rgb *= 0.6;
     bool xf = abs(n.x) > 0.5;
     float u = xf ? vObj.z + vSz.z * 0.5 : vObj.x + vSz.x * 0.5;
     float faceId = xf ? (n.x > 0.0 ? 1.0 : 2.0) : (n.z > 0.0 ? 3.0 : 4.0);
@@ -108,14 +111,18 @@ const BLD_FRAG = /* glsl */ `
     float on = step(h, litF) * inWin;
     // Far away the grid would alias into noise: fade it to its average glow.
     float aa = clamp(2.2 - 2.0 * max(fwidth(u / bay), fwidth(vH / uFloor)) * 2.5, 0.0, 1.0);
-    on = mix(litF * ww * wh * 1.3, on, aa); inWin = mix(ww * wh, inWin, aa);
+    on = mix(litF * ww * wh * 0.9, on, aa); inWin = mix(ww * wh, inWin, aa);
     float power = keep > 0.5 ? 1.0 : powerAt(vCity, h);
-    vec3 wc = uWinCol * (0.3 + 1.1 * h12(cell * 1.7 + seed * 91.0) * h12(cell.yx + seed));
-    if (glass > 0.5) { wc = mix(wc, vec3(0.55, 0.75, 0.95), 0.35) * 0.8; diffuseColor.rgb *= vec3(0.8, 0.95, 1.25); }
+    // Mostly the sector's window colour, some warm-white and dim-blue (screens) rooms for variety.
+    float hc = h12(cell * 0.37 + seed * 13.0);
+    vec3 tone = hc < 0.62 ? uWinCol : hc < 0.86 ? vec3(1.0, 0.78, 0.52) : vec3(0.45, 0.6, 0.9);
+    vec3 wc = tone * (0.25 + 0.95 * h12(cell * 1.7 + seed * 91.0) * h12(cell.yx + seed));
+    if (glass > 0.5) { wc *= vec3(0.75, 0.9, 1.1); diffuseColor.rgb *= vec3(0.8, 0.95, 1.25); }
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.015, 0.018, 0.024), inWin * 0.75);
     totalEmissiveRadiance += wc * on * power * (1.0 - vFall);
     // Burning floors: random windows turn to fire, and soot climbs the wall.
-    float burn = step(h12(cell + 3.7 + seed), fire * 0.9) * max(inWin, 0.25);
+    float burn = step(h12(cell + 3.7 + seed), fire * 0.9) * inWin;
+    diffuseColor.rgb *= 1.0 - 0.6 * fire;
     totalEmissiveRadiance += vec3(1.0, 0.38, 0.08) * burn * fire * flick * 2.2 * (1.0 - vFall * 0.7);
     // Neon trim along the top storey (Neon Sprawl).
     if (neon > 0.5) {
@@ -126,16 +133,16 @@ const BLD_FRAG = /* glsl */ `
   }
   if (vFall > 0.0) {
     // Rubble: dust-grey heap with embers that cool over time.
-    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.09, 0.085, 0.08), vFall);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.035, 0.032, 0.03), vFall);
     float em = smoothstep(0.72, 0.95, vnoise(vCity.xz / (2.2 * uK) + seed * 7.0));
-    totalEmissiveRadiance += vec3(1.0, 0.33, 0.06) * em * (0.15 + fire * 1.6) * flick * vFall;
+    totalEmissiveRadiance += vec3(1.0, 0.33, 0.06) * em * (0.1 + fire * 1.2) * flick * vFall;
   }
 }
 `;
 
 /** Patch a standard material into the city building material. */
 export function buildingMaterial(): THREE.MeshStandardMaterial {
-  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82, metalness: 0.15 });
+  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0.0 });
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader

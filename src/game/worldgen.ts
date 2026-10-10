@@ -590,10 +590,16 @@ export function worldBlast(x: number, y: number, r: number, dmg: number): number
       CITY.dirty.push(b);
     }
   }
-  if (r >= 10 && y > -40 && y < H + 40) {
+  // Craters: skip one that would land on top of a fresh one (the lance ticks every 50 ms).
+  let near = false;
+  for (let i = CITY.craters.length - 1; i >= Math.max(0, CITY.craters.length - 6); i--) {
+    const o = CITY.craters[i];
+    if (Math.abs(o.x - x) < r * 0.5 && Math.abs(o.cy - (y - S.scrollY)) < r * 0.5) { near = true; break; }
+  }
+  if (r >= 10 && !near && y > -40 && y < H + 40) {
     const c: Crater = { type: 'crater', x, y, cy: y - S.scrollY, w: r, h: r, r: r * rnd(0.55, 0.8), hgt: 0, born: CITY.time };
     CITY.craters.push(c); S.decor.push(c);
-    if (CITY.craters.length > 90) { const old = CITY.craters.shift()!; S.decor = S.decor.filter((d) => d !== old); }
+    if (CITY.craters.length > 90) { const old = CITY.craters.shift()!; const at = S.decor.indexOf(old); if (at >= 0) S.decor.splice(at, 1); }
   }
   return scrap;
 }
