@@ -72,13 +72,14 @@ describe('firing arcs', () => {
     const d = derive(starterBuild());
     expect(d.mounts.map((m) => [m.arc, m.side])).toEqual([['bow', 0], ['broadside', -1], ['ventral', 0], ['broadside', 1], ['internal', 0]]);
   });
-  it('bombs and mortars are always ventral, coils and PD omni, gun decks fire from the bow', () => {
+  it('bombs and mortars are always ventral, coils and PD omni, gun decks are top-deck turrets', () => {
     expect(mountArc('gundeck', 'W', 'artillery')).toBe('ventral');
     expect(mountArc('battery', 'W', 'bomb')).toBe('ventral');
     expect(mountArc('battery', 'W', 'tesla')).toBe('omni');
-    expect(mountArc('gundeck', 'W', 'pulse')).toBe('bow');
+    expect(mountArc('gundeck', 'W', 'pulse')).toBe('dorsal');
+    expect(mountArc('bridge', 'W', 'pulse')).toBe('bow');
     expect(mountArc('battery', 'W', null)).toBe('broadside');
-    for (const a of ['bow', 'broadside', 'ventral', 'omni', 'internal'] as const) expect(ARC_INFO[a].desc.length).toBeGreaterThan(10);
+    for (const a of ['bow', 'dorsal', 'broadside', 'ventral', 'omni', 'internal'] as const) expect(ARC_INFO[a].desc.length).toBeGreaterThan(10);
   });
   it('heavier hulls accelerate and brake more slowly', () => {
     const light = derive(starterBuild());

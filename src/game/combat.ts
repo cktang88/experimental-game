@@ -3,7 +3,7 @@
 import { clamp, rnd, pick, has, angDiff } from '../util/rng';
 import {
   WEAPONS, derive, wCd, wDmg, type Build, type Derived, type Part, type Mods, type Mount, type Arc, ghostToBuild,
-  weaponFamily, weaponGroups, HEAVY_FAMILIES, MAGNET, type WeaponGroup, type HeavyFamily,
+  weaponFamily, weaponGroups, HEAVY_FAMILIES, MAGNET, TRAVERSE, inTraverse, clampTraverse, layersHit, type WeaponGroup, type HeavyFamily, type TargetLayers, type Traverse,
 } from '../data/parts';
 import { EN, type EnemyType, type Encounter } from '../data/enemies';
 import { hasFlag } from '../data/relics';
@@ -259,7 +259,8 @@ function spawnElite(type: EnemyType) {
 /* ---------------- boss ---------------- */
 // A ghost flies the wreck it was recorded as, and every weapon keeps the arc its mount gives it, mirrored (its bow
 // points down the screen, at you):
-//  - bow guns cover a cone below it (BOSS_BROADSIDE.bowCone either side of straight down);
+//  - every gun trains inside its mount's traverse (mountTraverse in data/parts.ts, mirrored): the bridge gun a cone
+//    below it, top-deck turrets all round (the player is an aircraft to them), broadsides their flank sector;
 //  - Broadside Battery guns fire telegraphed ripple volleys off its flanks, stern to bow, like ours;
 //  - bombs and mortars work ventrally (mines and telegraphed strikes), coils and point defense all round.
 // So it has zones, as the player does: under its bow you eat the bow guns, beside it the broadsides.
@@ -271,13 +272,12 @@ export const BOSS_BROADSIDE = {
   /** Seconds between volleys on a side, before cdMul, the ghost's fire rate and the phase. */ period: 3.6,
   /** Wind-up per phase: the guns glow and their lanes show before the ripple. */ tele: [0.85, 0.7, 0.6],
   /** Seconds between rounds in the ripple (heavier than ours). */ stagger: 0.075,
-  /** Bow cone half-angle either side of straight down. */ bowCone: 0.6,
   /** Phase 2 rake: total sweep (radians) and the hole left in it. */ rake: 0.9, hole: 0.34,
   /** Phase 3 weave offset either side of the aimed line. */ weave: 0.15,
 } as const;
 const BOSS_CD: Record<string, number> = { pulse: 1.5, spread: 2.5, flak: 2.9, missile: 3.6, bomb: 3.1, artillery: 3.4, rail: 4.6, tesla: 2.6, pd: 0.45 };
 /** A ghost gun: mount offset in design units (scaled by Boss.s), arc and broadside side as on the player's ship. */
-export interface BossGun { part: Part; ox: number; oy: number; cd: number; arc: Arc; side: -1 | 0 | 1; /** Half width of its section: broadside muzzles sit on the hull side. */ edge: number }
+export interface BossGun { part: Part; ox: number; oy: number; cd: number; arc: Arc; side: -1 | 0 | 1; /** Half width of its section: broadside muzzles sit on the hull side. */ edge: number; /** Mount traverse (ship space; the ghost is mirrored). */ trav: Traverse }
 /** Broadside state for one flank: cooldown, wind-up (-1 idle) and the ripple's scheduled rounds. */
 export interface BossVolley { cd: number; wind: number; queue: { at: number; fire: () => void }[] }
 /** A wind-up glint for the FX layer: field point, 0..1 progress, lane angle, and the sweep half-angle (0: one line). */
@@ -302,7 +302,7 @@ function spawnBoss(g: Ghost) {
     regen: u.repair * 0.0025 * maxHp, tractor: u.magnet * 14, droneEvery: u.drones ? Math.max(5, 10 - u.drones) : 0, droneT: 6,
     speedMul: 1 + 0.12 * u.thruster, fireMul: (1 + 0.1 * u.reactor) * S.heat.bossFire, cdMul: clamp(1.15 - 0.06 * sec, 0.6, 1.1),
     t: 0, phase: 1, flash: 0, entered: false, vx: 0,
-    weps: dv.mounts.filter((m) => m.part && has(WEAPONS, m.part.id)).map((m, i) => ({ part: m.part!, ox: m.ox, oy: m.oy, cd: 1.2 + i * 0.45, arc: m.arc, side: m.side, edge: dv.rects[m.si].w / 2 })),
+    weps: dv.mounts.filter((m) => m.part && has(WEAPONS, m.part.id)).map((m, i) => ({ part: m.part!, ox: m.ox, oy: m.oy, cd: 1.2 + i * 0.45, arc: m.arc, side: m.side, edge: dv.rects[m.si].w / 2, trav: m.trav })),
     // first volleys come a beat after the bow guns open up, port and starboard out of step
     volley: [{ cd: 2.2, wind: -1, queue: [] }, { cd: 3.4, wind: -1, queue: [] }], glints: [],
   };
@@ -315,14 +315,14 @@ function eShot(x: number, y: number, a: number, spd: number, o: Record<string, a
 }
 function ring(x: number, y: number, n: number, spd: number, o: Record<string, any> = {}) { const off = rnd(0, Math.PI * 2); for (let i = 0; i < n; i++) eShot(x, y, off + (i * Math.PI * 2) / n, spd, o); }
 /** Aim at the player, held inside the ghost's bow cone (its bow points down the screen). */
-const bowAim = (x: number, y: number) => Math.PI / 2 + clamp(angDiff(aimAng(x, y), Math.PI / 2), -BOSS_BROADSIDE.bowCone, BOSS_BROADSIDE.bowCone);
+const gunAim = (w: BossGun, x: number, y: number) => clampTraverse(w.trav, aimAng(x, y), true);
 function bossFire(w: BossGun) {
   const P = S.P!, { x, y } = bossMount(w), t = w.part.tier, dmg = edmg() * 0.65 * (1 + 0.15 * (t - 1)), spd = bspd(), sec = S.sector;
   if (w.part.id !== 'pd' && w.part.id !== 'artillery') muzzle(x, y + 8, '#ff7a5c', w.part.id === 'rail' ? 22 : 14);
   switch (w.part.id) {
-    case 'pulse': { const a = bowAim(x, y); for (let k = 0; k < 3 + (t >= 3 ? 1 : 0); k++) eShot(x, y, a + rnd(-0.04, 0.04), spd * (1 - 0.12 * k), { dmg }); break; }
-    case 'spread': { const n = 7 + Math.min(4, t); for (let i = 0; i < n; i++) eShot(x, y, Math.PI / 2 + (i - (n - 1) / 2) * 0.17, spd * 0.85, { dmg, col: '#ff7a6b' }); break; }
-    case 'flak': { const a = bowAim(x, y), d = Math.hypot(P.x - x, P.y - y); eShot(x, y, a, 150, { kind: 'orb', r: 8, life: clamp(d / 150, 0.6, 2.4), col: '#ffd27a', dmg }); break; }
+    case 'pulse': { const a = gunAim(w, x, y); for (let k = 0; k < 3 + (t >= 3 ? 1 : 0); k++) eShot(x, y, a + rnd(-0.04, 0.04), spd * (1 - 0.12 * k), { dmg }); break; }
+    case 'spread': { const n = 7 + Math.min(4, t), c0 = w.arc === 'dorsal' ? gunAim(w, x, y) : Math.PI / 2; for (let i = 0; i < n; i++) eShot(x, y, c0 + (i - (n - 1) / 2) * 0.17, spd * 0.85, { dmg, col: '#ff7a6b' }); break; }
+    case 'flak': { const a = gunAim(w, x, y), d = Math.hypot(P.x - x, P.y - y); eShot(x, y, a, 150, { kind: 'orb', r: 8, life: clamp(d / 150, 0.6, 2.4), col: '#ffd27a', dmg }); break; }
     case 'missile': for (const s of [-1, 1]) eShot(x + s * 6, y, Math.PI / 2 + s * 0.7, 140, { kind: 'missile', turn: 1.6 + 0.2 * t, spd: 150 + 10 * t, hp: 5 * sec, life: 5, r: 5, col: '#ff9f5a', dmg: dmg * 1.5 }); break;
     case 'bomb': for (let i = -1; i <= 1; i++) eShot(x + i * 18, y, Math.PI / 2, 90 + rnd(0, 40), { kind: 'mine', r: 7, life: rnd(1.3, 2.1), col: '#f2a541', dmg }); break;
     case 'artillery': { const n = t >= 3 ? 4 : 2; for (let k = 0; k < n; k++) strike(P.x + (k ? rnd(-110, 110) : 0), P.y + (k ? rnd(-90, 90) : 0), dmg * 2.2, 46); break; }
@@ -348,15 +348,15 @@ function depressionTo(x: number, y: number, side: number) {
   return angDiff(Math.atan2(P.y - y, P.x - x), base) * side;
 }
 const sideAngle = (side: number, dep: number) => (side > 0 ? 0 : Math.PI) + side * dep;
-/** Broadside guns may train from a little above the beam to well below it; they cannot fire across their own hull. */
-const lockDep = (d: number) => clamp(d, -0.25, 0.95);
+/** Broadside guns train inside their flank sector (TRAVERSE.broadside either side of the beam); they cannot fire across their own hull. */
+const lockDep = (d: number) => clamp(d, -TRAVERSE.broadside, TRAVERSE.broadside);
 /** Does a flank have the player in its arc? Phase 3 fires both flanks regardless. */
 function bossFlankEngaged(b: Boss, side: number) {
   if (b.phase >= 3) return true;
   const P = S.P!, dx = (P.x - b.x) * side;
   if (dx < b.halfW * 0.5) return false;
   const d = depressionTo(b.x + side * b.halfW, b.y, side);
-  return d > -0.6 && d < (b.phase === 2 ? 1.25 : 1.05);
+  return Math.abs(d) < TRAVERSE.broadside + (b.phase === 2 ? 0.25 : 0.05);
 }
 function bossGuns(b: Boss, side: number) {
   const pSide = S.P!.x >= b.x ? 1 : -1;
@@ -682,9 +682,9 @@ function updateOverdrive(dt: number) {
  * across fights. Ghost bosses fly their own fire control (bossFire / ghost broadsides) and are unaffected.
  */
 export const gunnery = { manual: false, family: null as HeavyFamily | null };
-/** Manual fire numbers: cones a rail can train in, the heavy-shot damage bonus (a deliberate shot replaces the
- *  broadside ripple's 1.2x), and how close to the reticle a missile lock reaches. */
-export const MANUAL = { bowCone: 0.75, sideCone: 0.7, dmgMul: 1.2, lockR: 170 } as const;
+/** Manual fire numbers: the heavy-shot damage bonus (a deliberate shot replaces the broadside ripple's 1.2x), and how
+ *  close to the reticle a missile lock reaches. Cones are the mount traverses (mountTraverse in data/parts.ts). */
+export const MANUAL = { dmgMul: 1.2, lockR: 170 } as const;
 /**
  * The reticle (field units, the point under the mouse). `fire`: left mouse held (the selected group); `salvo`: right
  * mouse held (every heavy group). `group` indexes S.groups. `lock` is the missile lock (target nearest the reticle
@@ -693,10 +693,11 @@ export const MANUAL = { bowCone: 0.75, sideCone: 0.7, dmgMul: 1.2, lockR: 170 } 
  */
 export const aim = {
   x: W / 2, y: H * 0.35, fire: false, salvo: false, group: 0,
-  lock: null as Ent | null, lockT: 0, bears: {} as Record<number, boolean>, shotAt: -9,
+  lock: null as Ent | null, lockT: 0, bears: {} as Record<number, boolean>, why: {} as Record<number, NoBear>, shotAt: -9,
+  /** The target right under the reticle, if any. */ hover: null as Ent | null,
 };
 function resetAim() {
-  aim.fire = aim.salvo = false; aim.lock = null; aim.lockT = 0; aim.bears = {}; aim.shotAt = -9;
+  aim.fire = aim.salvo = false; aim.lock = null; aim.hover = null; aim.lockT = 0; aim.bears = {}; aim.why = {}; aim.shotAt = -9;
   const i = gunnery.family ? S.groups.findIndex((g) => g.family === gunnery.family) : -1;
   aim.group = Math.max(0, i);
 }
@@ -714,17 +715,23 @@ export function firingGroups(): WeaponGroup[] {
   if (aim.salvo) return S.groups;
   return aim.fire && S.groups[aim.group] ? [S.groups[aim.group]] : [];
 }
-/** Can heavy mount m bear on field point (ax, ay)? Rails train within a cone of their arc; ground ordnance has a reach;
- *  missiles are guided and always launch. */
-export function heavyBears(m: Mount, ax: number, ay: number): boolean {
-  const P = S.P!, fam = m.part ? weaponFamily(m.part.id) : null; if (!fam) return false;
-  const x = P.x + m.ox, y = P.y + m.oy, def = HEAVY_FAMILIES[fam];
-  if (def.aim === 'lock') return true;
-  if (def.aim === 'ground') return Math.hypot(ax - x, ay - y) <= def.reach;
-  const a = Math.atan2(ay - y, ax - x);
-  if (m.arc === 'broadside') return (m.side ? [m.side] : [-1, 1]).some((s) => Math.abs(angDiff(a, s < 0 ? Math.PI : 0)) <= MANUAL.sideCone);
-  return Math.abs(angDiff(a, -Math.PI / 2)) <= MANUAL.bowCone;
+/** Why a heavy mount cannot bear: '' (it can), 'arc' (outside its traverse), 'range' (ground ordnance out of reach),
+ *  'air' (a top-deck mount and the reticle is on a ground target), 'ground' (ventral ordnance on an aircraft lock). */
+export type NoBear = '' | 'arc' | 'range' | 'air' | 'ground';
+/**
+ * Can heavy mount m bear on field point (ax, ay), with `hover` the target under the reticle? Line weapons (rails)
+ * must have the point inside their traverse; ground ordnance has a reach; missiles are guided and launch from any
+ * mount, but a top-deck pod cannot take a ground lock. A mount never engages a layer its placement cannot reach.
+ */
+export function heavyWhy(m: Mount, ax: number, ay: number, hover: Ent | null): NoBear {
+  const P = S.P!, fam = m.part ? weaponFamily(m.part.id) : null; if (!fam) return 'arc';
+  const x = P.x + m.ox, y = P.y + m.oy, def = HEAVY_FAMILIES[fam], t = m.trav;
+  if (def.aim === 'ground') return Math.hypot(ax - x, ay - y) <= def.reach ? '' : 'range';
+  if (hover && !layersHit(t.layers, hover.layer)) return t.layers === 'air' ? 'air' : 'ground';
+  if (def.aim === 'lock') return '';
+  return inTraverse(t, Math.atan2(ay - y, ax - x)) ? '' : 'arc';
 }
+export const heavyBears = (m: Mount, ax: number, ay: number, hover: Ent | null = null) => heavyWhy(m, ax, ay, hover) === '';
 /** Where a heavy turret should point (renderer hook): the reticle or the missile lock, or null when it aims itself. */
 export function manualAimFor(uid: number): { x: number; y: number } | null {
   const P = S.P; if (!gunnery.manual || !P || !S.active) return null;
@@ -735,20 +742,27 @@ export function manualAimFor(uid: number): { x: number; y: number } | null {
   return aim;
 }
 /** Missile lock: the target nearest the reticle (bosses by their hull), within MANUAL.lockR. */
-export function lockNear(x: number, y: number): Ent | null {
+export function lockNear(x: number, y: number, layer = 'both'): Ent | null {
   let best: Ent | null = null, bd: number = MANUAL.lockR;
   for (const e of allTargets()) {
-    if (e.dead || EN[e.type as EnemyType]?.salvage) continue;
+    if (e.dead || EN[e.type as EnemyType]?.salvage || !layerOk(layer, e.layer)) continue;
     const d = e.isBoss ? Math.max(0, Math.abs(e.x - x) - e.halfW) + Math.max(0, Math.abs(e.y - y) - (e.dv.len * e.s) / 2) : Math.hypot(e.x - x, e.y - y) - e.r;
     if (d < bd) { bd = d; best = e; }
   }
   return best;
 }
 function updateAim(dt: number) {
-  for (const g of S.groups) for (const m of g.mounts) aim.bears[m.part!.uid] = heavyBears(m, aim.x, aim.y);
+  // the target under the reticle (tighter than a missile lock): what a line or lock weapon would be aimed at
+  const hover = lockNear(aim.x, aim.y);
+  aim.hover = hover && Math.hypot(hover.x - aim.x, hover.y - aim.y) - (hover.isBoss ? hover.halfW : hover.r) < 60 ? hover : null;
   const wantLock = S.groups[aim.group]?.family === 'missile' || (aim.salvo && S.groups.some((g) => g.family === 'missile'));
   const tg = wantLock ? lockNear(aim.x, aim.y) : null;
   if (tg !== aim.lock) { aim.lock = tg; aim.lockT = 0; } else if (tg) aim.lockT += dt;
+  // missiles judge their lock, everything else what is under the reticle
+  for (const g of S.groups) for (const m of g.mounts) {
+    const w = heavyWhy(m, aim.x, aim.y, g.family === 'missile' ? aim.lock ?? aim.hover : aim.hover);
+    aim.why[m.part!.uid] = w; aim.bears[m.part!.uid] = w === '';
+  }
 }
 /** One manually aimed heavy shot from mount m at the reticle. */
 function fireHeavy(m: Mount, x: number, y: number) {
@@ -756,10 +770,9 @@ function fireHeavy(m: Mount, x: number, y: number) {
   const ax = aim.x, ay = aim.y, dist = Math.hypot(ax - x, ay - y);
   switch (fam) {
     case 'rail': {
-      let a = Math.atan2(ay - y, ax - x), mx = x;
-      if (m.arc === 'broadside') { const s = m.side || (ax < x ? -1 : 1), base = s < 0 ? Math.PI : 0; a = base + clamp(angDiff(a, base), -MANUAL.sideCone, MANUAL.sideCone); mx = x + s * P.dv.width * 0.12; }
-      else a = -Math.PI / 2 + clamp(angDiff(a, -Math.PI / 2), -MANUAL.bowCone, MANUAL.bowCone);
-      railLine(mx, y, mx + Math.cos(a) * 1900, y + Math.sin(a) * 1900, d, c);
+      const a = clampTraverse(m.trav, Math.atan2(ay - y, ax - x));
+      const mx = m.arc === 'broadside' ? x + Math.sign(Math.cos(a)) * P.dv.width * 0.12 : x;
+      railLine(mx, y, mx + Math.cos(a) * 1900, y + Math.sin(a) * 1900, d, c, m.trav.layers);
       muzzle(mx + Math.cos(a) * 10, y + Math.sin(a) * 10, c, 24);
       kick(-Math.cos(a) * 9, -Math.sin(a) * 9); addTrauma(0.2); V.flashA = Math.max(V.flashA, 0.05);
       break;
@@ -768,8 +781,9 @@ function fireHeavy(m: Mount, x: number, y: number) {
       const s0 = m.arc === 'broadside' ? (m.side || (ax < x ? -1 : 1)) : 0;
       for (const s of [-1, 1]) {
         const vx = s0 ? s0 * 300 : s * 150, vy = s0 ? s * 80 : -170;
-        const b = bolt(x + s * 5, y, vx, vy, d, 'both', c, 3);
-        Object.assign(b, { kind: 'missile', turn: 6, speed: 520, life: 3.2, manual: true, tg: aim.lock && !aim.lock.dead ? aim.lock : null, dest: { x: ax, y: ay } });
+        const lay = m.trav.layers === 'air' ? 'air' : 'both', lk = aim.lock && !aim.lock.dead && layerOk(lay, aim.lock.layer) ? aim.lock : null;
+        const b = bolt(x + s * 5, y, vx, vy, d, lay, c, 3);
+        Object.assign(b, { kind: 'missile', turn: 6, speed: 520, life: 3.2, manual: true, tg: lk, dest: { x: ax, y: ay } });
         S.pb.push(b);
       }
       muzzle(x, y - 6, c, 14); sfx('missile', { x, layer: 'ship' }); addTrauma(0.07);
@@ -804,18 +818,25 @@ function nearest(x: number, y: number, f: (e: Ent) => boolean, maxD: number) {
   for (const e of allTargets()) { if (e.dead || !f(e)) continue; const d = Math.hypot(e.x - x, e.y - y) - (e.isBoss ? e.r * 0.6 : 0); if (d < bd) { bd = d; best = e; } }
   return best;
 }
-/** Range and cone numbers for each arc, shared with docs. */
-export const ARC_RANGE = { bowHalfWidth: 300, broadside: 760, broadsideBand: 90, ventralBomb: 0, mortar: 520, tesla: 240 } as const;
-/** The best target for a mount's arc, or null when nothing is in its arc (the battery then holds fire). */
-function arcTarget(m: Mount, x: number, y: number, layer: string): Ent | null {
-  const P = S.P!;
-  if (m.arc === 'bow') {
+/** Range and cone numbers for each arc, shared with docs. Cones are the mount traverses (TRAVERSE in data/parts.ts). */
+export const ARC_RANGE = { bow: 1000, dorsal: 720, broadside: 760, broadsideBand: 90, ventralBomb: 0, mortar: 520, tesla: 240 } as const;
+/** The best target for a mount's arc, or null when nothing is in its arc (the battery then holds fire). Bow and
+ *  broadside mounts engage air and ground inside their sectors; top-deck (dorsal) turrets turn all round but only
+ *  engage aircraft and ships. */
+function arcTarget(m: Mount, x: number, y: number): Ent | null {
+  const P = S.P!, t = m.trav;
+  if (m.arc === 'bow' || m.arc === 'dorsal') {
     let best: Ent | null = null, bd = Infinity;
+    const range = m.arc === 'bow' ? ARC_RANGE.bow : ARC_RANGE.dorsal;
     for (const e of allTargets()) {
-      if (e.dead || !layerOk(layer, e.layer) || (e.layer === 'ground' && layer !== 'both') || e.y > y + 10 || e.y < -40) continue;
-      const half = ARC_RANGE.bowHalfWidth + (e.isBoss ? e.halfW : e.r);
-      if (Math.abs(e.x - x) > half) continue;
-      const d = (y - e.y) + Math.abs(e.x - x) * 1.5; if (d < bd) { bd = d; best = e; }
+      if (e.dead || !layersHit(t.layers, e.layer) || e.y < -40) continue;
+      const reach = e.isBoss ? e.halfW : e.r, dx = e.x - x, dy = e.y - y, dist = Math.hypot(dx, dy) - reach;
+      if (dist > range) continue;
+      // inside the sector, or a ship whose hull reaches into it
+      const nx = e.isBoss ? clamp(x, e.x - reach, e.x + reach) : e.x;
+      if (!inTraverse(t, Math.atan2(dy, dx)) && !inTraverse(t, Math.atan2(dy, nx - x))) continue;
+      const d = (m.arc === 'bow' ? (y - e.y) + Math.abs(dx) * 1.5 : dist) + (EN[e.type as EnemyType]?.salvage ? 300 : 0);
+      if (d < bd) { bd = d; best = e; }
     }
     return best;
   }
@@ -824,10 +845,11 @@ function arcTarget(m: Mount, x: number, y: number, layer: string): Ent | null {
     let best: Ent | null = null, bd = Infinity;
     for (const side of m.side ? [m.side] : [-1, 1]) {
       for (const e of allTargets()) {
-        if (e.dead) continue;
+        if (e.dead || !layersHit(t.layers, e.layer)) continue;
         const dx = (e.x - x) * side, reach = e.isBoss ? e.halfW : e.r;
         if (dx < -reach + P.dv.width * 0.3 || dx > ARC_RANGE.broadside + reach) continue;
         if (Math.abs(e.y - P.y) > band + reach) continue;
+        if (!e.isBoss && !inTraverse(t, Math.atan2(e.y - y, e.x - x))) continue;
         const d = dx + Math.abs(e.y - y) * 0.7 + (EN[e.type as EnemyType]?.salvage ? 300 : 0); if (d < bd) { bd = d; best = e; }
       }
     }
@@ -855,7 +877,7 @@ function fireWeapons(dt: number) {
       continue;
     }
     if (m.arc === 'broadside') {
-      const tg = arcTarget(m, x, y, 'both');
+      const tg = arcTarget(m, x, y);
       if (!tg) { P.cds[p.uid] = 0.08; continue; }
       const side = m.side || (tg.x < x ? -1 : 1), v = S.volley[side < 0 ? 0 : 1];
       if (!v.queue.some((q) => q.m === m)) v.queue.push({ at: 0, m });
@@ -913,20 +935,20 @@ function updateVolleys(dt: number) {
   }
 }
 function fireWeapon(p: Part, m: Mount, x: number, y: number, mul: number, side = 0): boolean {
-  const d = wDmg(p) * mul, c = WEAPONS[p.id].col, arc = m.arc;
-  // aim direction for bow and broadside guns
+  const d = wDmg(p) * mul, c = WEAPONS[p.id].col, arc = m.arc, trav = m.trav;
+  // aim direction for bow, top-deck and broadside guns, held inside the mount's traverse
   let a = -Math.PI / 2, tg: Ent | null = null;
-  if (arc === 'bow' || arc === 'broadside') {
-    tg = arcTarget(m, x, y, arc === 'bow' ? WEAPONS[p.id].layer : 'both');
-    if (!tg && arc === 'bow' && p.id !== 'missile') return false;
-    if (arc === 'bow' && tg) a = -Math.PI / 2 + clamp(angDiff(Math.atan2(tg.y - y, tg.x - x), -Math.PI / 2), -0.35, 0.35);
+  if (arc === 'bow' || arc === 'broadside' || arc === 'dorsal') {
+    tg = arcTarget(m, x, y);
+    if (!tg && arc !== 'broadside' && p.id !== 'missile') return false;
     if (arc === 'broadside') {
       const base = side < 0 ? Math.PI : 0;
-      a = tg ? base + clamp(angDiff(Math.atan2(tg.y - y, tg.x - x), base), -0.5, 0.5) : base;
-    }
+      a = tg ? base + clamp(angDiff(Math.atan2(tg.y - y, tg.x - x), base), -TRAVERSE.broadside, TRAVERSE.broadside) : base;
+    } else if (tg) a = clampTraverse(trav, Math.atan2(tg.y - y, tg.x - x));
   }
-  const lay = arc === 'broadside' ? 'both' : WEAPONS[p.id].layer;
-  // Broadside guns shelling a ground target lob a shell onto it instead of a flat bolt.
+  // Bolts engage what the mount can engage: top-deck guns cannot hit the ground.
+  const lay = trav.layers === 'air' ? 'air' : trav.layers === 'ground' ? 'ground' : 'both';
+  // Broadside guns shelling a ground target lob a shell onto it instead of a flat bolt (bow guns strafe it with bolts).
   if (arc === 'broadside' && tg && tg.layer === 'ground' && p.id !== 'rail' && p.id !== 'missile') {
     const n = p.id === 'spread' ? (p.tier >= 3 ? 3 : 2) : 1;
     for (let i = 0; i < n; i++) shell(x, y, tg.x + rnd(-14, 14) * i, tg.y + S.scroll * 0.5 + rnd(-10, 10) * i, d * (p.id === 'flak' ? 1.4 : 1.15), c, 28, 0.5);
@@ -943,7 +965,7 @@ function fireWeapon(p: Part, m: Mount, x: number, y: number, mul: number, side =
       const sx = arc === 'broadside' ? side : 0;
       for (const s of [-1, 1]) {
         const vx = sx ? sx * 300 : s * 130, vy = sx ? s * 80 : -160;
-        const b = bolt(x + s * 4, y, vx, vy, d, 'both', c, 3); Object.assign(b, { kind: 'missile', turn: 5, speed: 470, life: 2.6 }); S.pb.push(b);
+        const b = bolt(x + s * 4, y, vx, vy, d, lay, c, 3); Object.assign(b, { kind: 'missile', turn: 5, speed: 470, life: 2.6 }); S.pb.push(b);
       }
       sfx('missile', { x, layer: 'ship' }); return true;
     }
@@ -965,14 +987,14 @@ function fireWeapon(p: Part, m: Mount, x: number, y: number, mul: number, side =
       shell(x, y, tx, ty, d, c, 36, 0.6); sfx('mortar', { x, layer: 'ship' }); return true;
     }
     case 'rail': {
-      railLine(x, y, x + Math.cos(a) * 1500, y + Math.sin(a) * 1500, d, c);
+      railLine(x, y, x + Math.cos(a) * 1500, y + Math.sin(a) * 1500, d, c, trav.layers);
       return true;
     }
     case 'tesla': {
       let cx = x, cy = y, range: number = ARC_RANGE.tesla, any = false; const hit = new Set<Ent>();
       for (let k = 0; k < 2 + p.tier; k++) {
         let best: Ent | null = null, bd = range;
-        for (const e of allTargets()) { if (e.dead || hit.has(e)) continue; const dd = Math.hypot(e.x - cx, e.y - cy) - (e.isBoss ? e.r * 0.6 : 0); if (dd < bd) { bd = dd; best = e; } }
+        for (const e of allTargets()) { if (e.dead || hit.has(e) || !layersHit(trav.layers, e.layer)) continue; const dd = Math.hypot(e.x - cx, e.y - cy) - (e.isBoss ? e.r * 0.6 : 0); if (dd < bd) { bd = dd; best = e; } }
         if (!best) break; hit.add(best);
         S.beams.push({ x1: cx, y1: cy, x2: best.x, y2: best.y, col: c, life: 0.14, max: 0.14, w: 2, zig: true });
         damageTarget(best, d); cx = best.x; cy = best.y; range = 150; any = true;
@@ -992,12 +1014,12 @@ function shell(x: number, y: number, tx: number, ty: number, d: number, col: str
   const b = bolt(x, y, 0, 0, d, 'ground', col, 4);
   Object.assign(b, { kind: 'shell', sx: x, sy: y, tx, ty, life: t, max: t, aoe }); S.pb.push(b);
 }
-function railLine(x1: number, y1: number, x2: number, y2: number, d: number, c: string) {
+function railLine(x1: number, y1: number, x2: number, y2: number, d: number, c: string, layers: TargetLayers = 'both') {
   S.beams.push({ x1, y1, x2, y2, col: c, life: 0.28, max: 0.28, w: 5 });
   const L = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / L, uy = (y2 - y1) / L;
   for (let i = 0; i < 16; i++) { const k = rnd(0, L); addFx({ type: 'spark', x: x1 + ux * k, y: y1 + uy * k, vx: rnd(-160, 160), vy: rnd(-60, 60), life: rnd(0.15, 0.4), max: 0.4, size: 1.5, drag: 3, tint: '#e6d6ff' }); }
   const distTo = (px: number, py: number) => { const k = clamp((px - x1) * ux + (py - y1) * uy, 0, L); return Math.hypot(x1 + ux * k - px, y1 + uy * k - py); };
-  for (const e of S.enemies) if (!e.dead && distTo(e.x, e.y) < e.r + 6) damageTarget(e, d);
+  for (const e of S.enemies) if (!e.dead && layersHit(layers, e.layer) && distTo(e.x, e.y) < e.r + 6) damageTarget(e, d);
   const B = S.boss; if (B && B.alive && distTo(B.x, B.y) < B.halfW) damageBoss(d);
   sfx('rail', { x: x1, layer: 'ship' });
 }
@@ -1010,7 +1032,7 @@ export function damageTarget(e: Ent, d: number) {
   if (e.hp <= 0) killEnemy(e as Enemy);
 }
 /** Global scrap tuning: kill and salvage values in data/enemies.ts are multiplied by this before carnage. */
-export const SCRAP_SCALE = 0.35;
+export const SCRAP_SCALE = 0.31;
 /**
  * Late sectors spawn several times as much to kill, and carnage sits at its cap, so raw scrap grows faster than
  * merchant prices. Each sector past the first divides drops by 1 + SCRAP_SECTOR_TAX: a fight buys about the same
@@ -1073,7 +1095,7 @@ function updatePB(dt: number) {
     if (b.kind === 'missile') {
       // Manual missiles keep their lock; without one (or when it dies) they look for a target near the aim point,
       // and failing that fly to the point itself and detonate there.
-      if (!b.tg || b.tg.dead) b.tg = b.manual ? lockNear(b.dest.x, b.dest.y) : nearest(b.x, b.y, () => true, 700);
+      if (!b.tg || b.tg.dead) b.tg = b.manual ? lockNear(b.dest.x, b.dest.y, b.layer) : nearest(b.x, b.y, (e) => layerOk(b.layer, e.layer), 700);
       if (b.manual && !b.tg && Math.hypot(b.dest.x - b.x, b.dest.y - b.y) < 22) { explode(b.x, b.y, 38, b.dmg, 'both', b.col); b.dead = true; continue; }
       const ca = Math.atan2(b.vy, b.vx);
       const goal = b.tg ? Math.atan2(b.tg.y - b.y, b.tg.x - b.x) : b.manual ? Math.atan2(b.dest.y - b.y, b.dest.x - b.x) : -Math.PI / 2;
