@@ -24,6 +24,8 @@ const P_ALT = -10;
 const v = new THREE.Vector3(), w = new THREE.Vector3(), d = new THREE.Vector3();
 /** Is a field offset (dx, dy) from the mount inside its traverse? */
 const inArc = (tv: Traverse, dx: number, dy: number) => tv.half >= Math.PI || bearingIn(tv, Math.atan2(dy, dx));
+/** World point (centred field) to field coordinates, in place. */
+const toField = (p: THREE.Vector3) => { p.x += FIELD_W / 2; p.z += FIELD_H / 2; return p; };
 
 interface Rig {
   model: ShipModel; sig: string;
@@ -336,7 +338,6 @@ export class ShipLayer implements Layer {
     // ghost's crew is dead: half its lights are out before the fight starts and more fail each phase.
     (m.lights.material as THREE.ShaderMaterial).uniforms.uDmg.value = hostile ? clamp(0.38 + 0.2 * esc + Math.max(0, 0.33 - frac) * 0.3, 0, 0.94) : clamp((0.7 - frac) / 0.7, 0, 0.8);
     if (frac <= 0) return;
-    const toField = (p: THREE.Vector3) => { p.x += FIELD_W / 2; p.z += FIELD_H / 2; return p; };
     d.set(0, 0, 1).transformDirection(m.root.matrixWorld);
     if (hostile) {
       // Old wounds: a smoulder and a long, thin smoke trail streaming aft from each.
