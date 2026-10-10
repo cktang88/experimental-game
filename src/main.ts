@@ -8,7 +8,7 @@ import { preloadKits } from './render/assets';
 import { V } from './game/vfx';
 import { drawHud } from './render/hud';
 import { drawBlueprint } from './render/shipPreview';
-import { S, W, H, keys, startCombat, updateCombat, updateBg, endCombat, seedDecor, setScrapHandler, damagePlayer, damageTarget, triggerOverdrive } from './game/combat';
+import { S, W, H, keys, startCombat, updateCombat, updateBg, endCombat, seedDecor, setScrapHandler, damagePlayer, damageTarget, triggerOverdrive, aim, gunnery, selectGroup, cycleGroup } from './game/combat';
 import { initAudio, sfx, audio, setMuted, music, updateAudio, setVolume } from './audio';
 import { settings as uiSettings, onSettings } from './ui/settings';
 import { wireAudioSettings } from './ui/sound';
@@ -98,24 +98,60 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') setMuted(audio.on);
 });
 window.addEventListener('keyup', (e) => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; });
-window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; if (mode === 'combat') setPaused(true); });
+const releaseTriggers = () => { aim.fire = aim.salvo = false; };
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; releaseTriggers(); if (mode === 'combat') setPaused(true); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && mode === 'combat') setPaused(true); });
+
+/* Gunnery. With a mouse the heavy weapon groups are fired by hand: the mouse moves the reticle, left button fires the
+   selected group, right button salvoes every heavy group; 1-9 (or Q / E, or the wheel) pick the group. AUTO guns fire on
+   their own either way. On a touch screen dragging steers and heavy groups aim themselves (gunnery.manual off). */
+gunnery.manual = matchMedia('(pointer: fine)').matches;
+const pickGroup = (ok: boolean) => { if (mode === 'combat' && !paused) sfx(ok ? 'uiSwitch' : 'uiError', { vol: ok ? 0.8 : 0.5 }); };
+window.addEventListener('keydown', (e) => {
+  if (mode !== 'combat' || paused || e.repeat || (e.target as HTMLElement)?.tagName === 'INPUT') return;
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  if (m) { e.preventDefault(); pickGroup(selectGroup(Number(m[1]) - 1)); }
+  else if (e.code === 'KeyQ') pickGroup(cycleGroup(-1));
+  else if (e.code === 'KeyE') pickGroup(cycleGroup(1));
+});
+let wheelAt = 0;
+hudCanvas.addEventListener('wheel', (e) => {
+  if (mode !== 'combat' || paused) return;
+  e.preventDefault();
+  const now = performance.now(); if (now - wheelAt < 110 || Math.abs(e.deltaY) < 1) return;
+  wheelAt = now; pickGroup(cycleGroup(e.deltaY > 0 ? 1 : -1));
+}, { passive: false });
+hudCanvas.addEventListener('contextmenu', (e) => { if (mode === 'combat') e.preventDefault(); });
+
 let drag: { px: number; py: number; sx: number; sy: number; id: number } | null = null;
 const toLocal = (e: PointerEvent) => { const r = hudCanvas.getBoundingClientRect(); return { x: (e.clientX - r.left) / SCALE, y: (e.clientY - r.top) / SCALE }; };
+const aimAt = (e: PointerEvent) => { const p = toLocal(e); aim.x = clamp(p.x, 0, W); aim.y = clamp(p.y, 0, H); };
 hudCanvas.addEventListener('pointerdown', (e) => {
   initAudio();
   if (mode !== 'combat' || !S.P) return;
   const p = toLocal(e);
   if (p.x > W - 46 && p.y < 46) { setPaused(true); return; }
+  if (e.pointerType === 'mouse') {
+    gunnery.manual = true; aimAt(e);
+    if (e.button === 0) aim.fire = true; else if (e.button === 2) aim.salvo = true;
+    try { hudCanvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    return;
+  }
+  gunnery.manual = false; releaseTriggers();
   drag = { px: p.x, py: p.y, sx: S.P.x, sy: S.P.y, id: e.pointerId };
   try { hudCanvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
 });
 hudCanvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'mouse') { aimAt(e); return; }
   if (!drag || !S.P || e.pointerId !== drag.id) return;
   const p = toLocal(e); S.P.tx = drag.sx + (p.x - drag.px) * 1.25; S.P.ty = drag.sy + (p.y - drag.py) * 1.25;
 });
-const endDrag = (e: PointerEvent) => { if (drag && e.pointerId === drag.id) drag = null; };
-hudCanvas.addEventListener('pointerup', endDrag); hudCanvas.addEventListener('pointercancel', endDrag);
+hudCanvas.addEventListener('pointerup', (e) => {
+  if (e.pointerType === 'mouse') { if (e.button === 0) aim.fire = false; else if (e.button === 2) aim.salvo = false; if (!e.buttons) releaseTriggers(); }
+  if (drag && e.pointerId === drag.id) drag = null;
+});
+hudCanvas.addEventListener('pointercancel', (e) => { releaseTriggers(); if (drag && e.pointerId === drag.id) drag = null; });
+hudCanvas.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse' && !e.buttons) releaseTriggers(); });
 
 /* ---------------- main loop ---------------- */
 let last = performance.now();
@@ -126,6 +162,9 @@ function frame(now: number) {
     if (S.outcome && onCombatDone) { const cb = onCombatDone; onCombatDone = null; cb(S.outcome); }
   } else if (mode === 'title') updateBg(dt);
   updateAudio(dt, mode === 'combat' ? S : null, paused);
+  // the reticle replaces the system cursor while a mouse is flying the guns
+  const cur = mode === 'combat' && !paused && gunnery.manual ? 'none' : '';
+  if (hudCanvas.style.cursor !== cur) hudCanvas.style.cursor = cur;
   const hideStage = mode === 'menu';
   if (stageEl.hidden !== hideStage) stageEl.hidden = hideStage;
   if (mode === 'combat' || mode === 'title') {
@@ -138,7 +177,7 @@ requestAnimationFrame(frame);
 
 const soundSwitch = { get on() { return audio.on; }, set: (on: boolean) => setMuted(!on) };
 function setPaused(v: boolean) {
-  paused = v;
+  paused = v; releaseTriggers();
   if (!v) { show(); return; }
   show(pauseView({ onResume: () => setPaused(false), onAbandon: () => { paused = false; abandonRun(); }, sound: soundSwitch }));
 }
@@ -473,7 +512,7 @@ async function onDeath() {
 /* ---------------- debug hooks for automated tests ---------------- */
 declare global { interface Window { __gd: unknown } }
 window.__gd = {
-  get run() { return run; }, get profile() { return profile; }, S, debug, EVENTS,
+  get run() { return run; }, get profile() { return profile; }, S, debug, EVENTS, aim, gunnery, selectGroup,
   travelTo(type: NodeType) { const r = run!; const id = reachable(r.map, r.at).find((i) => r.map.nodes[i].type === type); if (id) travel(id); return !!id; },
   reachableTypes() { const r = run!; return reachable(r.map, r.at).map((i) => r.map.nodes[i].type); },
   forceNext(type: NodeType) { const r = run!; const id = reachable(r.map, r.at)[0]; r.map.nodes[id].type = type; if (type === 'fight') r.map.nodes[id].enc = 'patrol'; if (type === 'elite') r.map.nodes[id].enc = 'ace'; travel(id); },
