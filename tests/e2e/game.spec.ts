@@ -235,9 +235,11 @@ test('fleet loop: admiralty, locked hulls and the daily strike', async ({ page }
   await page.click('#btn-back');
   await page.fill('#callsign', 'DAILY');
   await page.click('#btn-daily');
+  await expect(page.getByTestId('daily-roster')).toBeVisible();
+  await page.click('#btn-daily-launch');
   await expect(page.locator('svg[aria-label="Sector 1 route map"]')).toBeVisible();
-  const today = await page.evaluate(() => { const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; });
-  expect(await gd<string>(page, 'g.run.daily')).toBe(today);
+  // the daily strike runs on UTC days
+  expect(await gd<string>(page, 'g.run.daily')).toBe(new Date().toISOString().slice(0, 10));
   expect(await gd<string>(page, 'g.run.hull')).toBe('vanguard');
 });
 
@@ -267,4 +269,54 @@ test('victory after sector 3 banks the run, unlocks heat and offers endless', as
   await page.click('#btn-home');
   await expect(page.locator('[data-heat="1"]')).toBeVisible();
   await expect(page.locator('#btn-continue')).toHaveCount(0);
+});
+
+test('daily strike duty roster: briefing, filing on death, own row marked, offline fallback', async ({ page, request }) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const tag = Date.now() % 100000;
+  const rival = `RIVAL${tag}`, me = `DUTY${tag}`;
+  // the API: a rival files first; bad requests are refused
+  const filed = await request.post('/api/daily', { data: { callsign: rival, date: today, score: 9_999_999, sector: 3, floor: 9, hull: 'vanguard', kills: 4000, won: true } });
+  expect(filed.status()).toBe(201);
+  expect((await request.get('/api/daily/2026-02-30')).status()).toBe(400);
+  const board = await (await request.get(`/api/daily/${today}?callsign=${rival}`)).json();
+  expect(board.count).toBeGreaterThan(0);
+  expect(board.entries.length).toBeLessThanOrEqual(50);
+  expect(board.you.callsign).toBe(rival);
+
+  // title: the Daily Strike button opens the briefing with today's roster
+  await page.route('https://fonts.googleapis.com/**', (r) => r.abort());
+  await page.goto('/');
+  await page.fill('#callsign', me);
+  await page.click('#btn-daily');
+  const roster = page.getByTestId('daily-roster');
+  await expect(roster).toBeVisible();
+  await expect(page.getByTestId('roster-status')).toContainText('End of roster', { timeout: 15_000 });
+  await expect(roster.locator('.rs-row', { hasText: rival })).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/20-daily-briefing.png` });
+  await page.click('#btn-daily-launch');
+  await expect(page.locator('svg[aria-label="Sector 1 route map"]')).toBeVisible();
+
+  // die: the run is filed and the roster prints on the wreck report with our row highlighted
+  await clickNode(page);
+  await expect.poll(() => gd<string>(page, 'g.S.mode'), { timeout: 30_000 }).toBe('play');
+  await gd(page, '(g.debug.timeScale = 8, g.killPlayer())');
+  await expect(page.getByRole('heading', { name: 'Dreadnought down' })).toBeVisible({ timeout: 120_000 });
+  await expect(page.getByTestId('roster-status')).toContainText(/Filed .* pts/, { timeout: 20_000 });
+  await expect(roster.locator('.rs-row.you')).toContainText(me);
+  await roster.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${SHOTS}/21-daily-roster.png` });
+  const after = await (await request.get(`/api/daily/${today}?callsign=${me}`)).json();
+  expect(after.you).toMatchObject({ callsign: me, hull: 'vanguard', won: false });
+  expect(after.you.score).toBe(await gd<number>(page, 'g.profile.daily.score'));
+
+  // registry offline: the briefing says so and shows this device's own copy, unranked
+  await page.route('**/api/daily**', (r) => r.abort());
+  await page.click('#btn-again');
+  await page.click('#btn-daily');
+  await expect(page.getByTestId('roster-status')).toContainText('No carrier', { timeout: 15_000 });
+  await expect(roster.locator('.rs-row.you.local')).toContainText(me);
+  await page.screenshot({ path: `${SHOTS}/22-daily-offline.png` });
+  await page.click('#btn-daily-close');
+  await expect(roster).toHaveCount(0);
 });
