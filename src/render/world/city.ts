@@ -60,7 +60,9 @@ export class CityLayer implements Layer {
   anchors: Anchor[] = []; fires: Spot[] = []; stacks: Spot[] = [];
   /** Lights that belong to a building (roof beacons, flares): light index -> building. */
   bLights: { i: number; b: Bldg }[] = [];
-  gen = -1; sig = ''; darkVer = -1; craterSig = '';
+  gen = -1; darkVer = -1;
+  /** Change detection without per-frame strings: [gen, rows, first id, last id] and [craters, first born, last born]. */
+  private sig = [NaN, 0, 0, 0]; private craterSig = [NaN, 0, 0];
   private k = 1; private cz = 0; private nL = 0;
 
   constructor(private engine: Engine) {
@@ -120,7 +122,7 @@ export class CityLayer implements Layer {
 
   /** New seed or theme: colours and the traffic loop. */
   private reseed() {
-    this.gen = CITY.gen; this.sig = '';
+    this.gen = CITY.gen; this.sig[0] = NaN;
     const e = this.engine, th = THEMES[CITY.theme % THEMES.length], ti = CITY.theme % 5;
     U.uWinCol.value.set(th.window);
     U.uLampCol.value.set(ti === 2 ? '#cfe0ff' : ti === 4 ? '#ffc070' : ti === 1 ? '#ff9a3a' : '#ffae48');
@@ -270,8 +272,8 @@ export class CityLayer implements Layer {
     if (!CITY.plan) return;
     if (this.gen !== CITY.gen) this.reseed();
     const chs = CITY.chunks;
-    const sig = chs.length ? `${CITY.gen}:${chs.length}:${chs[0].id}:${chs[chs.length - 1].id}` : '';
-    if (sig !== this.sig) { this.sig = sig; this.rebuild(); }
+    const g = this.sig, first = chs.length ? chs[0].id : 0, last = chs.length ? chs[chs.length - 1].id : 0;
+    if (g[0] !== CITY.gen || g[1] !== chs.length || g[2] !== first || g[3] !== last) { g[0] = CITY.gen; g[1] = chs.length; g[2] = first; g[3] = last; this.rebuild(); }
     const k = this.k, scrollZ = S.scrollY * k, t = CITY.time;
     this.root.position.z = scrollZ;
     U.uTime.value = t; U.uScrollZ.value = scrollZ;
@@ -340,9 +342,9 @@ export class CityLayer implements Layer {
 
   private updateCraters() {
     const cr = CITY.craters;
-    const sig = cr.length ? `${cr.length}:${cr[0].born}:${cr[cr.length - 1].born}` : '0';
-    if (sig === this.craterSig) return;
-    this.craterSig = sig;
+    const g = this.craterSig, b0 = cr.length ? cr[0].born : 0, b1 = cr.length ? cr[cr.length - 1].born : 0;
+    if (g[0] === cr.length && g[1] === b0 && g[2] === b1) return;
+    g[0] = cr.length; g[1] = b0; g[2] = b1;
     const a = this.craters.attrs.aK, n = Math.min(MAX_CRATER, cr.length);
     for (let i = 0; i < n; i++) { const c = cr[cr.length - n + i]; a.setXYZW(i, this.X(c.x), this.Z(c.cy), this.R(c.r), c.born); }
     a.needsUpdate = true; this.craters.g.instanceCount = n;
