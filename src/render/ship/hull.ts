@@ -11,7 +11,7 @@
 //   4. Kitbash: Quaternius sci-fi kit pieces (vents, fans, barrels, lights, decals) merged per material.
 //   5. Life: thousands of running lights, rotating radars, spinning fans, beacons and strobes.
 import * as THREE from 'three';
-import { WEAPONS, UTILS, type Derived, type Rect as HullRect, type Mount } from '../../data/parts';
+import { WEAPONS, type Derived, type Rect as HullRect, type Mount } from '../../data/parts';
 import { SHIP_SCALE } from '../../game/field';
 import { has, mulberry32, type Rng } from '../../util/rng';
 import { source, meshesOf } from '../assets';
@@ -20,14 +20,16 @@ import { KIT_MAT, STENCIL_CHARS, type Livery, type MatKey } from './materials';
 import { LightSet, LMode, lightMaterial } from './lights';
 import { buildMount, GunRig, type Turret } from './turrets';
 import { mountTraverse } from './arcs';
-import { occupied, claim, onDeck, deckGreebles, beltGreebles, stencil, antenna, dish, machinery, type GCtx } from './greebles';
+import { occupied, claim, onDeck, deckGreebles, beltGreebles, stencil, antenna, dish, machinery, heatsink } from './greebles';
+import { utilityModule, utilZone, type UCtx } from './utilities';
 
 /** Ships are designed at this SHIP_SCALE; other scales build at the reference size and scale the body. */
 const REF_SCALE = 2.6;
 
 export const DECK = 8, KEEL = -9;
 
-export interface Nozzle { x: number; y: number; z: number; r: number; main: boolean }
+/** Engine exhaust anchor (root space on the model). `aft`: a small fixed jet that always fires aft (thruster pods). */
+export interface Nozzle { x: number; y: number; z: number; r: number; main: boolean; aft?: boolean }
 export interface Spinner { obj: THREE.Object3D; speed: number }
 export interface ShipModel {
   /** root: placed and oriented by the layer. body: scaled by k; every mesh and every point below is in body space. */
@@ -36,7 +38,7 @@ export interface ShipModel {
   lights: THREE.Points; edges: THREE.LineSegments | null; scorch: THREE.Mesh; len: number; width: number; hostile: boolean; tris: number;
 }
 
-interface Ctx extends GCtx {
+interface Ctx extends UCtx {
   rnd: Rng;
   dmg: V3[]; vents: V3[]; spin: Spinner[]; nozzles: Nozzle[]; root: THREE.Group; turrets: Turret[];
   edgeSegs: THREE.BufferGeometry[]; sig: number;
@@ -416,14 +418,13 @@ function armorSection(c: Ctx, r: HullRect) {
   for (let z = z0 + 9; z < z1 - 4; z += 5.5) if (Math.abs(z - zc) > 10) paintQuad(c, -0.3, z, 0.3, z + 3, line);
   // Deck elevators: lit wells with hazard borders.
   for (const sx of [-1, 1]) {
-    const ex = sx * W * 0.34, x0 = ex - 5.5, x1 = ex + 5.5, ez0 = zc - 6, ez1 = zc + 6;
+    const ex = sx * W * 0.34, x0 = ex - 3, x1 = ex + 3, ez0 = zc - 3.4, ez1 = zc + 3.4;
     if (!onDeck(c, x0, ez0, x1, ez1, 0.5)) continue;
     c.bk.get('black').quad([x0, DECK + 0.02, ez0], [x1, DECK + 0.02, ez0], [x1, DECK + 0.02, ez1], [x0, DECK + 0.02, ez1], [0, 0], [1, 0], [1, 1], [0, 1], P.dark, [0, 1, 0]);
-    flat(c.bk, 'core', x0 + 1.2, ez0 + 1.2, x1 - 1.2, ez1 - 1.2, DECK + 0.03, col(P.full, 0.22));
-    flatRect(c.bk, R.hatchCross, x0 + 2.2, ez0 + 2.5, x1 - 2.2, ez1 - 2.5, DECK + 0.05, P.plate);
-    hazardStrip(c, x0, ez0 - 1, x1, ez0); hazardStrip(c, x0, ez1, x1, ez1 + 1);
-    for (const [px, pz] of [[x0, ez0], [x1, ez0], [x0, ez1], [x1, ez1]]) c.lights.add(px, DECK + 0.3, pz, LL.port, 2, 0.9, LMode.Beacon, c.rnd());
-    claim(c, x0 - 1, ez0 - 1.5, x1 + 1, ez1 + 1.5);
+    flatRect(c.bk, R.hatchCross, x0 + 0.5, ez0 + 0.5, x1 - 0.5, ez1 - 0.5, DECK + 0.05, P.plate);
+    hazardStrip(c, x0, ez0 - 0.35, x1, ez0); hazardStrip(c, x0, ez1, x1, ez1 + 0.35);
+    for (const [px, pz] of [[x0, ez0], [x1, ez0], [x0, ez1], [x1, ez1]]) c.lights.add(px, DECK + 0.2, pz, LL.port, 1.6, 0.22, LMode.Beacon, c.rnd());
+    claim(c, x0 - 0.5, ez0 - 0.8, x1 + 0.5, ez1 + 0.8);
   }
   // Armour strakes bolted along the belt.
   for (const sx of [-1, 1]) for (let z = z0 + 1; z < z1 - 2; z += 9.5) {
@@ -439,14 +440,18 @@ function spineSection(c: Ctx, r: HullRect) {
   claim(c, -6, z0, 6, z1);
   for (const [px, pr] of [[-3.6, 1.2], [0, 1.6], [3.6, 1.2]] as [number, number][]) pipeRun(c, px, DECK + pr + 0.2, z0 - 0.5, z1 + 0.5, pr);
   dropShadow(c, -5, z0, 5, z1, DECK + 0.06, 2.4);
-  // Radiator fin banks with glowing roots, fore and aft of the module mounts.
+  // Radiator fields fore and aft of the module mounts: a grid of small fin banks (each a couple of units,
+  // dim glowing roots) with gaps the deck machinery fills, not one big glowing slab.
   for (const sx of [-1, 1]) for (const [za, zb] of [[z0 + 2, zc - 10], [zc + 10, z1 - 2]]) {
     if (zb - za < 4) continue;
-    const xa = sx * (W * 0.12), xb = sx * (W * 0.38), x0 = Math.min(xa, xb), x1 = Math.max(xa, xb);
-    for (let x = x0 + 0.8; x < x1; x += 1.7) box(c.bk, B.rail, 0.45, 2.6, zb - za, P.dark, new THREE.Matrix4().makeTranslation(x, DECK + 1.3, (za + zb) / 2));
-    flat(c.bk, 'core', x0, za, x1, zb, DECK + 0.08, col(P.full, 0.12));
-    dropShadow(c, x0, za, x1, zb, DECK + 0.06, 2.6); claim(c, x0, za, x1, zb);
-    c.dmg.push([(x0 + x1) / 2, DECK + 2.7, (za + zb) / 2]);
+    const xa = sx * (W * 0.12), xb = sx * (W * 0.38), x0 = Math.min(xa, xb), x1 = Math.max(xa, xb), cw = 2.6, cd = 2.3;
+    for (let z = za; z + cd <= zb + 0.01; z += cd + 0.5) for (let x = x0; x + cw <= x1 + 0.01; x += cw + 0.5) {
+      if (c.rnd() < 0.3 || !onDeck(c, x, z, x + cw, z + cd, 0.8)) continue;
+      const h = 0.5 + c.rnd() * 0.5;
+      heatsink(c, x, z, x + cw, z + cd, DECK, h);
+      dropShadow(c, x + 0.6, z + 0.6, x + cw - 0.6, z + cd - 0.6, DECK + 0.06, h * 0.6); claim(c, x, z, x + cw, z + cd);
+    }
+    c.dmg.push([(x0 + x1) / 2, DECK + 1.2, (za + zb) / 2]);
   }
 }
 
@@ -484,74 +489,6 @@ function engineSection(c: Ctx, r: HullRect, last: boolean) {
     c.nozzles.push({ x: x + sx * 1.5, y: DECK - 3.5, z: zz, r: 1.4, main: false });
   }
   hazardStrip(c, -nx + rad + 1.2, z1 - 6, nx - rad - 1.2, z1 - 4.8);
-}
-
-/* ---------------- utility modules ---------------- */
-function utilModule(c: Ctx, m: Mount) {
-  const x = m.ox, z = m.oy, P = c.L.paint, LL = c.L.light, id = m.part?.id ?? '', tier = m.part?.tier ?? 1, s = 1 + 0.06 * (tier - 1);
-  const T = (dx: number, dy: number, dz: number) => new THREE.Matrix4().makeTranslation(x + dx, DECK + dy, z + dz);
-  claim(c, x - 9, z - 9, x + 9, z + 9);
-  switch (id) {
-    case 'plate': {
-      for (let k = 0; k < 3; k++) block(c.bk, octagon(x - 7 + k * 1.2, z - 7.5 + k * 1.2, x + 7 - k * 1.2, z + 7.5 - k * 1.2, 2), DECK + k * 1.6, DECK + (k + 1) * 1.6, { side: B.ribs, top: B.panels, col: col(P.hull, 0.95 + k * 0.05), bevel: 0.5 });
-      dropShadow(c, x - 7, z - 7.5, x + 7, z + 7.5, DECK + 0.06, 4.8);
-      hazardStrip(c, x - 4.4, z + 3, x + 4.4, z + 4.2, DECK + 4.85);
-      break;
-    }
-    case 'shield': {
-      lathe(c.bk, B.ribs, [[0, 0], [7.5 * s, 0], [7.5 * s, 1.2], [5.5 * s, 2]], 18, P.hull, T(0, 0, 0));
-      lathe(c.bk, B.panels, [[5.5 * s, 2], [5 * s, 3.6], [3.2 * s, 5.2], [0, 5.8 * s]], 18, P.plate, T(0, 0, 0));
-      lathe(c.bk, { m: 'glow', v0: 0, v1: 1 }, [[5.65 * s, 1.95], [5.65 * s, 2.35], [5.2 * s, 2.35]], 24, P.full, T(0, 0, 0));
-      for (let k = 0; k < 4; k++) { const a = Math.PI / 4 + (k * Math.PI) / 2; box(c.bk, B.rail, 1, 4, 1, P.dark, T(Math.cos(a) * 6.6 * s, 2, Math.sin(a) * 6.6 * s)); c.lights.add(x + Math.cos(a) * 6.6 * s, DECK + 4.3, z + Math.sin(a) * 6.6 * s, LL.energy, 2.6, 1, LMode.Beacon, k / 4); }
-      dropShadow(c, x - 6, z - 6, x + 6, z + 6, DECK + 0.06, 5);
-      break;
-    }
-    case 'thruster': {
-      for (const sx of [-1, 1]) {
-        lathe(c.bk, B.panels, [[0, 0], [2.6, 0], [3, 2], [3, 9], [2.4, 10]], 12, P.hull, T(sx * 3.6, 3, -4.5).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-        lathe(c.bk, { m: 'core', v0: 0, v1: 1 }, [[2.1, 9.8], [0, 9.9]], 10, P.full, T(sx * 3.6, 3, -4.5).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2)));
-        c.nozzles.push({ x: x + sx * 3.6, y: DECK + 3, z: z + 6, r: 2.2, main: false });
-      }
-      dropShadow(c, x - 6.6, z - 4.5, x + 6.6, z + 5.5, DECK + 0.06, 6);
-      break;
-    }
-    case 'reactor': {
-      lathe(c.bk, B.darkPanel, [[0, 0], [7 * s, 0], [7 * s, 2.5], [6 * s, 3.4]], 16, P.hull, T(0, 0, 0));
-      lathe(c.bk, { m: 'core', v0: 0, v1: 1 }, [[6 * s, 3.4], [4.6 * s, 3.5]], 24, P.full, T(0, 0, 0));
-      lathe(c.bk, B.ribs, [[4.6 * s, 3.5], [4.2 * s, 4.5], [2 * s, 5], [0, 5.1]], 16, P.plate, T(0, 0, 0));
-      for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; kit(c, 'Prop_Vent_Small', x + Math.cos(a) * 5.3 * s, DECK + 3.42, z + Math.sin(a) * 5.3 * s, -a + Math.PI / 2, 1.6); }
-      c.vents.push([x, DECK + 5, z]);
-      dropShadow(c, x - 6.5, z - 6.5, x + 6.5, z + 6.5, DECK + 0.06, 4);
-      break;
-    }
-    case 'repair': {
-      block(c.bk, octagon(x - 5, z - 4, x + 5, z + 4, 1.5), DECK, DECK + 2.5, { side: B.ribs, top: B.brackets, col: P.hull, bevel: 0.5 });
-      lathe(c.bk, B.rail, [[0, 0], [1.6, 0], [1.4, 5], [0, 5]], 8, P.dark, T(-2, 2.5, 0));
-      box(c.bk, B.rail, 1, 1, 15, P.plate, T(-2, 7.5, -5).multiply(new THREE.Matrix4().makeRotationX(-0.25)));
-      box(c.bk, B.hazard, 1.05, 1.05, 3, P.accent, T(-2, 8.9, -10.5).multiply(new THREE.Matrix4().makeRotationX(-0.25)));
-      c.lights.add(x - 2, DECK + 9.6, z - 12, '#8fe39a', 2.6, 1.1, LMode.Beacon, c.rnd());
-      dropShadow(c, x - 3, z - 13, x - 1, z + 2, DECK + 0.06, 8);
-      break;
-    }
-    case 'magnet': {
-      lathe(c.bk, B.darkPanel, [[0, 0], [6.5 * s, 0], [6.5 * s, 1.6], [0, 1.6]], 16, P.dark, T(0, 0, 0));
-      lathe(c.bk, B.ribs, [[6 * s, 1.6], [6.2 * s, 2.4], [6.2 * s, 3.6], [4.4 * s, 3.8], [4.4 * s, 1.6]], 20, new THREE.Color('#e0c35c').multiplyScalar(0.55), T(0, 0, 0));
-      lathe(c.bk, { m: 'glow', v0: 0, v1: 1 }, [[4.3 * s, 2], [0, 2.1]], 16, P.full, T(0, 0, 0));
-      dropShadow(c, x - 6, z - 6, x + 6, z + 6, DECK + 0.06, 3.8);
-      break;
-    }
-    case 'drones': {
-      c.bk.get('black').quad([x - 7, DECK + 0.02, z - 7], [x + 7, DECK + 0.02, z - 7], [x + 7, DECK + 0.02, z + 7], [x - 7, DECK + 0.02, z + 7], [0, 0], [1, 0], [1, 1], [0, 1], P.dark, [0, 1, 0]);
-      flatRect(c.bk, R.hatchCross, x - 6, z - 6, x + 6, z + 6, DECK + 0.05, P.plate);
-      hazardStrip(c, x - 7.5, z - 8.4, x + 7.5, z - 7.2); hazardStrip(c, x - 7.5, z + 7.2, x + 7.5, z + 8.4);
-      for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; c.lights.add(x + Math.cos(a) * 8.6, DECK + 0.3, z + Math.sin(a) * 8.6, LL.deck, 2, 0.85, LMode.Chase, k / 8); }
-      break;
-    }
-    default: {
-      flatRect(c.bk, R.hatchRound, x - 4.5, z - 4.5, x + 4.5, z + 4.5, DECK + 0.05, P.plate);
-      lathe(c.bk, B.ribs, [[4.6, 0], [5.2, 0], [5.2, 0.5], [4.6, 0.5]], 16, P.dark, T(0, 0, 0));
-    }
-  }
 }
 
 /* ---------------- medium equipment ---------------- */
@@ -615,7 +552,7 @@ export function buildShip(dv: Derived, L: Livery, sigText: string, callsign = ''
   const body = new THREE.Group(); body.scale.setScalar(k); root.add(body);
   const c: Ctx = {
     bk: new Buckets(), L, lights: new LightSet(), rnd: mulberry32(sig), occ: [], dmg: [], vents: [], spin: [], nozzles: [], root: body, turrets: [],
-    hw, de: (z: number) => terrace(hw(z)), z0: st[0].z, z1: st[st.length - 1].z, edgeSegs: [], sig,
+    hw, de: (z: number) => terrace(hw(z)), z0: st[0].z, z1: st[st.length - 1].z, edgeSegs: [], sig, belt: [],
   };
   // Each section draws from its own seeded stream: type, position and the parts it carries.
   const secRng = (i: number, salt = 0) => mulberry32(hash(`${i}|${rects[i].type}|${mounts.filter((m) => m.si === i).map((m) => m.part ? m.part.id + m.part.tier : '-').join(',')}|${salt}`));
@@ -624,7 +561,7 @@ export function buildShip(dv: Derived, L: Livery, sigText: string, callsign = ''
   const rig = new GunRig();
   for (const m of mounts) {
     const p = m.part;
-    if (!p || !has(WEAPONS, p.id)) { claim(c, m.ox - 8.5, m.oy - 8.5, m.ox + 8.5, m.oy + 8.5); continue; }
+    if (!p || !has(WEAPONS, p.id)) { const zn = utilZone(rects[m.si].type, m.ox, m.oy); claim(c, zn[0], zn[1], zn[2], zn[3]); continue; }
     const trav = mountTraverse(m, rects[m.si].type), h = hw(m.oy);
     const { t, claim: cl } = buildMount({ uid: p.uid, id: p.id, tier: p.tier, x: m.ox, z: m.oy, deck: DECK, trav, hw: h, terrace: terrace(h), gallery: DECK - 2.4 }, rig, c.bk, L, c.lights);
     c.turrets.push(t); claim(c, cl[0], cl[1], cl[2], cl[3]);
@@ -669,8 +606,12 @@ export function buildShip(dv: Derived, L: Livery, sigText: string, callsign = ''
       c.nozzles.push({ x, y: DECK - 4, z: z1 + 3, r: rad, main: true });
     }
   }
-  // Utility modules.
-  for (const m of mounts) { const p = m.part; if (!p || !has(WEAPONS, p.id)) utilModule(c, m); }
+  // Utility modules: small installations bedded into the deck (utilities.ts), seeded per section and slot.
+  for (const m of mounts) {
+    const p = m.part; if (p && has(WEAPONS, p.id)) continue;
+    const r = rects[m.si];
+    utilityModule(c, secRng(m.si, 10 + m.i), { id: p?.id ?? '', tier: p?.tier ?? 1, x: m.ox, z: m.oy, zone: utilZone(r.type, m.ox, m.oy), za: r.y, zb: r.y + r.h });
+  }
   // Medium equipment, then the dense small layer, section by section; hull-side detail last.
   rects.forEach((r, i) => {
     const rnd = secRng(i, 1);
