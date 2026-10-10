@@ -7,8 +7,10 @@ import { FxLayer } from './render/fx/fxLayer';
 import { preloadKits } from './render/assets';
 import { V } from './game/vfx';
 import { drawHud } from './render/hud';
+import { screenToField } from './render/view';
+import { FLIR, stepFlir } from './render/flir';
 import { drawBlueprint } from './render/shipPreview';
-import { S, W, H, keys, startCombat, updateCombat, updateBg, endCombat, seedDecor, setScrapHandler, damagePlayer, damageTarget, triggerOverdrive, aim, gunnery, selectGroup, cycleGroup } from './game/combat';
+import { S, W, H, keys, startCombat, updateCombat, updateBg, endCombat, seedDecor, setScrapHandler, damagePlayer, damageTarget, triggerOverdrive, aim, gunnery, selectGroup, cycleGroup, spawnGroup, spawnElite } from './game/combat';
 import { initAudio, sfx, audio, setMuted, music, updateAudio, setVolume } from './audio';
 import { settings as uiSettings, onSettings } from './ui/settings';
 import { wireAudioSettings } from './ui/sound';
@@ -18,7 +20,7 @@ import {
 } from './game/run';
 import { NODE_INFO, reachable, type NodeType } from './game/map';
 import { fetchGhosts, submitGhost, chooseGhost, aiGhost, registryOnline, sanitizeName, type Ghost } from './game/ghosts';
-import { FIGHTS, ELITES, BOSS_ENCOUNTER, type Encounter } from './data/enemies';
+import { FIGHTS, ELITES, BOSS_ENCOUNTER, type Encounter, type EnemyType } from './data/enemies';
 import { EVENTS, pickEvent, type Outcome } from './data/events';
 import { RELICS, hasFlag, relicCost } from './data/relics';
 import { SECTIONS, partName, partCost, allParts, ghostToBuild, derive, mkPart, type Part, type SectionType } from './data/parts';
@@ -96,10 +98,16 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && mode === 'combat') { e.preventDefault(); if (!e.repeat && !paused) keys.od = true; }
   if ((e.code === 'KeyP' || e.code === 'Escape') && mode === 'combat') setPaused(!paused);
   if (e.code === 'KeyM') setMuted(audio.on);
+  // FLIR thermal view: hold Shift, or T to latch it (src/render/flir.ts)
+  if (mode === 'combat' && !paused && !e.repeat) {
+    if (e.key === 'Shift') flirHeld = true;
+    if (e.code === 'KeyT') flirLatched = !flirLatched;
+  }
 });
-window.addEventListener('keyup', (e) => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; });
+window.addEventListener('keyup', (e) => { if (KEYMAP[e.code]) keys[KEYMAP[e.code]] = false; if (e.key === 'Shift') flirHeld = false; });
+let flirHeld = false, flirLatched = false;
 const releaseTriggers = () => { aim.fire = aim.salvo = false; };
-window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; releaseTriggers(); if (mode === 'combat') setPaused(true); });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; flirHeld = false; releaseTriggers(); if (mode === 'combat') setPaused(true); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && mode === 'combat') setPaused(true); });
 
 /* Gunnery. With a mouse the heavy weapon groups are fired by hand: the mouse moves the reticle, left button fires the
@@ -125,7 +133,8 @@ hudCanvas.addEventListener('contextmenu', (e) => { if (mode === 'combat') e.prev
 
 let drag: { px: number; py: number; sx: number; sy: number; id: number } | null = null;
 const toLocal = (e: PointerEvent) => { const r = hudCanvas.getBoundingClientRect(); return { x: (e.clientX - r.left) / SCALE, y: (e.clientY - r.top) / SCALE }; };
-const aimAt = (e: PointerEvent) => { const p = toLocal(e); aim.x = clamp(p.x, 0, W); aim.y = clamp(p.y, 0, H); };
+// The reticle aims at the field point under the cursor: the camera's tilt makes the field a trapezoid on screen (view.ts).
+const aimAt = (e: PointerEvent) => { const l = toLocal(e), p = screenToField(l.x, l.y); aim.x = clamp(p.x, 0, W); aim.y = clamp(p.y, 0, H); };
 hudCanvas.addEventListener('pointerdown', (e) => {
   initAudio();
   if (mode !== 'combat' || !S.P) return;
@@ -168,6 +177,8 @@ function frame(now: number) {
   const hideStage = mode === 'menu';
   if (stageEl.hidden !== hideStage) stageEl.hidden = hideStage;
   if (mode === 'combat' || mode === 'title') {
+    FLIR.on = mode === 'combat' && !paused && (flirHeld || flirLatched) && S.mode !== 'done';
+    stepFlir(dt);
     renderer?.render({ dt, t: S.t, S, V, showPlayer: mode === 'combat' && S.mode !== 'dying' && S.mode !== 'done' });
     if (mode === 'combat') drawHud(hctx, SCALE, DPR, run?.scrap ?? 0); else { hctx.setTransform(1, 0, 0, 1, 0, 0); hctx.clearRect(0, 0, hudCanvas.width, hudCanvas.height); }
   }
@@ -521,6 +532,9 @@ window.__gd = {
   overdrive() { S.overdrive.charge = 1; return triggerOverdrive(); },
   killPlayer() { S.god = false; S.firstHitUsed = true; S.cheatDeath = false; if (S.P) { S.P.shield = 0; S.P.hp = 1; } damagePlayer(9999); },
   addScrap(n: number) { run!.scrap += n; },
+  /** Spawn one director group of an enemy type into the running fight. */
+  spawn(type: EnemyType) { if (S.active && S.P) spawnGroup(type); },
+  spawnElite(type: EnemyType) { if (S.active && S.P) spawnElite(type); },
 };
 
 titleScreen();

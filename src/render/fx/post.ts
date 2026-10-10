@@ -18,6 +18,7 @@ import { N8AOPostPass } from 'n8ao';
 import { DistortBatch } from './distort';
 import { V } from '../../game/vfx';
 import { THEMES } from '../palette';
+import { flirUniform } from '../flir';
 
 export type Quality = 'high' | 'low';
 
@@ -44,7 +45,7 @@ class DistortEffect extends Effect {
 
 const GRADE_FS = /* glsl */`
 uniform vec3 lift; uniform vec3 gain; uniform float gam; uniform float sat; uniform float slow;
-uniform float vig; uniform vec3 vigCol; uniform float bars; uniform float grain; uniform float seed; uniform float expo;
+uniform float vig; uniform vec3 vigCol; uniform float bars; uniform float grain; uniform float seed; uniform float expo; uniform float flir;
 float gdHash(vec2 p){ p = fract(p * vec2(443.897, 441.423)); p += dot(p, p.yx + 19.19); return fract((p.x + p.y) * p.x); }
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor){
   vec3 c = inputColor.rgb * expo;
@@ -57,6 +58,16 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   float keep = smoothstep(0.12, 0.45, mx - mn) * smoothstep(0.18, 0.6, mx);
   vec3 mono = vec3(l) * vec3(0.8, 0.93, 1.12) * 0.9;
   c = mix(c, mix(mono, c * 1.1, keep), slow);
+  // FLIR white-hot (src/render/flir.ts): greyscale, the cool world compressed low and flat, anything hot (units' heat
+  // cores, engines, muzzles, fires, explosions; materials raise their emissive "heat" for this view) pushed to white.
+  if (flir > 0.001) {
+    float lf = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float hotK = smoothstep(0.32, 0.85, lf);
+    float th = 0.07 + 0.32 * sqrt(lf) * (1.0 - hotK) + hotK * 1.02;
+    float scan = 0.94 + 0.06 * sin(uv.y * resolution.y * 1.5708);
+    vec3 fl = vec3(th) * vec3(0.96, 1.0, 1.02) * scan;
+    c = mix(c, fl, flir);
+  }
   // Vignette: an oval falloff toward the frame edge, toward the night colour.
   vec2 q = (uv - 0.5) * vec2(1.0, 0.82);
   float v = smoothstep(0.22, 0.72, length(q));
@@ -68,7 +79,7 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   // Film grain in a perceptual space, weaker on bright areas.
   vec3 g = sqrt(c);
   float n = gdHash(floor(uv * resolution) + seed) - 0.5;
-  g += n * grain * (1.0 - 0.7 * sqrt(l));
+  g += n * (grain + flir * 0.05) * (1.0 - 0.7 * sqrt(l));
   outputColor = vec4(g * g, inputColor.a);
 }`;
 class GradeEffect extends Effect {
@@ -78,7 +89,7 @@ class GradeEffect extends Effect {
       uniforms: new Map<string, THREE.Uniform>([
         ['lift', new THREE.Uniform(new THREE.Vector3())], ['gain', new THREE.Uniform(new THREE.Vector3(1, 1, 1))], ['gam', new THREE.Uniform(1)],
         ['sat', new THREE.Uniform(1)], ['slow', new THREE.Uniform(0)], ['vig', new THREE.Uniform(0.55)], ['vigCol', new THREE.Uniform(new THREE.Vector3(0.18, 0.2, 0.26))],
-        ['grain', new THREE.Uniform(0.035)], ['bars', new THREE.Uniform(0)], ['seed', new THREE.Uniform(0)], ['expo', new THREE.Uniform(1)],
+        ['grain', new THREE.Uniform(0.035)], ['bars', new THREE.Uniform(0)], ['seed', new THREE.Uniform(0)], ['expo', new THREE.Uniform(1)], ['flir', flirUniform as THREE.Uniform],
       ]),
     });
   }

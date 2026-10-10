@@ -6,6 +6,7 @@
 // and the CPU only touches buildings whose damage state changed.
 import * as THREE from 'three';
 import { DARK } from '../../game/worldgen';
+import { flirUniform } from '../flir';
 
 /** Blackout grid (see worldgen DARK): CITY.time each cell went dark, 0 = lit. */
 export const darkTex = new THREE.DataTexture(DARK.data, DARK.n, DARK.n, THREE.RedFormat, THREE.FloatType);
@@ -25,10 +26,12 @@ export const U = {
   uLampCol: { value: new THREE.Color('#ffb347') },
   /** Traffic loop: world z of the top of the loop and its length. */
   uLoop: { value: new THREE.Vector2(-2000, 4000) },
+  /** FLIR thermal view 0..1 (src/render/flir.ts): the city goes cool, its lamps and windows near dark; fires stay hot. */
+  uFlir: flirUniform,
 };
 
 export const GLSL_COMMON = /* glsl */ `
-uniform float uTime; uniform sampler2D uDark; uniform vec4 uDarkMap;
+uniform float uTime; uniform sampler2D uDark; uniform vec4 uDarkMap; uniform float uFlir;
 float h12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
   return mix(mix(h12(i), h12(i+vec2(1,0)), f.x), mix(h12(i+vec2(0,1)), h12(i+vec2(1,1)), f.x), f.y); }
@@ -119,7 +122,7 @@ const BLD_FRAG = /* glsl */ `
     vec3 wc = tone * (0.25 + 0.95 * h12(cell * 1.7 + seed * 91.0) * h12(cell.yx + seed));
     if (glass > 0.5) { wc *= vec3(0.75, 0.9, 1.1); diffuseColor.rgb *= vec3(0.8, 0.95, 1.25); }
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.015, 0.018, 0.024), inWin * 0.75);
-    totalEmissiveRadiance += wc * on * power * (1.0 - vFall) * 0.7;
+    totalEmissiveRadiance += wc * on * power * (1.0 - vFall) * 0.7 * (1.0 - 0.85 * uFlir);
     // Burning floors: random windows turn to fire, and soot climbs the wall.
     float burn = step(h12(cell + 3.7 + seed), fire * 0.9) * inWin;
     diffuseColor.rgb *= 1.0 - 0.6 * fire;
@@ -128,7 +131,7 @@ const BLD_FRAG = /* glsl */ `
     if (neon > 0.5) {
       vec3 nc = neon < 1.5 ? NEON0 : neon < 2.5 ? NEON1 : neon < 3.5 ? NEON2 : NEON3;
       float band = step(abs(vObj.y - vSz.y + 0.4 * uK), 0.18 * uK);
-      totalEmissiveRadiance += nc * band * 1.6 * power * (1.0 - vFall);
+      totalEmissiveRadiance += nc * band * 1.6 * power * (1.0 - vFall) * (1.0 - 0.85 * uFlir);
     }
   }
   if (vFall > 0.0) {
@@ -183,7 +186,7 @@ void main(){
   if (vKind < 0.5 || (vKind > 1.5 && vKind < 3.5)) { a = pow(max(0.0, 1.0 - d), 2.0); col = mix(col, vec3(1.0), pow(max(0.0, 1.0 - d * 2.5), 2.0)); }
   else if (vKind < 4.5) a = pow(max(0.0, 1.0 - d), 1.6);
   else { vec2 q = abs(vUv * 2.0 - 1.0); a = pow(max(0.0, 1.0 - q.x), 1.4) * (1.0 - smoothstep(0.9, 1.0, q.y)) * powerAt(vP, 0.0); }
-  gl_FragColor = vec4(col * a * vC.a, 1.0);
+  gl_FragColor = vec4(col * a * vC.a * (1.0 - 0.8 * uFlir), 1.0);
 }`;
 export function lightMaterial() {
   return new THREE.ShaderMaterial({ uniforms: U, vertexShader: GLSL_COMMON + LIGHT_VS, fragmentShader: GLSL_COMMON + LIGHT_FS, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
@@ -201,7 +204,7 @@ void main(){
   float z = uLoop.x + mod(aT.y + uTime * aT.z + uScrollZ, uLoop.y);
   vec3 p = vec3(aT.x + position.x * 0.7 * uDarkMap.z, 0.9, z + position.z * aT.w);
   float pw = powerAt(p - vec3(0.0, 0.0, uScrollZ), fract(aT.y * 0.013));
-  vC.a *= 0.35 + 0.65 * pw;
+  vC.a *= (0.35 + 0.65 * pw) * (1.0 - 0.45 * uFlir);
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
 }`;
 const TRAFFIC_FS = /* glsl */ `

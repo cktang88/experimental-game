@@ -15,6 +15,7 @@ import { QuadBatch } from './fx/quads';
 import { PostChain, type Quality } from './fx/post';
 import type { S as CombatState } from '../game/combat';
 import { cameraShake, type V as VfxState } from '../game/vfx';
+import { setViewHomography } from './view';
 
 import { FIELD_W, FIELD_H } from '../game/field';
 export { FIELD_W, FIELD_H };
@@ -104,6 +105,11 @@ export class Engine {
     }
     this.camPos.copy(cam.position); this.camLook.set(0, FLIGHT, tz);
     this.groundScale = cam.position.y / (cam.position.y - FLIGHT);
+    // Field -> screen homography for the HUD and the mouse (src/render/view.ts): clip = PV * (x - W/2, FLIGHT, y - H/2, 1).
+    const pv = new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse).elements;
+    const row = (r: number) => [pv[r], pv[8 + r], pv[4 + r] * FLIGHT + pv[12 + r] - pv[r] * FIELD_W / 2 - pv[8 + r] * FIELD_H / 2];
+    const r0 = row(0), r1 = row(1), r3 = row(3);
+    setViewHomography([0, 1, 2].map((j) => (FIELD_W / 2) * (r0[j] + r3[j])).concat([0, 1, 2].map((j) => (FIELD_H / 2) * (r3[j] - r1[j])), r3));
     // Sun shadow frustum covers the visible ground footprint.
     const g0 = this.toGround(-200, -400), g1 = this.toGround(FIELD_W + 200, FIELD_H + 200);
     const cx = (g0.x + g1.x) / 2, cz = (g0.z + g1.z) / 2, hw = Math.abs(g1.x - g0.x) / 2, hd = Math.abs(g1.z - g0.z) / 2;
