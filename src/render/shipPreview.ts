@@ -44,14 +44,21 @@ function sectionDetail(c: CanvasRenderingContext2D, r: Rect, si: number, th: The
   c.globalAlpha = 1;
 }
 
-export function drawBlueprint(canvas: HTMLCanvasElement, dv: Derived, hostile = false, highlight: { si: number; i: number } | null = null) {
+export interface BlueprintOpts {
+  /** Ship origin and scale in canvas pixels (the refit board lays the ship out itself); `k` is the device pixel ratio. */
+  fit?: { cx: number; cy: number; s: number; k: number };
+  /** Hull section to outline (the refit board's section list hover). */
+  section?: number | null;
+}
+export function drawBlueprint(canvas: HTMLCanvasElement, dv: Derived, hostile = false, highlight: { si: number; i: number } | null = null, opts: BlueprintOpts = {}) {
   const c = canvas.getContext('2d')!, w = canvas.width, h = canvas.height, th = hostile ? BTH : PTH;
+  const k = opts.fit?.k ?? 1, step = 32 * k;
   c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = '#0a0e13'; c.fillRect(0, 0, w, h);
-  c.strokeStyle = '#17212b'; c.lineWidth = 1;
-  for (let x = 0; x <= w; x += 32) { c.beginPath(); c.moveTo(x + 0.5, 0); c.lineTo(x + 0.5, h); c.stroke(); }
-  for (let y = 0; y <= h; y += 32) { c.beginPath(); c.moveTo(0, y + 0.5); c.lineTo(w, y + 0.5); c.stroke(); }
-  const s = Math.min(5, (h - 60) / dv.len, (w - 60) / dv.width), px = 1 / s;
-  c.save(); c.translate(w / 2, h / 2); if (hostile) c.scale(s, -s); else c.scale(s, s);
+  c.strokeStyle = '#17212b'; c.lineWidth = k;
+  for (let x = 0; x <= w; x += step) { c.beginPath(); c.moveTo(x + 0.5, 0); c.lineTo(x + 0.5, h); c.stroke(); }
+  for (let y = 0; y <= h; y += step) { c.beginPath(); c.moveTo(0, y + 0.5); c.lineTo(w, y + 0.5); c.stroke(); }
+  const s = opts.fit ? opts.fit.s * k : Math.min(5, (h - 60) / dv.len, (w - 60) / dv.width), px = 1 / s;
+  c.save(); c.translate(opts.fit ? opts.fit.cx * k : w / 2, opts.fit ? opts.fit.cy * k : h / 2); if (hostile) c.scale(s, -s); else c.scale(s, s);
   c.lineWidth = 1.2 * px;
   dv.rects.forEach((r, si) => {
     c.fillStyle = th.hull; c.strokeStyle = th.edge; hullPath(c, r); c.fill(); c.stroke();
@@ -67,6 +74,13 @@ export function drawBlueprint(canvas: HTMLCanvasElement, dv: Derived, hostile = 
     if (r.type === 'engine') { c.fillStyle = '#ffb347'; for (const sx of [-0.22, 0.22]) c.fillRect(r.w * sx - 2.5, r.y + r.h, 5, 3); }
     if (si > 0) { c.strokeStyle = th.edge; c.globalAlpha = 0.5; c.beginPath(); c.moveTo(r.x + 3, r.y); c.lineTo(r.x + r.w - 3, r.y); c.stroke(); c.globalAlpha = 1; }
   });
+  if (opts.section != null && dv.rects[opts.section]) {
+    // Section outline: a hazard-amber frame with corner ticks, like a marked-up drawing.
+    const r = dv.rects[opts.section], m = 3;
+    c.save(); c.strokeStyle = '#f2a541'; c.lineWidth = 1.6 * px; c.setLineDash([4 * px, 3 * px]);
+    c.strokeRect(r.x - m, r.y - 0.5, r.w + m * 2, r.h + 1); c.setLineDash([]);
+    c.fillStyle = 'rgba(242,165,65,0.10)'; c.fillRect(r.x - m, r.y - 0.5, r.w + m * 2, r.h + 1); c.restore();
+  }
   for (const m of dv.mounts) {
     const p = m.part, hl = highlight && highlight.si === m.si && highlight.i === m.i;
     if (!p) { c.strokeStyle = hl ? '#4fd1e8' : th.panel; c.setLineDash([2, 2]); c.beginPath(); c.arc(m.ox, m.oy, 3.8, 0, Math.PI * 2); c.stroke(); c.setLineDash([]); continue; }
@@ -75,6 +89,13 @@ export function drawBlueprint(canvas: HTMLCanvasElement, dv: Derived, hostile = 
     else { c.save(); c.translate(m.ox, m.oy); c.rotate(Math.PI / 4); c.fillStyle = col; c.globalAlpha = 0.85; c.fillRect(-3.2, -3.2, 6.4, 6.4); c.globalAlpha = 1; c.strokeStyle = hl ? '#4fd1e8' : th.edge; c.strokeRect(-3.2, -3.2, 6.4, 6.4); c.restore(); }
   }
   c.restore();
+}
+
+/** Where a mount is drawn on the plan (ship units): broadside guns sit out on their sponsons at the hull edge. */
+export function mountDrawPos(dv: Derived, m: Derived['mounts'][number]): [number, number] {
+  if (m.part && has(WEAPONS, m.part.id) && m.part.id !== 'bomb' && mountTraverse(m, dv.rects[m.si].type).kind === 'side')
+    return [(m.ox < 0 ? -1 : 1) * (dv.rects[m.si].w / 2 * 0.9 - 0.2), m.oy];
+  return [m.ox, m.oy];
 }
 
 /** A weapon mount: its traverse arc, its static dressing and its cluster of small guns. */

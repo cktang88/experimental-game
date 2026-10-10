@@ -362,20 +362,33 @@ function merchantScreen() {
   const [rel] = relicChoices(r, 1, ['common', 'rare']); let relSold = false;
   let toast = 'The quartermaster nods at your scrap counter.';
   let first = true;
+  const price = (p: Part) => Math.round(partCost(p) * m());
+  // Purchases, shared by the counter and the refit board (dragging a slip onto a socket buys it into the hold first).
+  const buyPart = (i: number) => {
+    const p = stock[i];
+    if (sold.has(i) || r.scrap < price(p)) return false;
+    r.scrap -= price(p); sold.add(i); r.inv.push(p); sfx('buy'); toast = `${partName(p)} is in your hold.`; saveRun(r);
+    return true;
+  };
+  const buySection = (k: SectionType) => {
+    const cost = nextSectionCost(r, k);
+    if (secSold.has(k) || r.scrap < cost || r.build.sections.length >= 8) return false;
+    r.scrap -= cost; addSection(r, k); secSold.add(k); sfx('buy'); toast = `${SECTIONS[k].name} welded on.`; saveRun(r);
+    return true;
+  };
   const render = () => {
-    const price = (p: Part) => Math.round(partCost(p) * m());
     const repair = repairQuote(r, m());
     const curses = r.relics.filter((id) => RELICS[id].rarity === 'curse');
     const relPrice = rel ? Math.round(relicCost(rel) * m()) : 0;
     show(merchantView({
       run: r, toast,
-      stock: stock.map((p, i) => ({ part: p, price: price(p), sold: sold.has(i), afford: r.scrap >= price(p), buy: () => { r.scrap -= price(p); sold.add(i); r.inv.push(p); sfx('buy'); toast = `${partName(p)} is in your hold.`; saveRun(r); render(); } })),
+      stock: stock.map((p, i) => ({ part: p, price: price(p), sold: sold.has(i), afford: r.scrap >= price(p), buy: () => { buyPart(i); render(); } })),
       sections: secs.map((k) => {
         const d = SECTIONS[k], cost = nextSectionCost(r, k), full = r.build.sections.length >= 8;
         return {
           type: k, name: d.name, cost, sold: secSold.has(k), full, afford: r.scrap >= cost,
           desc: `+${d.hp} hull · ${d.slots.length} ${d.slots[0] === 'W' ? 'weapon mount' : 'utility bay'}${d.slots.length > 1 ? 's' : ''} · mass ${d.mass}${d.thrust ? ` · thrust +${d.thrust}` : ''}`,
-          buy: () => { r.scrap -= cost; addSection(r, k); secSold.add(k); sfx('buy'); toast = `${d.name} welded on.`; saveRun(r); render(); },
+          buy: () => { buySection(k); render(); },
         };
       }),
       relic: rel ? { id: rel, price: relPrice, sold: relSold, afford: r.scrap >= relPrice, buy: () => { r.scrap -= relPrice; addRelic(r, rel); relSold = true; sfx('buy'); toast = `${RELICS[rel].name} installed.`; saveRun(r); render(); } } : null,
@@ -392,7 +405,11 @@ function merchantScreen() {
     first = false;
   };
   const refitFromMerchant = () => {
-    show(refitView({ run: r, screen: 'merchant-refit', back: { label: 'Back to merchant', act: render }, onChange: () => saveRun(r) }));
+    // The counter comes along: slips can be dragged straight onto a socket (bought, then mounted) or a section welded on.
+    const market = () => stock.map((p, i) => ({ part: p, price: price(p), sold: sold.has(i), afford: r.scrap >= price(p), buy: () => buyPart(i) }));
+    const sections = () => secs.map((k) => ({ type: k, cost: nextSectionCost(r, k), sold: secSold.has(k), afford: r.scrap >= nextSectionCost(r, k), buy: () => buySection(k) }));
+    const view = () => refitView({ run: r, screen: 'merchant-refit', back: { label: 'Back to merchant', act: render }, onChange: () => { saveRun(r); }, market, sections });
+    show(view());
   };
   render();
 }
