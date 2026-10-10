@@ -8,7 +8,7 @@ import { FIELD_W, FIELD_H } from '../engine';
 import { buildToGhost, derive, starterBuild, type Derived } from '../../data/parts';
 import { rgb, Shape, DarkShape } from '../fx/quads';
 import { clamp, angDiff } from '../../util/rng';
-import { dronePos, fireLog, type Ent } from '../../game/combat';
+import { dronePos, fireLog, manualAimFor, type Ent } from '../../game/combat';
 import { addFx, FIRE } from '../../game/vfx';
 import { kitLoaded } from '../assets';
 import { livery } from './materials';
@@ -168,7 +168,8 @@ export class ShipLayer implements Layer {
           let tx = NaN, ty = NaN;
           if (hostile) { if (P) { tx = P.x; ty = P.y; } }
           else {
-            const tg = this.target(tr, S.enemies, S.eb, B && B.alive ? B : null, fx, fy);
+            // heavy guns flown by the mouse train on the reticle (or the missile lock)
+            const tg = manualAimFor(tr.uid) ?? this.target(tr, S.enemies, S.eb, B && B.alive ? B : null, fx, fy);
             if (tg) { tx = tg.x; ty = tg.y; }
           }
           if (tx === tx) { const dx = tx - fx, dy = ty - fy; r.aims.set(tr.uid, hostile ? Math.atan2(-dx, dy) : Math.atan2(-dx, -dy)); }

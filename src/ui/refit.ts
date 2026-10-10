@@ -3,7 +3,7 @@ import { layerTag, rankPips } from './cards';
 import { icon } from './icons';
 import { gauge, lamp, legend } from './kit';
 import { guardedSwitch } from './screens/pause';
-import { SECTIONS, WEAPONS, ARC_INFO, partName, partDesc, partSlot, partDef, TIER, type Arc } from '../data/parts';
+import { SECTIONS, WEAPONS, ARC_INFO, LAYERS_TAG, mountTraverse, partName, partDesc, partSlot, partDef, placementNote, weaponControl, TIER, type Arc } from '../data/parts';
 import { has } from '../util/rng';
 import { changeBuild, dv, type RunState } from '../game/run';
 import { drawBlueprint } from '../render/shipPreview';
@@ -18,8 +18,9 @@ export function refitPanel(run: RunState, onChange: () => void) {
     const canvas = el('canvas', { class: 'blueprint', width: 500, height: 625 });
     drawBlueprint(canvas, d, false, hl);
     const weps = d.mounts.filter((m) => m.part && has(WEAPONS, m.part.id));
-    const air = weps.filter((m) => ['air', 'both'].includes(WEAPONS[m.part!.id].layer)).length;
-    const gnd = weps.filter((m) => ['ground', 'both'].includes(WEAPONS[m.part!.id].layer)).length;
+    // what each gun can engage depends on where it sits: the top deck cannot hit the ground (mountTraverse)
+    const air = weps.filter((m) => ['air', 'both'].includes(m.trav.layers)).length;
+    const gnd = weps.filter((m) => ['ground', 'both'].includes(m.trav.layers)).length;
     const meters = el('div', 'gauges',
       gauge(d.maxHp / 450, 'Hull', `${Math.ceil(run.hp)}/${d.maxHp}`, { memo: 'rf-hull' }),
       gauge(d.shieldMax / 200, 'Shield', d.shieldMax ? String(d.shieldMax) : 'none', { memo: 'rf-shield' }),
@@ -31,7 +32,7 @@ export function refitPanel(run: RunState, onChange: () => void) {
     const stats = el('dl', 'stats');
     for (const [k, v] of [['Mass · thrust', `${d.mass} · ${d.thrust}`], ['Repair', d.regen ? `${d.regen.toFixed(1)}/s` : 'none'], ['Drones', String(d.drones)], ['Length', `${Math.round(d.len * 1.6)} m`]] as const)
       stats.append(el('dt', null, k), el('dd', null, v));
-    const warn = air === 0 ? el('p', 'fatal hazard-plate', 'No anti-air weapons mounted. Aircraft will be untouchable.') : gnd === 0 ? el('p', 'fatal hazard-plate', 'No anti-ground weapons mounted. Tanks and turrets will be untouchable.') : null;
+    const warn = air === 0 ? el('p', 'fatal hazard-plate', 'No anti-air weapons mounted. Aircraft will be untouchable.') : gnd === 0 ? el('p', 'fatal hazard-plate', 'Nothing can reach the ground: top-deck turrets only engage aircraft. Mount a gun on the bow or a broadside, or a bomb bay.') : null;
 
     const selPart = sel != null ? run.inv[sel] : null;
     const list = el('ol', 'sections');
@@ -53,9 +54,14 @@ export function refitPanel(run: RunState, onChange: () => void) {
         const b = el('button', { class: 'slot' + (p ? ' full' : ' empty') + (target ? ' target' : '') + (k === 'W' ? ' w' : ' u'), 'data-slot': `${si}-${i}`, onclick: () => clickSlot(si, i) });
         b.addEventListener('pointerenter', () => { hl = { si, i }; drawBlueprint(canvas, d, false, hl); });
         b.addEventListener('pointerleave', () => { hl = null; drawBlueprint(canvas, d, false, null); });
-        const arc = d.mounts.find((m) => m.si === si && m.i === i)?.arc ?? 'internal';
+        const mt = d.mounts.find((m) => m.si === si && m.i === i), arc = mt?.arc ?? 'internal';
         b.style.setProperty('--arc', ARC_INFO[arc].col);
         b.append(el('em', { class: 'arc-tag', title: ARC_INFO[arc].desc }, ARC_INFO[arc].short));
+        // what a gun here would engage: the selected part's reach if it were mounted here, else the mounted part's
+        if (k === 'W') {
+          const t = selPart && partSlot(selPart.id) === 'W' ? mountTraverse(s.type, k, selPart.id, mt?.side ?? 0) : mt?.part ? mt.trav : mountTraverse(s.type, k, 'pulse', mt?.side ?? 0);
+          b.append(el('em', { class: `reach-tag ${t.layers}`, title: 'What a gun in this mount can engage' }, LAYERS_TAG[t.layers]));
+        }
         const sock = el('span', 'sock', p ? icon(p.id) : el('i', null, k === 'W' ? 'W' : 'U'));
         if (p) b.append(sock, el('span', 'slot-txt', el('span', null, partDef(p.id).name, layerTag(p)), el('small', null, el('span', null, `Mk ${TIER[p.tier]}`), ' · click to unmount')));
         else b.append(sock, el('span', 'slot-txt', el('span', null, k === 'W' ? 'Weapon mount' : 'Utility bay'), el('small', null, target ? 'Click to mount' : 'Empty')));
@@ -73,7 +79,9 @@ export function refitPanel(run: RunState, onChange: () => void) {
       inv.append(b);
     });
     const info = selPart
-      ? el('div', 'selinfo', el('div', 'sel-head', icon(selPart.id), el('b', null, partName(selPart)), rankPips(selPart.tier)), el('p', null, partDesc(selPart)), el('small', null, `Fits a ${partSlot(selPart.id) === 'W' ? 'weapon mount' : 'utility bay'}. Highlighted mounts accept it.`))
+      ? el('div', 'selinfo', el('div', 'sel-head', icon(selPart.id), el('b', null, partName(selPart)), rankPips(selPart.tier)), el('p', null, partDesc(selPart)),
+        partSlot(selPart.id) === 'W' ? el('p', null, `${weaponControl(selPart.id) === 'heavy' ? 'Heavy: aimed with the mouse, in a numbered group.' : 'Auto: fires on its own.'} ${placementNote(selPart.id)}`) : null,
+        el('small', null, `Fits a ${partSlot(selPart.id) === 'W' ? 'weapon mount' : 'utility bay'}. Highlighted mounts accept it; their corner tag says what it would engage there.`))
       : el('div', 'selinfo idle', el('p', null, 'Pick a part from the hold, then a highlighted mount. Click a mounted part to send it back to the hold.'));
     root.replaceChildren(
       el('div', 'col schematic',
@@ -81,7 +89,7 @@ export function refitPanel(run: RunState, onChange: () => void) {
           el('div', 'title-block', el('span', null, el('small', null, 'Dwg no.'), `GD-${String(run.seed % 10000).padStart(4, '0')}-${run.build.sections.length}`), el('span', null, el('small', null, 'Vessel'), run.callsign), el('span', null, el('small', null, 'Sections'), String(run.build.sections.length))),
           el('div', 'bp-wrap', canvas, el('span', 'bow', 'Bow'), el('span', 'dim-line', el('i'), `${Math.round(d.len * 1.6)} m`, el('i')))),
         meters,
-        el('div', 'banks', arcBank('bow'), arcBank('broadside'), arcBank('ventral'), arcCount('omni') ? arcBank('omni') : null, bank('Anti-air', air), bank('Anti-ground', gnd)),
+        el('div', 'banks', arcBank('bow'), arcCount('dorsal') ? arcBank('dorsal') : null, arcBank('broadside'), arcBank('ventral'), arcCount('omni') ? arcBank('omni') : null, bank('Anti-air', air), bank('Anti-ground', gnd)),
         stats, warn),
       el('div', 'col', legend('Hull sections', 'bow at top'), list),
       el('div', 'col', legend('Cargo hold', 'pick a part, then a mount'), inv, info, el('div', { class: 'toast', role: 'status' }, toast)),

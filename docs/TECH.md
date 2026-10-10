@@ -71,17 +71,65 @@ Renderers read it every frame; nothing here needs to be written by them.
 - `tx, ty` pointer-steer target (null when keys steer). Movement math: `src/game/feel.ts` (`stepShipVelocity`, `arriveWish`, `stepBank`).
 - Bounds: the whole 1600×900 field minus the hull's half size (56 units kept clear at the top for the HUD).
 
-### Firing arcs (`src/data/parts.ts`)
-- Every `Mount` has `arc: 'bow' | 'broadside' | 'ventral' | 'omni' | 'internal'` and `side: -1 | 0 | 1` (broadside port/starboard, 0 = either).
-  `ARC_INFO[arc]` gives `label`, `short`, `col` and `desc` for the UI. `positionArc(sectionType, slotKind)` is the arc a mount position
-  gives; `mountArc(sectionType, slotKind, partId)` the effective arc (bombs and mortars are always ventral, arc coils and PD omni).
-- Bridge and gun decks are bow; Broadside Battery sections are broadside (outer mounts port/starboard, centre either side).
-- Ranges (`ARC_RANGE` in combat.ts): bow fires at targets within ±300 of the mount's x ahead of it (air only, plus ground for
-  `both`-layer weapons); broadside reaches 760 sideways for anything within half a hull length + 90 of the ship's y, air or ground
-  (ground targets get lobbed shells); mortars 520 around the ship; bomb bays drop under the hull. A battery with nothing in its arc holds fire.
+### Firing arcs, traverse and target layers (`src/data/parts.ts`)
+Where a gun is mounted decides where it can point and what it can hit:
+
+| Arc | Mounts | Traverse (ship space, 0 = bow) | Engages |
+| --- | --- | --- | --- |
+| `bow` | Command Bridge | forward cone ±`TRAVERSE.bow` (0.75 rad) | air and ground |
+| `dorsal` | Gun Deck turrets (top deck) | all round | air only (aircraft and ghost dreadnoughts): they cannot depress below the hull |
+| `broadside` | Broadside Battery | its flank ±`TRAVERSE.broadside` (1.0 rad) about the beam; the centre mount either flank | air and ground |
+| `ventral` | any bomb bay or mortar | falls (`down: true`) | ground only; a flying ghost is out of reach |
+| `omni` | point defense, arc coils | all round | PD: enemy fire (`shots`); coils: air from the top deck, air and ground elsewhere |
+
+- Every `Mount` has `arc`, `side: -1 | 0 | 1` (broadside port/starboard, 0 = either) and `trav: Traverse` =
+  `mountTraverse(sectionType, slotKind, partId, side)`: `{ arc, sectors: { c, h }[], layers, down }`. Sector angles are in SHIP space
+  (radians, 0 = dead ahead, +PI/2 = starboard). `shipToField(a, mirrored)` / `fieldToShip` convert (the player's bow points up the
+  screen, a ghost's down: `mirrored = true`), `inTraverse(trav, fieldAngle, mirrored)` tests a bearing and
+  `clampTraverse(trav, fieldAngle, mirrored)` clamps one into the nearest sector. The ship renderer should clamp turret yaw with the same
+  helpers. `layersHit(layers, enemyLayer)` decides what a mount may engage (a ghost dreadnought is layer `both`: air guns reach it,
+  ground ordnance does not). `LAYERS_TAG` gives the HUD / refit tag (AIR, GND, ALL, PD). `placementNote(partId)` is the part slip line.
+- `ARC_INFO[arc]` gives `label`, `short`, `col` and `desc` for the UI. `positionArc(sectionType, slotKind)` is the arc a mount position
+  gives (bridge bow, gun deck dorsal, battery broadside); `mountArc(sectionType, slotKind, partId)` the effective arc (bombs and mortars
+  are always ventral, arc coils and PD omni).
+- Ranges (`ARC_RANGE` in combat.ts): bow 1000 inside its cone (bolts strafe ground targets; bow flak lobs shells at them); dorsal 720
+  all round, air only; broadside reaches 760 sideways for anything within half a hull length + 90 of the ship's y and inside its flank
+  sector, air or ground (ground targets get lobbed shells); mortars 520 around the ship; bomb bays drop under the hull. A battery with
+  nothing in its arc holds fire. Missiles and rails also respect the mount's layers (a top-deck pod only seeks aircraft).
 - Broadside cadence (`BROADSIDE`): each side fires one ripple volley about every 1.7 s, stern to bow, 35 ms between rounds; each gun packs
   `broadsideRounds(part)` rounds (period / cooldown, max 12) at 1.2x damage, +10% per extra gun on the side.
 - Enemy weapons have `range` (`EN[type].range`, measured to the hull by `hullDist`). Out-ranging them is the positional game.
+
+### Gunnery: AUTO guns and aimed HEAVY groups (`src/data/parts.ts`, gunnery section of combat.ts)
+- `weaponControl(id)`: **AUTO** (pulse, scatter, flak, arc coil, point defense) fire on their own at the best target in their arc and keep
+  the screen alive; **HEAVY** (rail, missile, mortar, bomb) are fired by the pilot. `weaponFamily(id)` maps heavy parts to a family
+  (`rail`, `missile`, `mortar` = artillery, `bomb`); `HEAVY_FAMILIES[f]` = `{ name, slot, short, icon, col, aim, reach }`.
+- `weaponGroups(mounts)` numbers the families the ship carries 1.. in `FAMILY_ORDER` (rails, missiles, mortars, bombs); `S.groups` holds
+  them for the fight. `autoMounts(mounts)` lists the AUTO guns.
+- `gunnery = { manual, family }`: `manual` is on when a mouse flies the guns (main.ts sets it from `(pointer: fine)` and from the pointer type
+  of each press); off (touch, the balance harness, headless tests) every heavy gun aims itself exactly as before. `family` remembers the
+  selected group across fights.
+- `aim = { x, y, fire, salvo, group, lock, lockT, hover, bears, why, shotAt }`: the reticle in field units (the point under the mouse; ground
+  ordnance hits the ground under that pixel). `fire` = left button (the selected group), `salvo` = right button (every group).
+  `selectGroup(i)`, `cycleGroup(d)`, `firingGroups()`. Each frame `updateAim` sets `hover` (target under the reticle), the missile `lock`
+  (target nearest the reticle within `MANUAL.lockR` 170, while a missile group is selected or salvoing) and per heavy mount
+  `why[uid]` = `heavyWhy(m, x, y, target)`: `''` (bears), `'arc'` (outside its traverse), `'range'` (ground ordnance beyond `reach`:
+  bombs 420, mortars 640 from the mount), `'air'` (a top-deck gun and the target is on the ground), `'ground'`. `bears[uid]` is `why === ''`.
+- Manual fire (`fireHeavy`): a loaded heavy gun whose group is pulled and that bears fires at `MANUAL.dmgMul` (1.1x, in place of the
+  broadside ripple's 1.2x): rails along the line to the reticle (clamped to the traverse), missile pairs on the lock (or to the point,
+  detonating there), mortar shells and bombs onto the ground under it (fall time grows with distance). Heavy shots kick the camera
+  (`kick`, `addTrauma`), set `fireLog` (turret recoil) and `aim.shotAt` (reticle punch). `manualAimFor(uid)` is the renderer hook that
+  trains a heavy turret on the reticle or lock.
+- Input (main.ts): mouse moves the reticle; left button fires the selected group, right button salvoes; `1`-`9` select, `Q` / `E` and the
+  wheel cycle (`uiSwitch`, or `uiError` when there is no such group); the system cursor hides over the field. Touch: drag steers, every
+  gun aims itself. Space stays Overdrive.
+- HUD (`src/render/hud.ts`): bottom-left weapon panel with a numbered slot per heavy group (keycap, icon, AIR/GND/ALL tag, a reload pip
+  per mount, dimmed when it cannot bear, READY / n/m BEAR / NO BEARING) and an AUTO lamp bank; the reticle (brackets, reload ring per
+  mount, group tag, a slash and OUT OF ARC / OUT OF REACH / AIR ONLY when nothing bears, a dashed impact ring for ground ordnance and
+  the reach circles when out of reach, dashed firing lines from rails that bear and the traverse wedge of those that do not, closing lock
+  brackets for missiles, and a HOLD LMB prompt until the first heavy shot).
+- Ghost bosses keep their own fire control (`bossFire`, ghost broadsides) but train every gun inside its mount's traverse (mirrored):
+  the bridge gun in its cone, top-deck turrets all round (the player is an aircraft), broadsides in their flank sector.
 
 ### Events (`S.events`, `S.eventId`)
 Sim to audio/VFX/UI queue, capped at 160. Each `GameEvent` has an increasing `id`; consumers remember the last id they handled
@@ -108,8 +156,8 @@ Kinds (`OVERDRIVES` in `src/data/hulls.ts`):
 
 ### Carnage (`S.carnage`) and scrap
 `{ value, mult 1..3, since, peak }` (`src/game/feel.ts`, `CARNAGE`). Kills and structures add value; after a 1.6 s grace it decays at
-8 + 35% of value per second. `mult = 1 + value / 80`, capped at 3. Every scrap drop is `base * SCRAP_SCALE (0.35) * scrapSectorMul(sector) * carnage.mult *
-heat.scrap * dv.scrapMult` (see "Scrap economy" below). Scrap pickups home to the hull on their own after ~0.9 s (sooner with magnets); `S.pickStreak = { n, t }`
+8 + 35% of value per second. `mult = 1 + value / 80`, capped at 3. Every scrap drop is `base * SCRAP_SCALE (0.31) * scrapSectorMul(sector) * carnage.mult *
+heat.scrap * dv.scrapMult` (see "Scrap economy" below). Scrap magnet (`MAGNET` in parts.ts): scrap within `dv.magnet` (240 + 80 per Salvage Magnet tier + relic `magnetAdd`, e.g. Magnetized Hull +90) of the hull's edge is pulled in with an acceleration that grows as it nears and the longer it is held (`p.pull`), sideways drift is bled off so it curls into the hull, speed capped at 1500, and fast scrap throws a gold streak; anything within `MAGNET.collect` (26) of the hull is taken at once. All scrap also homes on its own after ~0.9 s (sooner with magnets) and is never lost off the bottom of the field (repair kits only come inside the reach); `S.pickStreak = { n, t }`
 counts pickups landing within 0.5 s of each other (rising pitch for audio). City agent: `worldBlast()` should return about 1-4 scrap per
 building destroyed; combat (`groundBlast`) first multiplies it by `cityPay()` (below), then pays `STRUCTURE_SCRAP` (0.4) of it with the usual scaling, adds `2 + scrap` carnage, counts it as a structure and feeds Overdrive.
 
@@ -145,8 +193,10 @@ Besides `x, y, r, hp, maxHp, layer, type`: `hdg` heading (aircraft), `ang` turre
 ### Ghost bosses (`S.boss`, boss section of combat.ts)
 A ghost flies its recorded build (`ghostToBuild`), mirrored: its bow points down the screen, so a mount at design offset
 (ox, oy) sits at field (x + ox·s, y − oy·s). Every `BossGun` keeps its mount's `arc` and `side`:
-- bow guns fire inside `BOSS_BROADSIDE.bowCone` (±0.6 rad) of straight down, on their own cooldowns (`BOSS_CD`);
+- non-broadside guns fire on their own cooldowns (`BOSS_CD`), aimed with `clampTraverse(gun.trav, ..., true)`: the bridge gun inside its
+  forward cone (straight down the screen), top-deck turrets all round;
 - ventral (bombs: mines; mortars: telegraphed strikes) and omni (arc coil rings, point defense) as before;
+- broadside lanes lock inside the flank sector (±`TRAVERSE.broadside` about the beam), and a flank engages when the player is inside it;
 - broadside guns fire **volleys** per flank (`B.volley[0]` port / screen left, `[1]` starboard): a flank whose arc holds the
   player winds up for `BOSS_BROADSIDE.tele[phase]` s (the FX layer draws `B.glints`: a hostile glint per gun and its lane,
   or the arc it will rake), then ripples stern to bow, `stagger` 75 ms per round. Rounds per gun `bossRounds(part, phase)`.
@@ -180,12 +230,15 @@ collapsed building) sectors 1 and 2 rose another ~55% (148 and 294 a fight). The
 
 | Sector | Fight | Elite | Boss + strip | Route income | Avg part | Merchant stock | Half-hull repair | Parts / fight | Income / stock |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | 124 | 117 | 288 | 976 | 111 | 1237 | 46 | 1.12 | 0.79 |
-| 2 | 229 | 142 | 321 | 1483 | 217 | 1883 | 77 | 1.05 | 0.79 |
-| 3 | 283 | 124 | 323 | 1703 | 341 | 2573 | 124 | 0.83 | 0.66 |
+| 1 | 136 | 104 | 279 | 1008 | 111 | 1237 | 46 | 1.23 | 0.82 |
+| 2 | 218 | 139 | 311 | 1423 | 217 | 1883 | 77 | 1.00 | 0.76 |
+| 3 | 251 | 120 | 310 | 1548 | 341 | 2573 | 124 | 0.74 | 0.60 |
 
-Early rampages pay a little more (a fight buys about one part in sectors 1-2), and by sector 3 a fight buys 0.83 of an
-average part and a whole sector two thirds of one merchant's stock, so the last shop is a choice between parts, a
+(After the scrap magnet and placement arcs: bow guns now reach ground targets and no scrap is lost off the field, which lifted
+sector 1 fights to 154; `SCRAP_SCALE` went from 0.35 to 0.31 to bring the curve back.)
+
+Early rampages pay a little more (a fight buys about one part in sectors 1-2), and by sector 3 a fight buys 0.74 of an
+average part and a whole sector about 60% of one merchant's stock, so the last shop is a choice between parts, a
 section, a relic and repairs. The unit test fails if a sector 3 fight buys more than 15% more than a sector 1 fight, or
 if sector 3 income leaves the 0.35–0.85 stock band.
 
@@ -230,12 +283,14 @@ clearing sector 3 shows the victory screen; the pilot banks the run or pushes on
 - **UI** (`src/ui/screens/roster.ts`): the roster is fan-fold line-printer paper (pin-feed margins, green bars, line-by-line print), the pilot's row marked with a highlighter, a rubber stamp for the filing result (Filed / On file / Held / Refused). It prints on the wreck report (death) and the port report (retiring after victory) of daily runs, and in the Daily Strike briefing on the title (today / yesterday tabs, then the launch switch, `#btn-daily-launch`). Offline it says "No carrier" and shows this device's own run, unranked.
 
 ### Balance harness
-`tests/sim/harness.ts` runs real fights headless with a scripted pilot and seeded `Math.random`. `BALANCE=1 npx vitest run
+`tests/sim/harness.ts` runs real fights headless with a scripted pilot and seeded `Math.random`. Bots: `pilot` (every gun aims
+itself), `gunner` (same flying, `gunnery.manual` on, the reticle on the boss / elite or the nearest target and every heavy group
+salvoing: what a mouse player does) and `idle`. A unit test holds the gunner's DPS within 0.85-1.6x of the pilot's. `BALANCE=1 npx vitest run
 tests/unit/balance.test.ts --disable-console-intercept` prints the table (`ONLY=s2-boss,ace` narrows it).
 
 ### Debug hooks (`window.__gd`)
 `run`, `profile`, `S`, `debug.timeScale`, `god()`, `winNow()` (kills boss/elite outright), `killPlayer()`, `overdrive()` (charge and fire),
-`travelTo(type)`, `forceNext(type)`, `addScrap(n)`.
+`travelTo(type)`, `forceNext(type)`, `addScrap(n)`, `aim`, `gunnery`, `selectGroup(i)`.
 
 ## VFX API (`src/game/vfx.ts`, rendering in `src/render/fx/`)
 Particles live in field coordinates plus a height `h` (ground particles: field units above the city; flight particles: world units above or below the flight plane). They are pooled; `V.cap` (set by the quality tier) bounds the live count.

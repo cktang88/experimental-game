@@ -17,7 +17,7 @@ export const RELICS: Record<string, RelicDef> = {
   flak_lattice: { name: 'Flak Lattice', rarity: 'common', col: '#4fd1e8', desc: '+20% damage to aircraft.', mods: (m) => { m.dmgAir *= 1.2; } },
   bunker_buster: { name: 'Bunker Buster Fuses', rarity: 'common', col: '#f2a541', desc: '+20% damage to ground targets.', mods: (m) => { m.dmgGround *= 1.2; } },
   capacitor_bank: { name: 'Capacitor Bank', rarity: 'common', col: '#4fd1e8', desc: '+35 shield, even without a generator.', mods: (m) => { m.shieldAdd += 35; } },
-  magnetic_hull: { name: 'Magnetized Hull', rarity: 'common', col: '#e0c35c', desc: 'Scrap pickup radius +90.', mods: (m) => { m.magnetAdd += 90; } },
+  magnetic_hull: { name: 'Magnetized Hull', rarity: 'common', col: '#e0c35c', desc: 'Scrap magnet reach +90.', mods: (m) => { m.magnetAdd += 90; } },
   nanite_vats: { name: 'Nanite Vats', rarity: 'common', col: '#8fe39a', desc: 'Repair 10% hull after every fight.', flag: 'heal_after_fight' },
   haggler_chip: { name: "Haggler's Chip", rarity: 'common', col: '#e0c35c', desc: 'Merchants charge 20% less.', mods: (m) => { m.priceMul *= 0.8; } },
   overclock_bus: { name: 'Overclock Bus', rarity: 'rare', col: '#ff7a6b', desc: 'All weapons fire 12% faster.', mods: (m) => { m.fireMul *= 1.12; } },

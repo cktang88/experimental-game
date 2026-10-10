@@ -2,7 +2,7 @@
 // costs and pays. Used by tests/unit/balance.test.ts; run `BALANCE=1 npx vitest run tests/unit/balance.test.ts`
 // for the full table.
 import './env';
-import { S, keys, startCombat, updateCombat, endCombat, type CombatSetup } from '../../src/game/combat';
+import { S, keys, startCombat, updateCombat, endCombat, gunnery, aim, type CombatSetup } from '../../src/game/combat';
 import { derive, mkPart, starterBuild, type Build } from '../../src/data/parts';
 import { FIGHTS, ELITES, BOSS_ENCOUNTER, type Encounter } from '../../src/data/enemies';
 import { HULLS, type HullId } from '../../src/data/hulls';
@@ -13,7 +13,9 @@ import { FIELD_W as W, FIELD_H as H } from '../../src/game/field';
 import { EN } from '../../src/data/enemies';
 import { mulberry32 } from '../../src/util/rng';
 
-export type Bot = 'pilot' | 'idle';
+/** pilot: scripted flying, every weapon aims itself. gunner: the same flying, heavy groups fired by hand (right-mouse
+ *  salvo at the best target, as a mouse player would). idle: parks mid-field. */
+export type Bot = 'pilot' | 'gunner' | 'idle';
 export interface FightResult {
   enc: string; kind: string; level: number; outcome: 'win' | 'dead' | 'timeout'; seconds: number;
   hullLostPct: number; scrap: number; kills: number; structures: number; overdrives: number; broadsides: number; maxVolley: number;
@@ -86,14 +88,29 @@ function steer(bot: Bot) {
     }
   }
   p.tx = gx; p.ty = gy;
+  if (bot === 'gunner') aimHeavies(foes);
   if (S.overdrive.charge >= 1 && (foes.length >= 6 || S.boss?.alive || S.elite)) keys.od = true;
 }
 
+/** The gunner's aiming policy: the boss or elite if there is one, else the nearest real target; the reticle sits on it
+ *  (ground targets lead the scroll a little) and every heavy group salvoes. */
+function aimHeavies(foes: typeof S.enemies) {
+  const p = S.P!;
+  const el = S.elite && !S.elite.dead ? S.elite : null;
+  let tg: { x: number; y: number; layer: string } | null = S.boss?.alive ? S.boss : el;
+  if (!tg) {
+    let bd = Infinity;
+    for (const e of foes) { const d = Math.hypot(e.x - p.x, e.y - p.y) + (e.y > p.y ? 200 : 0); if (e.y > 0 && d < bd) { bd = d; tg = e; } }
+  }
+  aim.salvo = !!tg;
+  if (tg) { aim.x = tg.x; aim.y = tg.y + (tg.layer === 'ground' ? S.scroll * 0.4 : 0); }
+}
 export interface FightSpec { enc: Encounter; level: number; sector: number; build: string; bot?: Bot; heat?: number; hull?: HullId; relics?: string[]; seed?: number }
 /** Runs one fight to its end. Math.random is swapped for a seeded stream so a spec always plays out the same way. */
 export function runFight(spec: FightSpec, dt = 1 / 60, maxT = 240): FightResult {
   const realRandom = Math.random; Math.random = mulberry32(spec.seed ?? 1);
-  try { return runFightInner(spec, dt, maxT); } finally { Math.random = realRandom; }
+  gunnery.manual = spec.bot === 'gunner'; gunnery.family = null;
+  try { return runFightInner(spec, dt, maxT); } finally { Math.random = realRandom; gunnery.manual = false; aim.salvo = aim.fire = false; }
 }
 function runFightInner(spec: FightSpec, dt: number, maxT: number): FightResult {
   const build = BUILDS[spec.build](), relics = spec.relics ?? [], mods = relicMods(relics);
