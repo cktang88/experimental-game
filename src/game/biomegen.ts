@@ -46,7 +46,7 @@ function pathRoad(ch: Chunk, b: Biome, f: (cy: number) => number, c0: number, c1
 }
 
 /* ---------------- shared structures ---------------- */
-const CONTAINER_TINTS = ['#4a2a20', '#1d3047', '#25423e', '#4f4020', '#4d5156', '#33293d', '#26352a', '#553a1c'];
+const CONTAINER_TINTS = ['#6a3a2a', '#2a4566', '#335c56', '#6e5a2c', '#6a7076', '#47395a', '#36503c', '#7a5226'];
 /** A parked aircraft, nose toward -x (rot turns it). Fuel: it burns and blows. */
 function plane(ch: Chunk, x: number, cy: number, len: number, span: number, rot = 0, tint = '#4b525a') {
   const c = Math.cos(rot), s = Math.sin(rot);
@@ -69,7 +69,7 @@ function ship(ch: Chunk, x: number, cy: number, len: number, beam: number, kind:
     const holds = Math.floor(len * 0.68 / 12);
     for (let i = 0; i < holds; i++) {
       const hy = cy - len * 0.3 + i * 12;
-      fb(ch, 'low', x, hy, beam * 0.8, 10.5, 2.4, Style.Metal, { tint: pick(CONTAINER_TINTS), lit: 0 }, [tier(beam * 0.8, 10.5, 3, 1.4 + Math.random() * 1.6)]);
+      fb(ch, 'low', x, hy, beam * 0.8, 10.5, 2.4, Style.Shell, { tint: pick(CONTAINER_TINTS), lit: 0 }, [tier(beam * 0.8, 10.5, 3, 1.4 + Math.random() * 1.6)]);
     }
   } else if (kind === 'tanker') {
     for (let i = 0; i < 5; i++) L(ch, x, cy - len * 0.3 + i * len * 0.13, 3.4, 0.7, LC.Amber, 0.3, 2);
@@ -109,7 +109,7 @@ function cluster(ch: Chunk, b: Biome, cx: number, cy: number, n: number, rad: nu
     T(x, y); if (ts.water > 0.3) continue;
     const w = rnd(3, 5.5), h = rnd(2.6, 4.2), rot = pick([0, Math.PI / 2, 0.2, -0.3]);
     fb(ch, Math.random() < 0.5 ? 'cabin' : 'house', x, y, w, h, rnd(1.2, 2.2), style, { tint, lit: rnd(0.25, 0.7), roof, rot });
-    if (Math.random() < 0.35) L(ch, x + rnd(-3, 3), y + rnd(-3, 3), 1.5, 0.8, Math.random() < 0.6 ? LC.Warm : lamp, 0.5, 0);
+    if (Math.random() < 0.7) L(ch, x + rnd(-3, 3), y + rnd(-3, 3), 1.5, 0.8, Math.random() < 0.6 ? LC.Warm : lamp, 0.5, 0);
   }
 }
 function church(ch: Chunk, x: number, cy: number, roof: number) {
@@ -212,9 +212,10 @@ export function genPort(ch: Chunk, c0: number, c1: number) {
     // Quay apron and cranes.
     if (ok(B, cx + 30, mid)) {
       pad(ch, cx - 1, c0, cx + 66, c1, 'dock'); zone(ch, cx - 1, c0, cx + 66, c1, 'dock');
+      for (let y = Math.ceil(c0 / 12) * 12; y < c1; y += 12) L(ch, cx + 1, y, 1, 0.8, LC.Sodium, 0.5, 0);
       for (let y = c0 + rnd(4, 16); y < c1 - 6; y += rnd(26, 36)) {
         if (!ok(B, cx + 6, y)) continue;
-        const cr = fb(ch, 'crane', cx + 6, y, 12, 4, 13.5, Style.Metal, { tint: '#4a3a24', lit: 0 }, [
+        const cr = fb(ch, 'crane', cx + 6, y, 12, 4, 13.5, Style.Shell, { tint: '#7a5a2a', lit: 0 }, [
           tier(10, 3.2, 0, 12.2, 1, 0), tier(40, 2.2, 12.2, 1.4, -8, 0), tier(4, 4, 12.2, 3.5, 4, 0),
         ]);
         L(ch, cx - 27, y, 13.8, 0.9, LC.Amber, 0.75, 3, Math.random(), cr);
@@ -228,7 +229,7 @@ export function genPort(ch: Chunk, c0: number, c1: number) {
     for (let y = c0 + 4; y < c1 - 4; y += 8.5) {
       for (let x = yx0; x < yx1; x += 25) {
         if (Math.random() < 0.18 || !ok(B, x + 11, y)) continue;
-        fb(ch, 'low', x + 11, y + 2.6, 22, 5.2, 1.4 * (1 + Math.floor(Math.random() * 3.4)), Style.Metal, { tint: pick(CONTAINER_TINTS), lit: 0 });
+        fb(ch, 'low', x + 11, y + 2.6, 22, 5.2, 1.4 * (1 + Math.floor(Math.random() * 3.4)), Style.Shell, { tint: pick(CONTAINER_TINTS), lit: 0 });
       }
     }
     if (inBiome(B, yx0 + 90, mid)) {
@@ -474,7 +475,9 @@ export function genDesert(ch: Chunk, c0: number, c1: number) {
     const x = rnd(X0 + 30, X1 - 30), y = rnd(c0 + 10, c1 - 10);
     if (Math.random() < 0.3 || !ok(B, x, y, 14) || T(x, y).h > 26 || Math.abs(x - highwayX(y)) < 20) continue;
     compound(ch, B, x, y, rnd(12, 22), Style.Adobe, 0.5, SAND);
-    seg(ch, x, y, highwayX(y), y + rnd(-30, 30), 1.6, 'dirt');
+    // A track out of the gate, toward the highway when it is near.
+    const hx = highwayX(y), tx = Math.abs(hx - x) < 260 ? hx : x + Math.sign(hx - x) * rnd(40, 90);
+    seg(ch, x, y, tx, y + rnd(-30, 30), 1.4, 'dirt');
   }
   // A truck stop on the highway: sheds, fuel tanks, a pool of sodium light.
   if (Math.random() < 0.3) {

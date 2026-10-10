@@ -244,7 +244,12 @@ void main(){
   float a; vec3 col = vC.rgb;
   if ((vKind > 0.5 && vKind < 1.5) || (vKind > 3.5 && vKind < 4.5)) a = pow(max(0.0, 1.0 - d), 1.6);
   else if (vKind > 4.5 && vKind < 5.5) { vec2 q = abs(vUv * 2.0 - 1.0); a = pow(max(0.0, 1.0 - q.x), 1.4) * (1.0 - smoothstep(0.9, 1.0, q.y)) * powerAt(vP, 0.0); }
-  else { a = pow(max(0.0, 1.0 - d), 2.0); col = mix(col, vec3(1.0), pow(max(0.0, 1.0 - d * 2.5), 2.0)); }
+  else {
+    // Pinpoint: a crisp hot core and a faint halo.
+    float core = 1.0 - smoothstep(0.12, 0.34, d);
+    a = core + pow(max(0.0, 1.0 - d), 3.0) * 0.35;
+    col = mix(col, vec3(1.0) * max(col.r, max(col.g, col.b)), core * 0.45);
+  }
   gl_FragColor = vec4(col * a * vC.a, 1.0);
 }`;
 export function lightMaterial() {

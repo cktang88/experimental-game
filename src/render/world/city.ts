@@ -276,7 +276,7 @@ export class CityLayer implements Layer {
       for (const L of ch.lights) {
         // Pinpoints are authored at their real size; from this altitude they need a couple of pixels to read.
         const pool = L.k === 1 || L.k === 4, sz = pool ? L.s : Math.max(2.8, L.s * 2.6);
-        const i = this.light(X(L.x), R(L.h), Z(L.cy), R(sz), LIGHT_COL[L.c] ?? white, pool ? L.a * 2.6 : Math.min(0.85, 0.25 + L.a), L.k, L.p);
+        const i = this.light(X(L.x), R(L.h), Z(L.cy), R(sz), LIGHT_COL[L.c] ?? white, pool ? L.a * 1.3 : Math.min(0.85, 0.25 + L.a), L.k, L.p);
         if (L.b && i >= 0) this.bLights.push({ i, b: L.b });
         if (L.k === 8) this.sweeps.push({ x: X(L.x), y: R(L.h), z: Z(L.cy), s: R(L.s), seed: L.p, b: L.b });
       }
@@ -351,9 +351,9 @@ export class CityLayer implements Layer {
       if (f.b) {
         // Flare stack: a tall standing flame and the orange wash it throws on the ground.
         const fl = 0.8 + 0.2 * Math.sin(t * 11 + f.seed * 30);
-        glow.add(f.x, f.y + f.s, f.z + scrollZ, 0, f.s * 1.2 * fl, f.s * 2.2 * fl, FIRE_A, 1.1, Shape.Soft);
-        glow.add(f.x, f.y + f.s * 0.6, f.z + scrollZ, 0, f.s * 0.6, f.s * 1.1, FIRE_B, 1.2, Shape.Hot);
-        glow.add(f.x, 2, f.z + scrollZ, 0, f.s * 9, f.s * 9, FIRE_A, 0.06, Shape.Soft);
+        glow.add(f.x, f.y + f.s, f.z + scrollZ, 0.6, f.s * 2.2 * fl, f.s * 1.1 * fl, FIRE_A, 0.45, Shape.Soft);
+        glow.add(f.x, f.y + f.s * 0.6, f.z + scrollZ, 0, f.s * 0.5, f.s * 0.5, FIRE_B, 0.5, Shape.Hot);
+        glow.add(f.x, 2, f.z + scrollZ, 0, f.s * 12, f.s * 12, FIRE_A, 0.07, Shape.Soft);
       } else this.burn(glow, dark, f.x, f.y, f.z + scrollZ, f.s * 1.5, 0.6, f.seed, t);
     }
     for (const s of this.stacks) {

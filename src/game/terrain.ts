@@ -132,12 +132,12 @@ function fieldOf(b: Biome, x: number, cy: number, o: TerrainSample): TerrainSamp
     }
     case Biome.Desert: {
       const w = fbm(x * 0.0025, cy * 0.0025, 3);
-      // Dune crests run diagonally across the field: long windward slopes, short steep lee faces, broken up by warp.
-      const ph = (x * 0.8 + cy * 0.45) * 0.0085 + w * 5 + 1.5 * fbm(x * 0.006 + 3, cy * 0.006, 2);
+      // Dune ridges run diagonally across the field, warped into crescents: soft graded slopes with a crisp crest.
+      const ph = (x * 0.8 + cy * 0.5) * 0.0062 + w * 4 + 1.2 * fbm(x * 0.005 + 3, cy * 0.005, 2);
       const s = ph - Math.floor(ph);
-      const dune = s < 0.72 ? s / 0.72 : (1 - s) / 0.28;
-      const amp = 16 * smooth(0.25, 0.7, fbm(x * 0.0035 + 5, cy * 0.0035, 2));
-      let h = dune * dune * (3 - 2 * dune) * amp + 7 * fbm(x * 0.008, cy * 0.008, 3);
+      const dune = s < 0.65 ? Math.sin((s / 0.65) * Math.PI * 0.5) : Math.cos(((s - 0.65) / 0.35) * Math.PI * 0.5);
+      const amp = 26 * smooth(0.2, 0.65, fbm(x * 0.0028 + 5, cy * 0.0028, 2));
+      let h = dune * dune * amp + 6 * fbm(x * 0.008, cy * 0.008, 3);
       // Mesas: flat-topped plateaus with hard escarpments.
       const m = fbm(x * 0.0018 + 40, cy * 0.0018, 4);
       const mesa = smooth(0.63, 0.655, m);
