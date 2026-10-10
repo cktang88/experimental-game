@@ -27,7 +27,7 @@ For production, `npm start` builds the client and serves `dist/` and the API fro
 - **Relics** are 22 passive modifiers, including curses picked up from risky choices.
 - **Death** uploads your exact build to the registry for the sector you died in. Bosses are drawn at random from everyone who died in that sector, preferring other pilots. If nobody has died there yet, a procedurally armed AI defense core holds it.
 
-Controls: WASD, arrow keys or drag to steer. Guns fire on their own. Press P or Esc to pause and M to mute. Runs are saved after every node and can be continued from the title screen.
+Controls: WASD or arrow keys to steer. Light guns (point defense, pulse, scatter, flak, arc coils) fire on their own. The mouse aims the heavy weapons: hold the left button to fire the selected group, the right button to salvo every group; 1-9, Q / E or the wheel select a group. Space fires Overdrive. On a touch screen, drag to steer and every gun aims itself. Press P or Esc to pause and M to mute. Runs are saved after every node and can be continued from the title screen.
 
 ## Code map
 

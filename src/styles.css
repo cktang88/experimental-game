@@ -852,3 +852,10 @@ ol.heat-list li.shut { opacity: .5; }
   .rs-you { display: none; }
   .daily-console .foot .switch { min-width: 0; width: 100%; }
 }
+
+/* Weapon control and placement on part slips and the refit sheet */
+.slip .ds.place { flex: 0; font-size: 12px; font-family: var(--f-mono); letter-spacing: .02em; color: #5a5242; border-top: 1px dashed rgba(58, 53, 40, .35); padding-top: 4px; }
+.slip em.layer.ctl.heavy { color: #8d520a; } .slip em.layer.ctl.auto { color: #275f31; }
+em.layer.ctl.heavy { color: var(--hazard); } em.layer.ctl.auto { color: var(--good); }
+.slot .reach-tag { position: absolute; bottom: 3px; right: 4px; font-style: normal; font-family: var(--f-mono); font-size: 9px; letter-spacing: .1em; opacity: .9; }
+.slot .reach-tag.air { color: var(--plasma); } .slot .reach-tag.ground { color: var(--hazard); } .slot .reach-tag.both { color: var(--violet); } .slot .reach-tag.shots { color: #b8f2c8; }

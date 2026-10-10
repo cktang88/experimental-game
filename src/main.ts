@@ -195,7 +195,7 @@ function titleScreen() {
     if (saved) settle(profile, saved, saved.won ? 'victory' : 'abandoned'); // a run left unfinished is banked at half pay
     const key = utcDateKey();
     run = daily ? newRun(cs, dailySeed(key), { daily: key }) : newRun(cs, undefined, { hull: profile.hull, heat: profile.heat, perks: perksFor(profile.xp) });
-    mapToast = daily ? `Daily strike ${key}: the same route for every pilot today.` : 'Choose your first node. Everything on floor one is a fight.';
+    mapToast = daily ? `Daily strike ${key}: the same route for every pilot today.` : 'Choose your first node. Everything on floor one is a fight. In combat your light guns fire on their own; the mouse aims the heavy guns: hold the left button to fire, right button for a full salvo.';
     mapScreen();
   };
   const callsign = () => (document.getElementById('callsign') as HTMLInputElement | null)?.value ?? '';

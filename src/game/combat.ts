@@ -948,8 +948,9 @@ function fireWeapon(p: Part, m: Mount, x: number, y: number, mul: number, side =
   }
   // Bolts engage what the mount can engage: top-deck guns cannot hit the ground.
   const lay = trav.layers === 'air' ? 'air' : trav.layers === 'ground' ? 'ground' : 'both';
-  // Broadside guns shelling a ground target lob a shell onto it instead of a flat bolt (bow guns strafe it with bolts).
-  if (arc === 'broadside' && tg && tg.layer === 'ground' && p.id !== 'rail' && p.id !== 'missile') {
+  // Broadside guns (and bow flak) shelling a ground target lob a shell onto it instead of a flat bolt; other bow guns
+  // strafe it with bolts.
+  if ((arc === 'broadside' || (arc === 'bow' && p.id === 'flak')) && tg && tg.layer === 'ground' && p.id !== 'rail' && p.id !== 'missile') {
     const n = p.id === 'spread' ? (p.tier >= 3 ? 3 : 2) : 1;
     for (let i = 0; i < n; i++) shell(x, y, tg.x + rnd(-14, 14) * i, tg.y + S.scroll * 0.5 + rnd(-10, 10) * i, d * (p.id === 'flak' ? 1.4 : 1.15), c, 28, 0.5);
     sfx('cannon', { x, layer: 'ship' }); return true;

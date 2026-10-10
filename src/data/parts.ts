@@ -30,17 +30,17 @@ export const WEAPONS: Record<string, WeaponDef> = {
 export type WeaponControl = 'auto' | 'heavy';
 export type HeavyFamily = 'rail' | 'missile' | 'mortar' | 'bomb';
 export interface FamilyDef {
-  name: string; short: string; icon: string; col: string;
+  name: string; /** Panel label. */ slot: string; short: string; icon: string; col: string;
   /** How the reticle is used: 'line' fires toward it, 'lock' locks the target nearest it, 'ground' hits the ground under it. */
   aim: 'line' | 'lock' | 'ground';
   /** Ground weapons: max distance from the mount to the reticle (0 = no limit). */ reach: number;
 }
 /** Heavy families in group order: a ship's groups are numbered 1.. in this order, skipping families it does not carry. */
 export const HEAVY_FAMILIES: Record<HeavyFamily, FamilyDef> = {
-  rail: { name: 'Rail Cannons', short: 'RAIL', icon: 'hypersonic-bolt', col: '#c9a6ff', aim: 'line', reach: 0 },
-  missile: { name: 'Seeker Missiles', short: 'MSL', icon: 'missile-pod', col: '#ff9f5a', aim: 'lock', reach: 0 },
-  mortar: { name: 'Siege Mortars', short: 'MRT', icon: 'mortar', col: '#e88a3c', aim: 'ground', reach: 640 },
-  bomb: { name: 'Bomb Bays', short: 'BMB', icon: 'falling-bomb', col: '#f2a541', aim: 'ground', reach: 420 },
+  rail: { name: 'Rail Cannons', slot: 'RAILS', short: 'RAIL', icon: 'hypersonic-bolt', col: '#c9a6ff', aim: 'line', reach: 0 },
+  missile: { name: 'Seeker Missiles', slot: 'MISSILES', short: 'MSL', icon: 'missile-pod', col: '#ff9f5a', aim: 'lock', reach: 0 },
+  mortar: { name: 'Siege Mortars', slot: 'MORTARS', short: 'MRT', icon: 'mortar', col: '#e88a3c', aim: 'ground', reach: 640 },
+  bomb: { name: 'Bomb Bays', slot: 'BOMBS', short: 'BMB', icon: 'falling-bomb', col: '#f2a541', aim: 'ground', reach: 420 },
 };
 export const FAMILY_ORDER: HeavyFamily[] = ['rail', 'missile', 'mortar', 'bomb'];
 const PART_FAMILY: Record<string, HeavyFamily> = { rail: 'rail', missile: 'missile', artillery: 'mortar', bomb: 'bomb' };

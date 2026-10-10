@@ -237,7 +237,7 @@ function weapons(c: CanvasRenderingContext2D) {
   const P = S.P!, groups = S.groups ?? [], autos = autoMounts(P.dv.mounts);
   if (!groups.length && !autos.length) return;
   const manual = gunnery.manual, autoW = autos.length ? Math.max(92, 18 + autos.length * 30) : 0;
-  const w = 24 + groups.length * (SLOT_W + 8) + (autos.length ? autoW + 8 : 0) - 8, h = manual && groups.length ? 104 : 90;
+  const w = 24 + groups.length * (SLOT_W + 8) + (autos.length ? autoW + 8 : 0) - 8, h = manual && groups.length ? 112 : 96;
   const x = 14, y = H - 14 - h;
   plate(c, x, y, w, h);
   label(c, groups.length ? (manual ? 'HEAVY · AIMED' : 'HEAVY · AUTO-AIM') : 'NO HEAVY ORDNANCE', x + 12, y + 18, C.faint, 10);
@@ -251,7 +251,7 @@ function weapons(c: CanvasRenderingContext2D) {
     keycap(c, sx + 6, sy + 6, 20, 20, String(g.key), act, C.hazard);
     drawIcon(c, g.def.icon, sx + 42, sy + 16, 20, act ? g.def.col : shade(g.def.col, 0.7));
     c.font = `12px ${F_STEN}`; c.fillStyle = act ? C.fg : C.dim; c.textAlign = 'left'; c.textBaseline = 'alphabetic';
-    c.fillText(g.def.name.toUpperCase(), sx + 56, sy + 21);
+    c.fillText(g.def.slot, sx + 56, sy + 21);
     // target-layer tag and bearing state
     const tag = groupTag(g.mounts);
     label(c, tag, sx + 8, sy + 44, LAYER_TAG_COL[tag] ?? C.dim, 9);
@@ -263,7 +263,7 @@ function weapons(c: CanvasRenderingContext2D) {
     const nb = g.mounts.filter((m) => aim.bears[m.part!.uid] !== false).length;
     const state = !manual ? 'AUTO' : nb === g.mounts.length ? 'READY' : nb ? `${nb}/${g.mounts.length} BEAR` : 'NO BEARING';
     label(c, `×${g.mounts.length}`, sx + SLOT_W - 8, sy + 44, C.dim, 10, 'right');
-    label(c, state, sx + 8, sy + SLOT_H - 6, state === 'NO BEARING' ? C.hazard : act ? C.dim : C.faint, 9);
+    label(c, state, sx + 8, sy + SLOT_H - 7, state === 'NO BEARING' ? C.hazard : act ? C.dim : C.faint, 9);
   });
   if (autos.length) {
     const ax = x + 12 + groups.length * (SLOT_W + 8), ay = y + 24;
@@ -338,16 +338,19 @@ function reticle(c: CanvasRenderingContext2D) {
       c.save(); c.translate(L.x, L.y); c.rotate((1 - k) * Math.PI / 4);
       c.strokeStyle = '#ff9f5a'; c.lineWidth = 2.5; brackets(c, 0, 0, rr, rr * 0.45);
       c.restore();
-      if (k >= 1) { label(c, 'LOCK', L.x, L.y - rr - 8, '#ff9f5a', 11, 'center'); c.strokeStyle = 'rgba(255,159,90,.35)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y); c.lineTo(L.x, L.y); c.stroke(); }
+      if (k >= 1) { label(c, 'LOCK', L.x + rr + 6, L.y - rr + 4, '#ff9f5a', 11, 'left'); c.strokeStyle = 'rgba(255,159,90,.35)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y); c.lineTo(L.x, L.y); c.stroke(); }
     }
   }
   // the reticle itself
-  const s = 1 + punch * 0.35, r = 17 * s;
-  c.strokeStyle = 'rgba(5,8,11,.85)'; c.lineWidth = 5; brackets(c, x, y, r, 8);
-  c.strokeStyle = col; c.lineWidth = 2.2; brackets(c, x, y, r, 8);
-  c.fillStyle = col; c.fillRect(x - 1.5, y - 1.5, 3, 3);
-  c.lineWidth = 1.5;
-  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { c.beginPath(); c.moveTo(x + dx * 5, y + dy * 5); c.lineTo(x + dx * 10, y + dy * 10); c.stroke(); }
+  const s = 1 + punch * 0.35, r = 22 * s;
+  c.strokeStyle = 'rgba(5,8,11,.9)'; c.lineWidth = 6; brackets(c, x, y, r, 10);
+  c.strokeStyle = col; c.lineWidth = 2.8; brackets(c, x, y, r, 10);
+  if (pulling && can) { c.save(); c.globalAlpha = 0.5 + 0.5 * Math.sin(st.t * 40); c.lineWidth = 1.2; brackets(c, x, y, r + 5, 6); c.restore(); }
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    c.strokeStyle = 'rgba(5,8,11,.9)'; c.lineWidth = 4; c.beginPath(); c.moveTo(x + dx * 5, y + dy * 5); c.lineTo(x + dx * 12, y + dy * 12); c.stroke();
+    c.strokeStyle = col; c.lineWidth = 1.8; c.beginPath(); c.moveTo(x + dx * 5, y + dy * 5); c.lineTo(x + dx * 12, y + dy * 12); c.stroke();
+  }
+  c.fillStyle = '#fff'; c.fillRect(x - 1, y - 1, 2, 2);
   if (!can) { c.strokeStyle = '#7d8a96'; c.lineWidth = 2; c.beginPath(); c.moveTo(x - r * 0.8, y + r * 0.8); c.lineTo(x + r * 0.8, y - r * 0.8); c.stroke(); }
   // reload ring: one arc per mount in the active group(s)
   const n = ms.length, gap = n > 1 ? 0.18 : 0, R = r + 9;
@@ -355,8 +358,8 @@ function reticle(c: CanvasRenderingContext2D) {
     const p = m.part!, cd = S.P!.cds[p.uid] ?? 0, full = (wCd(p) * (p.id === 'rail' ? P.dv.mods.railCdMul : 1)) / Math.max(0.2, P.dv.fireMult);
     const ready = clamp(1 - cd / Math.max(0.05, full), 0, 1), a0 = -Math.PI / 2 + (i / n) * Math.PI * 2 + gap / 2, span = Math.PI * 2 / n - gap;
     const ok = aim.bears[p.uid] !== false;
-    c.strokeStyle = '#05080b'; c.lineWidth = 5; c.beginPath(); c.arc(x, y, R, a0, a0 + span); c.stroke();
-    c.strokeStyle = ok ? (ready >= 1 ? col : shade(col, 0.6)) : '#4a5561'; c.lineWidth = 3; c.beginPath(); c.arc(x, y, R, a0, a0 + span * ready); c.stroke();
+    c.strokeStyle = 'rgba(5,8,11,.9)'; c.lineWidth = 6; c.beginPath(); c.arc(x, y, R, a0, a0 + span); c.stroke();
+    c.strokeStyle = ok ? (ready >= 1 ? col : shade(col, 0.6)) : '#4a5561'; c.lineWidth = 3.5; c.beginPath(); c.arc(x, y, R, a0, a0 + span * ready); c.stroke();
   });
   // tag: group key and name, and why it cannot bear
   const why = can ? '' : WHY_TEXT[aim.why[ms[0].part!.uid] || 'arc'] ?? 'NO BEARING';
@@ -570,6 +573,6 @@ export function drawHud(c: CanvasRenderingContext2D, scale: number, dpr: number,
   weapons(c);
   carnage(c);
   overdrive(c);
-  reticle(c);
   banner(c);
+  reticle(c);
 }
