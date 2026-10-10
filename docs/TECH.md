@@ -195,6 +195,8 @@ A ghost flies its recorded build (`ghostToBuild`), mirrored: its bow points down
 (ox, oy) sits at field (x + ox·s, y − oy·s). Every `BossGun` keeps its mount's `arc` and `side`:
 - non-broadside guns fire on their own cooldowns (`BOSS_CD`), aimed with `clampTraverse(gun.trav, ..., true)`: the bridge gun inside its
   forward cone (straight down the screen), top-deck turrets all round;
+- every ghost round is scaled by `bossHitEase()` = 2.6 / SHIP_SCALE (×0.85 more from sector 3): the scale pass made our hull a
+  bigger target. Scripted pilot hull lost per boss: s1 32% / s2 60% / s3 70%;
 - ventral (bombs: mines; mortars: telegraphed strikes) and omni (arc coil rings, point defense) as before;
 - broadside lanes lock inside the flank sector (±`TRAVERSE.broadside` about the beam), and a flank engages when the player is inside it;
 - broadside guns fire **volleys** per flank (`B.volley[0]` port / screen left, `[1]` starboard): a flank whose arc holds the

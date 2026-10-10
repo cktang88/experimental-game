@@ -309,6 +309,9 @@ function spawnBoss(g: Ghost) {
   };
 }
 const bossMount = (w: { ox: number; oy: number }) => ({ x: S.boss!.x + w.ox * S.boss!.s, y: S.boss!.y - w.oy * S.boss!.s });
+/** Ghost fire hits a bigger hull since the scale pass (SHIP_SCALE 2.6 -> 3.1), and the late ghosts carry the most guns:
+ *  shrink each hit to match the larger target, and ease the sector-3+ ghost a little more. */
+const bossHitEase = () => (2.6 / SHIP_SCALE) * (S.sector >= 3 ? 0.85 : 1);
 let shooter = 'unknown';
 function eShot(x: number, y: number, a: number, spd: number, o: Record<string, any> = {}) {
   sfx(o.kind === 'missile' ? 'eMissile' : 'eshot', { x, y, layer: 'air' });
@@ -318,7 +321,7 @@ function ring(x: number, y: number, n: number, spd: number, o: Record<string, an
 /** Aim at the player, held inside the ghost's bow cone (its bow points down the screen). */
 const gunAim = (w: BossGun, x: number, y: number) => clampTraverse(w.trav, aimAng(x, y), true);
 function bossFire(w: BossGun) {
-  const P = S.P!, { x, y } = bossMount(w), t = w.part.tier, dmg = edmg() * 0.65 * (1 + 0.15 * (t - 1)), spd = bspd(), sec = S.sector;
+  const P = S.P!, { x, y } = bossMount(w), t = w.part.tier, dmg = edmg() * 0.65 * (1 + 0.15 * (t - 1)) * bossHitEase(), spd = bspd(), sec = S.sector;
   if (w.part.id !== 'pd' && w.part.id !== 'artillery') muzzle(x, y + 8, '#ff7a5c', w.part.id === 'rail' ? 22 : 14);
   switch (w.part.id) {
     case 'pulse': { const a = gunAim(w, x, y); for (let k = 0; k < 3 + (t >= 3 ? 1 : 0); k++) eShot(x, y, a + rnd(-0.04, 0.04), spd * (1 - 0.12 * k), { dmg }); break; }
@@ -414,7 +417,7 @@ function bossRound(b: Boss, w: BossGun, side: number, r: number, R: number, lock
   if (!b.alive || S.mode !== 'play') return;
   const BS = BOSS_BROADSIDE, P = S.P!, p = w.part, t = p.tier, ph = b.phase;
   const { x, y } = bossGunPos(b, w, side);
-  const dmg = edmg() * 0.7 * (1 + 0.15 * (t - 1)), spd = bspd() * 0.9;
+  const dmg = edmg() * 0.7 * (1 + 0.15 * (t - 1)) * bossHitEase(), spd = bspd() * 0.9;
   let d = lock;
   if (ph === 2 && R > 1) {
     // rake: sweep from above the line to below it, skipping a hole the player can sit in
