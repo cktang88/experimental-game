@@ -595,8 +595,8 @@ function navLights(c: Ctx, st: { z: number; hw: number }[]) {
   const zs = [wide.z, (st[0].z + wide.z) / 2];
   for (const z of zs) {
     const hw = c.hw(z);
-    c.lights.add(-hw - 0.3, DECK - 2.2, z, LL.navPort, 2.6, 0.5, LMode.Steady);
-    c.lights.add(hw + 0.3, DECK - 2.2, z, LL.navStar, 2.6, 0.5, LMode.Steady);
+    c.lights.add(-hw - 0.3, DECK - 2.2, z, LL.navPort, 2.0, 0.35, LMode.Steady);
+    c.lights.add(hw + 0.3, DECK - 2.2, z, LL.navStar, 2.0, 0.35, LMode.Steady);
   }
   const zs0 = st[0].z, zs1 = st[st.length - 1].z;
   c.lights.add(0, DECK + 0.4, zs0 + 0.3, LL.strobe, 1.6, 0.35, LMode.Steady);
