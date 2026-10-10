@@ -8,7 +8,7 @@ import { FIELD_W, FIELD_H } from '../engine';
 import { buildToGhost, derive, starterBuild, type Derived } from '../../data/parts';
 import { rgb, Shape, DarkShape } from '../fx/quads';
 import { clamp, angDiff } from '../../util/rng';
-import { dronePos, fireLog, type Ent } from '../../game/combat';
+import { dronePos, fireLog, manualAimFor, type Ent } from '../../game/combat';
 import { addFx, FIRE } from '../../game/vfx';
 import { kitLoaded } from '../assets';
 import { livery } from './materials';
@@ -16,13 +16,13 @@ import { buildShip, disposeShip, DECK, type ShipModel } from './hull';
 import { lightUniforms } from './lights';
 import type { Gun, Turret } from './turrets';
 import type { V3 } from './mesh';
-import { clampYaw, type Traverse } from './arcs';
+import { aimYaw, restYaw, holdYaw, bearingIn, type Traverse } from './arcs';
 
 /** Flight-plane altitude of the ship origin: keeps the deck just under the bullet/muzzle layer. */
 const P_ALT = -10;
 const v = new THREE.Vector3(), w = new THREE.Vector3(), d = new THREE.Vector3();
-/** Is a field offset (dx, dy) from the mount inside its traverse (a little slack at the edges)? */
-const inArc = (tv: Traverse, dx: number, dy: number) => tv.half >= Math.PI || Math.abs(angDiff(Math.atan2(-dx, -dy), tv.center)) <= tv.half + 0.15;
+/** Is a field offset (dx, dy) from the mount inside its traverse? */
+const inArc = (tv: Traverse, dx: number, dy: number) => tv.half >= Math.PI || bearingIn(tv, Math.atan2(dy, dx));
 
 interface Rig {
   model: ShipModel; sig: string;
@@ -181,11 +181,12 @@ export class ShipLayer implements Layer {
         let rt = (r.retarget.get(tr.uid) ?? 0) - dt;
         if (rt <= 0) {
           rt = 0.15 + Math.random() * 0.1;
-          let want = tv.center;
-          if (hostile) { if (P) { const dx = P.x - fx, dy = P.y - fy; want = clampYaw(tv, Math.atan2(-dx, dy)); } }
+          let want = restYaw(tv, tr.cur);
+          if (hostile) { if (P) want = aimYaw(tv, Math.atan2(P.y - fy, P.x - fx), true, tr.cur); }
           else {
-            const tg = this.target(tr, S.enemies, S.eb, Bo && Bo.alive ? Bo : null, fx, fy);
-            if (tg) want = clampYaw(tv, Math.atan2(-(tg.x - fx), -(tg.y - fy)));
+            // Heavy guns flown by the mouse train on the reticle (or the missile lock), still inside their arc.
+            const tg = manualAimFor(tr.uid) ?? this.target(tr, S.enemies, S.eb, Bo && Bo.alive ? Bo : null, fx, fy);
+            if (tg) want = aimYaw(tv, Math.atan2(tg.y - fy, tg.x - fx), false, tr.cur);
           }
           r.aims.set(tr.uid, want);
         }
@@ -193,7 +194,7 @@ export class ShipLayer implements Layer {
         const want = r.aims.get(tr.uid) ?? tv.center, dd = angDiff(want, tr.cur), mx = tr.rate * dt;
         // Ease in the last few degrees so heavy guns settle instead of snapping.
         tr.cur += clamp(dd * Math.min(1, dt * 6), -mx, mx);
-        if (tv.half < Math.PI) tr.cur = tv.center + clamp(angDiff(tr.cur, tv.center), -tv.half, tv.half);
+        tr.cur = holdYaw(tv, tr.cur);
       }
       const lf = fireLog.get(tr.uid);
       if (lf !== undefined && lf !== r.seen.get(tr.uid)) {

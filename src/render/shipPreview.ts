@@ -82,10 +82,11 @@ function drawMount(c: CanvasRenderingContext2D, dv: Derived, m: Derived['mounts'
   const p = m.part!, tv = mountTraverse(m, dv.rects[m.si].type), n = gunCount(p.id, p.tier);
   const dir = (a: number): [number, number] => [-Math.sin(a), -Math.cos(a)];
   // Traverse arc, faint (bright when the slot is hovered).
-  if (tv.half > 0) {
-    const R = hl ? 46 : 26, a0 = Math.atan2(-Math.cos(tv.center), -Math.sin(tv.center));
+  // Sectors are in ship space (0 = bow, +PI/2 = starboard); on the canvas the bow is up (-y).
+  if (tv.half > 0) for (const sec of tv.game.sectors) {
+    const R = hl ? 46 : 26, a0 = sec.c - Math.PI / 2;
     c.fillStyle = col; c.globalAlpha = hl ? 0.22 : 0.08; c.beginPath(); c.moveTo(m.ox, m.oy);
-    if (tv.half >= Math.PI) c.arc(m.ox, m.oy, R * 0.6, 0, Math.PI * 2); else c.arc(m.ox, m.oy, R, a0 - tv.half, a0 + tv.half);
+    if (sec.h >= Math.PI) c.arc(m.ox, m.oy, R * 0.6, 0, Math.PI * 2); else c.arc(m.ox, m.oy, R, a0 - sec.h, a0 + sec.h);
     c.closePath(); c.fill(); c.globalAlpha = 1;
   }
   const gun = (x: number, y: number, a: number, size: number, barrels: number, len: number) => {

@@ -321,3 +321,41 @@ test('daily strike duty roster: briefing, filing on death, own row marked, offli
   await page.click('#btn-daily-close');
   await expect(roster).toHaveCount(0);
 });
+
+test('gunnery: number keys pick a heavy group, the mouse aims it and the left button fires it', async ({ page }) => {
+  await startRun(page, 'GUNNER');
+  // a bridge rail (group 1) and a bomb bay (group 2); the pulse guns stay AUTO
+  await gd(page, `(() => { const mk = (id) => ({ id, tier: 1, uid: 70000 + Math.floor(Math.random() * 1e6) });
+    g.run.build.sections = [{ type: 'bridge', slots: [mk('rail')] }, { type: 'battery', slots: [mk('pulse'), mk('bomb'), mk('pulse')] }, { type: 'engine', slots: [null] }]; })()`);
+  await clickNode(page);
+  await expect.poll(() => gd<string>(page, 'g.S.mode'), { timeout: 30_000 }).toBe('play');
+  await gd(page, 'g.god(true)');
+  expect(await gd<string[]>(page, 'g.S.groups.map(x => x.family)')).toEqual(['rail', 'bomb']);
+  const box = (await page.locator('#hud').boundingBox())!, k = box.width / 1600;
+  const to = async (x: number, y: number) => page.mouse.move(box.x + x * k, box.y + y * k, { steps: 3 });
+  const P = await gd<{ x: number; y: number }>(page, '({ x: g.S.P.x, y: g.S.P.y })');
+  await page.keyboard.press('Digit2');
+  expect(await gd<number>(page, 'g.aim.group')).toBe(1);
+  await page.keyboard.press('KeyQ');
+  expect(await gd<number>(page, 'g.aim.group')).toBe(0);
+  await page.keyboard.press('Digit2');
+  // bombs fall on the ground under the reticle
+  await to(P.x - 140, P.y - 200);
+  await expect.poll(() => gd<number>(page, 'Math.round(g.aim.x)'), { timeout: 10_000 }).toBeLessThan(P.x - 100);
+  await page.mouse.down();
+  expect(await gd<boolean>(page, 'g.gunnery.manual')).toBe(true);
+  await expect.poll(() => gd<boolean>(page, "g.S.pb.some(b => b.kind === 'bomb' && Math.abs(b.tx - g.aim.x) < 40)"), { timeout: 30_000 }).toBe(true);
+  await page.screenshot({ path: `${SHOTS}/23-gunnery-bombs.png` });
+  await page.mouse.up();
+  // the bridge rail cannot bear abeam, and the reticle says why
+  await page.keyboard.press('Digit1');
+  await to(Math.min(1560, P.x + 600), P.y + 40);
+  await expect.poll(() => gd<string>(page, 'g.aim.why[g.S.groups[0].mounts[0].part.uid]'), { timeout: 10_000 }).toBe('arc');
+  await page.screenshot({ path: `${SHOTS}/24-gunnery-no-bearing.png` });
+  // ahead of the bow it fires
+  await to(P.x + 80, Math.max(80, P.y - 400));
+  await expect.poll(() => gd<string>(page, 'g.aim.why[g.S.groups[0].mounts[0].part.uid]'), { timeout: 10_000 }).toBe('');
+  await page.mouse.down();
+  await expect.poll(() => gd<number>(page, 'g.S.beams.filter(b => b.w === 5).length'), { timeout: 30_000 }).toBeGreaterThan(0);
+  await page.mouse.up();
+});

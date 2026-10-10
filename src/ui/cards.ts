@@ -1,6 +1,6 @@
 // Documents and objects the screens are built from: requisition slips (parts), enamel insignia pins (relics),
 // and the bridge status rail that sits on top of every node screen.
-import { partDesc, partLayer, partSlot, partDef, TIER, type Part } from '../data/parts';
+import { partDesc, partLayer, partSlot, partDef, isWeapon, weaponControl, placementNote, TIER, type Part } from '../data/parts';
 import { RELICS } from '../data/relics';
 import type { RunState } from '../game/run';
 import { maxHp } from '../game/run';
@@ -10,7 +10,15 @@ import { flap, plateK, segBar, stamp, tape } from './kit';
 import { uiSound } from './sound';
 
 const LAYER_LABEL: Record<string, string> = { air: 'AIR', ground: 'GROUND', both: 'AIR + GND', none: 'DEFENSE', util: 'UTILITY' };
-export const layerTag = (p: Part) => el('em', 'layer ' + partLayer(p), LAYER_LABEL[partLayer(p)]);
+/** What a part engages. Guns that work from any placement read "by mount": bow and side mounts reach the ground, the
+ *  top deck does not (placementNote says it in full). */
+const cardLayer = (p: Part) => {
+  const l = partLayer(p);
+  return isWeapon(p.id) && (l === 'air' || l === 'both') ? { cls: 'both', text: 'BY MOUNT' } : { cls: l, text: LAYER_LABEL[l] };
+};
+export const layerTag = (p: Part) => { const t = cardLayer(p); return el('em', 'layer ' + t.cls, t.text); };
+/** AUTO weapons fire on their own; HEAVY ones join a numbered group the pilot fires with the mouse. */
+export const controlTag = (p: Part) => (isWeapon(p.id) ? el('em', 'layer ctl ' + weaponControl(p.id), weaponControl(p.id) === 'heavy' ? 'AIMED' : 'AUTO') : null);
 
 /** Mk rank as a row of lamps: lit up to the tier. */
 export function rankPips(tier: number, max = 5) {
@@ -46,8 +54,9 @@ export function partCard(p: Part, opts: { price?: number; afford?: boolean; onCl
     el('span', 'slip-head', el('span', null, `REQ ${serial(p.uid)}`), el('span', null, weapon ? 'Ordnance' : 'Fitting')),
     el('span', 'slip-body',
       el('span', `slip-ico ${layer}`, icon(p.id)),
-      el('span', 'slip-txt', nm, el('span', 'slip-tags', layerTag(p), el('span', 'mk', `Mk ${TIER[p.tier]}`), rankPips(p.tier)))),
+      el('span', 'slip-txt', nm, el('span', 'slip-tags', layerTag(p), controlTag(p), el('span', 'mk', `Mk ${TIER[p.tier]}`), rankPips(p.tier)))),
     el('span', 'ds', partDesc(p)),
+    ...(weapon ? [el('span', 'ds place', placementNote(p.id))] : []),
     el('span', 'meta', el('span', null, weapon ? 'Weapon mount' : 'Utility bay'),
       opts.sold ? el('span', null, 'Sold') : opts.price != null ? el('span', 'price', icon('metal-bar'), `${opts.price} scrap`) : opts.label ? el('span', 'price', opts.label) : null),
   );

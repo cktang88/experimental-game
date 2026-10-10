@@ -1,20 +1,20 @@
 // Combat HUD: a 2D canvas over the WebGL view, drawn in field units (1600x900). Same instrument language as
 // the menus: riveted plates, stencil legends, segmented bars with a damage trail, a split-flap scrap counter with a
-// pickup streak, battery lamps grouped by firing arc, the Overdrive gauge (with a SPACE prompt that cannot be missed),
+// pickup streak, the weapon panel (numbered HEAVY groups with reload pips and target-layer tags, AUTO lamps), the mouse
+// reticle (impact ring, rail lines, missile lock brackets, reload ring, why a group cannot bear), the Overdrive gauge (with a SPACE prompt that cannot be missed),
 // the carnage ladder, a boss/elite nameplate, a stamped banner, a slow-mo letterbox and off-screen threat chevrons
 // (ported from Dead Air's threat-indicators.js). Reads S.overdrive, S.carnage, S.events, S.pickStreak, S.slowFx.
-import { S, W, H, BOSS_PHASES } from '../game/combat';
+import { S, W, H, BOSS_PHASES, aim, gunnery, firingGroups } from '../game/combat';
 import { V } from '../game/vfx';
 import { clamp } from '../util/rng';
 import { EN } from '../data/enemies';
-import { WEAPONS, wCd, ARC_INFO, type Arc } from '../data/parts';
+import { wCd, autoMounts, LAYERS_TAG, type Part, type Mount } from '../data/parts';
 import { OVERDRIVES, type OverdriveKind } from '../data/hulls';
 import { drawIcon } from '../ui/icons';
 
 const F_MONO = '"Share Tech Mono", ui-monospace, monospace';
 const F_STEN = '"Saira Stencil One", "Chakra Petch", sans-serif';
 const C = { void: '#0a0e13', fg: '#dbe4ec', dim: '#8597a8', faint: '#5d6e7e', hazard: '#f2a541', plasma: '#4fd1e8', hostile: '#ff5a4e', good: '#8fe39a', scrap: '#e0c35c', violet: '#c9a6ff', crt: '#ffb347' };
-const LAYER_COL: Record<string, string> = { air: C.plasma, ground: C.hazard, both: C.violet, none: '#b8f2c8' };
 const CODE: Record<string, string> = { pulse: 'PLS', spread: 'SCT', flak: 'FLK', missile: 'MSL', bomb: 'BMB', artillery: 'MRT', rail: 'RAIL', tesla: 'ARC', pd: 'PD' };
 
 let VIG: HTMLCanvasElement | null = null, HURT: HTMLCanvasElement | null = null;
@@ -31,6 +31,7 @@ const st = {
   scrapShown: 0, digits: [] as { ch: string; flip: number }[], gains: [] as { v: number; t: number }[], lastScrap: -1,
   fired: new Map<number, number>(), lastCd: new Map<number, number>(),
   bannerKey: '', odNeedle: 0, tierAt: -9, lastEvent: 0,
+  /** The pilot has fired a heavy group (hides the HOLD LMB prompt). */ everFired: false,
 };
 
 /* ---------------- primitives ---------------- */
@@ -197,41 +198,190 @@ function nameplate(c: CanvasRenderingContext2D, B: NonNullable<typeof S.boss> | 
   if (B && !B.ghost.ai) label(c, `FELL ON FLOOR ${B.ghost.floor + 1}`, x + w - 16, y + 62, C.faint, 9, 'right');
 }
 
-/* ---------------- batteries: one lamp bank per firing arc ---------------- */
-const ARC_ORDER: Arc[] = ['bow', 'broadside', 'ventral', 'omni'];
-function batteries(c: CanvasRenderingContext2D) {
+/* ---------------- weapons: numbered HEAVY groups and the AUTO lamp bank ---------------- */
+const LAYER_TAG_COL: Record<string, string> = { AIR: C.plasma, GND: C.hazard, ALL: C.violet, PD: '#b8f2c8' };
+/** Reload fraction 0..1 of a mounted weapon (1 = loaded), and whether it just fired (HUD flash). */
+function reload(p: Part, cd: number): { ready: number; flash: number } {
   const P = S.P!;
-  const mounts = P.dv.mounts.filter((m) => m.part && WEAPONS[m.part.id]);
-  if (!mounts.length) return;
-  const groups = ARC_ORDER.map((a) => ({ arc: a, ms: mounts.filter((m) => m.arc === a) })).filter((g) => g.ms.length);
-  const cell = 40, gap = 14;
-  const w = 20 + groups.reduce((a, g) => a + Math.max(64, g.ms.length * cell) + gap, -gap), h = 74, x = 14, y = H - 14 - h;
-  plate(c, x, y, w, h);
-  const odBoost = S.overdrive.active;
-  let gx = x + 12;
-  for (const g of groups) {
-    const info = ARC_INFO[g.arc], gw = Math.max(64, g.ms.length * cell);
-    c.fillStyle = info.col; c.fillRect(gx, y + 9, 3, 10);
-    label(c, info.short, gx + 7, y + 18, info.col, 10);
-    g.ms.forEach((m, i) => {
-      const p = m.part!;
-      const cd = P.cds[p.uid] ?? 0, full = wCd(p) * (p.id === 'rail' ? P.dv.mods.railCdMul : 1) / Math.max(0.2, P.dv.fireMult);
-      const prev = st.lastCd.get(p.uid) ?? cd;
-      const fired = (Number.isFinite(cd) && Number.isFinite(prev) && cd > prev + 0.02) || (!Number.isFinite(prev) && Number.isFinite(cd));
-      if (fired) st.fired.set(p.uid, st.t);
-      st.lastCd.set(p.uid, cd);
-      const armed = !Number.isFinite(cd);
-      const ready = armed ? 1 : clamp(1 - cd / Math.max(0.05, full), 0, 1);
-      const flash = clamp(1 - (st.t - (st.fired.get(p.uid) ?? -9)) / 0.14, 0, 1);
-      const col = LAYER_COL[WEAPONS[p.id].layer] ?? C.fg;
-      const cx = gx + i * cell + cell / 2 - 4, cy = y + 40;
-      const k = flash > 0 ? 1 : armed ? (Math.floor(st.t * 10) % 2 ? 0.95 : 0.55) : 0.2 + 0.7 * ready * ready;
-      lampDot(c, cx, cy, odBoost ? 7 : 6, flash > 0 ? '#ffffff' : col, k);
-      label(c, CODE[p.id] ?? p.id.slice(0, 3).toUpperCase(), cx, cy + 25, ready > 0.98 ? C.dim : C.faint, 10, 'center');
-      if (m.side) label(c, m.side < 0 ? 'P' : 'S', cx + 10, cy - 8, C.faint, 8, 'center');
-    });
-    gx += gw + gap;
+  const full = (wCd(p) * (p.id === 'rail' ? P.dv.mods.railCdMul : 1)) / Math.max(0.2, P.dv.fireMult);
+  const prev = st.lastCd.get(p.uid) ?? cd;
+  if ((Number.isFinite(cd) && Number.isFinite(prev) && cd > prev + 0.02) || (!Number.isFinite(prev) && Number.isFinite(cd))) st.fired.set(p.uid, st.t);
+  st.lastCd.set(p.uid, cd);
+  const ready = !Number.isFinite(cd) ? 1 : clamp(1 - cd / Math.max(0.05, full), 0, 1);
+  return { ready, flash: clamp(1 - (st.t - (st.fired.get(p.uid) ?? -9)) / 0.16, 0, 1) };
+}
+/** A pie lamp: the reload sweeps round, it rings white when the gun fires. */
+function reloadPip(c: CanvasRenderingContext2D, x: number, y: number, r: number, col: string, ready: number, flash: number, dead = false) {
+  c.fillStyle = '#05080b'; c.beginPath(); c.arc(x, y, r + 1.5, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#18212a'; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+  if (!dead) {
+    c.fillStyle = ready >= 1 ? col : shade(col, 0.55);
+    c.beginPath(); c.moveTo(x, y); c.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ready); c.closePath(); c.fill();
   }
+  if (flash > 0) { c.save(); c.globalAlpha = flash; c.strokeStyle = '#fff'; c.lineWidth = 2; c.beginPath(); c.arc(x, y, r + 2 + (1 - flash) * 4, 0, Math.PI * 2); c.stroke(); c.restore(); }
+}
+function keycap(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, text: string, lit: boolean, col: string) {
+  c.fillStyle = '#05080b'; c.fillRect(x, y + 2, w, h);
+  c.fillStyle = lit ? col : '#26313c'; c.fillRect(x, y + (lit ? 1 : 0), w, h);
+  c.strokeStyle = '#000'; c.lineWidth = 1; c.strokeRect(x + 0.5, y + 0.5 + (lit ? 1 : 0), w - 1, h - 1);
+  c.font = `13px ${F_MONO}`; c.fillStyle = lit ? '#120c04' : C.fg; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(text, x + w / 2, y + h / 2 + (lit ? 2 : 1)); c.textBaseline = 'alphabetic';
+}
+/** Layers a group or a mount engages, as one tag: every mount in a group shares it unless placement differs (MIX). */
+function groupTag(ms: Mount[]) {
+  const tags = new Set(ms.map((m) => LAYERS_TAG[m.trav.layers]));
+  return tags.size === 1 ? [...tags][0] : 'MIX';
+}
+const SLOT_W = 138, SLOT_H = 66;
+function weapons(c: CanvasRenderingContext2D) {
+  const P = S.P!, groups = S.groups ?? [], autos = autoMounts(P.dv.mounts);
+  if (!groups.length && !autos.length) return;
+  const manual = gunnery.manual, autoW = autos.length ? Math.max(92, 18 + autos.length * 30) : 0;
+  const w = 24 + groups.length * (SLOT_W + 8) + (autos.length ? autoW + 8 : 0) - 8, h = manual && groups.length ? 112 : 96;
+  const x = 14, y = H - 14 - h;
+  plate(c, x, y, w, h);
+  label(c, groups.length ? (manual ? 'HEAVY · AIMED' : 'HEAVY · AUTO-AIM') : 'NO HEAVY ORDNANCE', x + 12, y + 18, C.faint, 10);
+  const firing = manual ? firingGroups() : [];
+  groups.forEach((g, gi) => {
+    const sx = x + 12 + gi * (SLOT_W + 8), sy = y + 24, act = manual && gi === aim.group, hot = firing.includes(g);
+    // slot well
+    c.fillStyle = act ? 'rgba(242,165,65,.10)' : '#0b1015'; c.fillRect(sx, sy, SLOT_W, SLOT_H);
+    c.strokeStyle = act ? C.hazard : '#000'; c.lineWidth = act ? 2 : 1; c.strokeRect(sx + (act ? 1 : 0.5), sy + (act ? 1 : 0.5), SLOT_W - (act ? 2 : 1), SLOT_H - (act ? 2 : 1));
+    if (hot) { c.save(); c.globalAlpha = 0.25 + 0.2 * Math.sin(st.t * 30); c.fillStyle = g.def.col; c.fillRect(sx, sy, SLOT_W, 3); c.restore(); }
+    keycap(c, sx + 6, sy + 6, 20, 20, String(g.key), act, C.hazard);
+    drawIcon(c, g.def.icon, sx + 42, sy + 16, 20, act ? g.def.col : shade(g.def.col, 0.7));
+    c.font = `12px ${F_STEN}`; c.fillStyle = act ? C.fg : C.dim; c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+    c.fillText(g.def.slot, sx + 56, sy + 21);
+    // target-layer tag and bearing state
+    const tag = groupTag(g.mounts);
+    label(c, tag, sx + 8, sy + 44, LAYER_TAG_COL[tag] ?? C.dim, 9);
+    // one reload pip per mount, dimmed when it cannot bear on the reticle
+    g.mounts.forEach((m, mi) => {
+      const p = m.part!, r = reload(p, P.cds[p.uid] ?? 0), bears = !manual || aim.bears[p.uid] !== false;
+      reloadPip(c, sx + 40 + mi * 18, sy + 40, 6, bears ? g.def.col : '#5d6e7e', r.ready, r.flash);
+    });
+    const nb = g.mounts.filter((m) => aim.bears[m.part!.uid] !== false).length;
+    const state = !manual ? 'AUTO' : nb === g.mounts.length ? 'READY' : nb ? `${nb}/${g.mounts.length} BEAR` : 'NO BEARING';
+    label(c, `×${g.mounts.length}`, sx + SLOT_W - 8, sy + 44, C.dim, 10, 'right');
+    label(c, state, sx + 8, sy + SLOT_H - 7, state === 'NO BEARING' ? C.hazard : act ? C.dim : C.faint, 9);
+  });
+  if (autos.length) {
+    const ax = x + 12 + groups.length * (SLOT_W + 8), ay = y + 24;
+    c.fillStyle = '#0b1015'; c.fillRect(ax, ay, autoW, SLOT_H); c.strokeStyle = '#000'; c.lineWidth = 1; c.strokeRect(ax + 0.5, ay + 0.5, autoW - 1, SLOT_H - 1);
+    const anyLit = autos.some((m) => (st.fired.get(m.part!.uid) ?? -9) > st.t - 0.3);
+    lampDot(c, ax + 12, ay + 13, 4, C.good, anyLit ? 1 : 0.5);
+    label(c, 'AUTO', ax + 22, ay + 17, C.good, 10);
+    autos.forEach((m, i) => {
+      const p = m.part!, r = reload(p, P.cds[p.uid] ?? 0), cx = ax + 18 + i * 30, cy = ay + 36;
+      const col = LAYER_TAG_COL[LAYERS_TAG[m.trav.layers]] ?? C.fg;
+      lampDot(c, cx, cy, 5, r.flash > 0 ? '#ffffff' : col, r.flash > 0 ? 1 : 0.25 + 0.65 * r.ready * r.ready);
+      label(c, CODE[p.id] ?? p.id.slice(0, 3).toUpperCase(), cx, cy + 17, C.faint, 8, 'center');
+      label(c, LAYERS_TAG[m.trav.layers], cx, cy + 26, shade(col, 0.8), 7, 'center');
+    });
+  }
+  if (manual && groups.length) {
+    const keys = groups.length > 1 ? `1-${groups.length} / Q E / WHEEL SELECT` : '';
+    label(c, `LMB FIRE GROUP · RMB SALVO ALL${keys ? ' · ' + keys : ''}`, x + 12, y + h - 8, C.faint, 9);
+  }
+}
+
+/* ---------------- the reticle: where the heavy groups will land ---------------- */
+const WHY_TEXT: Record<string, string> = { arc: 'OUT OF ARC', range: 'OUT OF REACH', air: 'AIR ONLY', ground: 'GROUND ONLY' };
+function brackets(c: CanvasRenderingContext2D, x: number, y: number, r: number, len: number) {
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    c.beginPath(); c.moveTo(x + sx * r, y + sy * (r - len)); c.lineTo(x + sx * r, y + sy * r); c.lineTo(x + sx * (r - len), y + sy * r); c.stroke();
+  }
+}
+function reticle(c: CanvasRenderingContext2D) {
+  const P = S.P!, groups = S.groups ?? [];
+  if (!gunnery.manual || !groups.length || S.mode !== 'play') return;
+  const sel = groups[aim.group] ?? groups[0], act = aim.salvo ? groups : [sel];
+  const ms = act.flatMap((g) => g.mounts), bearing = ms.filter((m) => aim.bears[m.part!.uid] !== false);
+  const can = bearing.length > 0, col = can ? (aim.salvo ? C.hazard : sel.def.col) : '#7d8a96';
+  const x = aim.x, y = aim.y;
+  const punch = clamp(1 - (S.t - aim.shotAt) / 0.18, 0, 1);
+  const pulling = aim.fire || aim.salvo;
+  c.save();
+  c.lineCap = 'square';
+  // ground ordnance: the impact ring on the city, and the reach of each ventral mount when the reticle is beyond it
+  if (act.some((g) => g.def.aim === 'ground')) {
+    const g = act.find((q) => q.def.aim === 'ground')!, rad = g.family === 'bomb' ? 50 : 40;
+    c.strokeStyle = can ? g.def.col : '#7d8a96'; c.globalAlpha = 0.85; c.lineWidth = 2;
+    c.setLineDash([7, 5]); c.lineDashOffset = -st.t * 30;
+    c.beginPath(); c.ellipse(x, y, rad, rad * 0.92, 0, 0, Math.PI * 2); c.stroke(); c.setLineDash([]);
+    c.globalAlpha = 0.18; c.fillStyle = can ? g.def.col : '#7d8a96'; c.beginPath(); c.ellipse(x, y, rad, rad * 0.92, 0, 0, Math.PI * 2); c.fill();
+    if (act.some((q) => q.def.aim === 'ground' && q.mounts.some((m) => aim.why[m.part!.uid] === 'range'))) {
+      for (const q of act) if (q.def.aim === 'ground') for (const m of q.mounts) {
+        c.globalAlpha = 0.35; c.strokeStyle = q.def.col; c.lineWidth = 1.5; c.setLineDash([4, 8]);
+        c.beginPath(); c.arc(P.x + m.ox, P.y + m.oy, q.def.reach, 0, Math.PI * 2); c.stroke(); c.setLineDash([]);
+      }
+    }
+    c.globalAlpha = 1;
+  }
+  // rails: a firing line from every gun that bears; the traverse wedge of those that do not
+  for (const g of act) if (g.def.aim === 'line') for (const m of g.mounts) {
+    const mx = P.x + m.ox, my = P.y + m.oy;
+    if (aim.bears[m.part!.uid] !== false) {
+      c.strokeStyle = g.def.col; c.globalAlpha = pulling ? 0.7 : 0.35; c.lineWidth = 1.2; c.setLineDash([10, 6]); c.lineDashOffset = -st.t * 60;
+      c.beginPath(); c.moveTo(mx, my); c.lineTo(x, y); c.stroke(); c.setLineDash([]);
+    } else {
+      c.globalAlpha = 0.12; c.fillStyle = g.def.col;
+      for (const sct of m.trav.sectors) { const a0 = sct.c - sct.h - Math.PI / 2, a1 = sct.c + sct.h - Math.PI / 2; c.beginPath(); c.moveTo(mx, my); c.arc(mx, my, 260, a0, a1); c.closePath(); c.fill(); }
+    }
+    c.globalAlpha = 1;
+  }
+  // missiles: lock brackets close in on the target nearest the reticle
+  if (act.some((g) => g.family === 'missile')) {
+    const L = aim.lock;
+    if (L && !L.dead) {
+      // grey when no missile mount can take this lock (a top-deck pod on a ground target)
+      const takes = act.some((g) => g.family === 'missile' && g.mounts.some((m) => aim.bears[m.part!.uid] !== false));
+      const k = clamp(aim.lockT / 0.25, 0, 1), rr = (L.isBoss ? Math.min(90, L.halfW * 0.5) : L.r + 12) * (2 - k);
+      c.save(); c.translate(L.x, L.y); c.rotate((1 - k) * Math.PI / 4);
+      c.strokeStyle = takes ? '#ff9f5a' : '#7d8a96'; c.lineWidth = 2.5; brackets(c, 0, 0, rr, rr * 0.45);
+      c.restore();
+      if (k >= 1 && takes) { label(c, 'LOCK', L.x + rr + 6, L.y - rr + 4, '#ff9f5a', 11, 'left'); c.strokeStyle = 'rgba(255,159,90,.35)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y); c.lineTo(L.x, L.y); c.stroke(); }
+    }
+  }
+  // the reticle itself
+  const s = 1 + punch * 0.35, r = 22 * s;
+  c.strokeStyle = 'rgba(5,8,11,.9)'; c.lineWidth = 6; brackets(c, x, y, r, 10);
+  c.strokeStyle = col; c.lineWidth = 2.8; brackets(c, x, y, r, 10);
+  if (pulling && can) { c.save(); c.globalAlpha = 0.5 + 0.5 * Math.sin(st.t * 40); c.lineWidth = 1.2; brackets(c, x, y, r + 5, 6); c.restore(); }
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    c.strokeStyle = 'rgba(5,8,11,.9)'; c.lineWidth = 4; c.beginPath(); c.moveTo(x + dx * 5, y + dy * 5); c.lineTo(x + dx * 12, y + dy * 12); c.stroke();
+    c.strokeStyle = col; c.lineWidth = 1.8; c.beginPath(); c.moveTo(x + dx * 5, y + dy * 5); c.lineTo(x + dx * 12, y + dy * 12); c.stroke();
+  }
+  c.fillStyle = '#fff'; c.fillRect(x - 1, y - 1, 2, 2);
+  if (!can) { c.strokeStyle = '#7d8a96'; c.lineWidth = 2; c.beginPath(); c.moveTo(x - r * 0.8, y + r * 0.8); c.lineTo(x + r * 0.8, y - r * 0.8); c.stroke(); }
+  // reload ring: one arc per mount in the active group(s)
+  const n = ms.length, gap = n > 1 ? 0.18 : 0, R = r + 9;
+  ms.forEach((m, i) => {
+    const p = m.part!, cd = S.P!.cds[p.uid] ?? 0, full = (wCd(p) * (p.id === 'rail' ? P.dv.mods.railCdMul : 1)) / Math.max(0.2, P.dv.fireMult);
+    const ready = clamp(1 - cd / Math.max(0.05, full), 0, 1), a0 = -Math.PI / 2 + (i / n) * Math.PI * 2 + gap / 2, span = Math.PI * 2 / n - gap;
+    const ok = aim.bears[p.uid] !== false;
+    c.strokeStyle = 'rgba(5,8,11,.9)'; c.lineWidth = 6; c.beginPath(); c.arc(x, y, R, a0, a0 + span); c.stroke();
+    c.strokeStyle = ok ? (ready >= 1 ? col : shade(col, 0.6)) : '#4a5561'; c.lineWidth = 3.5; c.beginPath(); c.arc(x, y, R, a0, a0 + span * ready); c.stroke();
+  });
+  // tag: group key and name, and why it cannot bear
+  const why = can ? '' : WHY_TEXT[aim.why[ms[0].part!.uid] || 'arc'] ?? 'NO BEARING';
+  const tx = x + R + 10, ty = y + 4;
+  c.font = `12px ${F_STEN}`; c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+  const name = aim.salvo ? 'SALVO · ALL GROUPS' : `${sel.key} · ${sel.def.short}`;
+  const tw = Math.max(c.measureText(name).width, why ? 84 : 0) + 12;
+  c.fillStyle = 'rgba(8,10,13,.7)'; c.fillRect(tx - 4, ty - 14, tw, why ? 30 : 18);
+  c.fillStyle = col; c.fillText(name, tx + 2, ty);
+  if (why) label(c, why, tx + 2, ty + 12, C.hazard, 9);
+  else if (bearing.length < ms.length) label(c, `${bearing.length}/${ms.length} BEAR`, tx + 2, ty + 12, C.dim, 9);
+  // teach the trigger in the first seconds of the first fights
+  if (!st.everFired && S.time < 14) {
+    const kx = x - 44, ky = y + R + 14, on = Math.floor(st.t * 3) % 2 === 0;
+    c.globalAlpha = on ? 1 : 0.6;
+    keycap(c, kx, ky, 88, 20, 'HOLD LMB', on, C.hazard);
+    c.globalAlpha = 1;
+  }
+  if (pulling && can) st.everFired = true;
+  c.restore();
 }
 
 /* ---------------- overdrive: the unmissable gauge ---------------- */
@@ -422,8 +572,9 @@ export function drawHud(c: CanvasRenderingContext2D, scale: number, dpr: number,
   encounterPlate(c);
   scrapCluster(c, totalScrap);
   pauseKey(c);
-  batteries(c);
+  weapons(c);
   carnage(c);
   overdrive(c);
   banner(c);
+  reticle(c);
 }

@@ -1,53 +1,73 @@
-// Gun traverse per mount: where a turret may point, where it rests, what it may engage and how it is
-// dressed (raised dorsal barbette, bow casemate, broadside sponson, ventral bay).
+// Gun traverse for the renderer: how each mount is dressed (raised dorsal barbette, bow casemate, flank
+// sponson, ventral bay), where its guns rest, and the yaw clamp. The arcs themselves are the game's:
+// Mount.trav = mountTraverse(...) in src/data/parts.ts (ship space, 0 = bow, +PI/2 = starboard), with
+// clampTraverse / inTraverse for field-space bearings (ghosts mirrored). Combat, ghosts, HUD and this
+// renderer all read the same sectors.
 //
-// This is the ONE place the renderer decides it. It mirrors the sim's firing arcs (src/game/combat.ts,
-// docs/TECH.md "Firing arcs"): bow guns fire up the field in a narrow cone, broadside guns off their own
-// flank, bombs and mortars ventrally, coils and point defence all round. When the game exports a shared
-// per-mount traverse helper, swap the body of mountTraverse() for a call to it.
-import { WEAPONS, type Mount, type SectionType } from '../../data/parts';
+// Turret yaw in the renderer is the three.js rotation about +Y: 0 points at the bow, +PI/2 to PORT. So
+// yaw = -(ship angle).
+import { WEAPONS, clampTraverse, fieldToShip, inTraverse, type Mount, type SectionType, type Traverse as GameTraverse } from '../../data/parts';
 import { has } from '../../util/rng';
 
 export type MountKind = 'dorsal' | 'bow' | 'side' | 'ventral' | 'omni';
 export interface Traverse {
   kind: MountKind;
-  /** Rest yaw in ship-local turret space: 0 toward the bow, +PI/2 to port (screen left), -PI/2 to starboard. */
+  /** Rest yaw (renderer yaw: 0 toward the bow, +PI/2 to port). */
   center: number;
-  /** Half width of the traverse arc in radians; PI or more is free 360-degree training. */
+  /** Widest sector half-width; PI is free 360-degree training. */
   half: number;
-  /** What the mount may engage: dorsal mounts are anti-air only; bow and side mounts reach the ground in their arcs. */
+  /** What the mount may engage (the game's layers; point defence engages shots, shown as 'none'). */
   layer: 'air' | 'ground' | 'both' | 'none';
   /** Barrel elevation for the look (radians): high-angle AA up, casemate guns depressed toward the city. */
   elev: number;
+  /** The shared traverse (sectors in ship space). */
+  game: GameTraverse;
 }
 
-const FREE = Math.PI;
+const FREE: GameTraverse = { arc: 'dorsal', sectors: [{ c: 0, h: Math.PI }], layers: 'air', down: false };
 
-export function mountTraverse(m: Mount, section: SectionType): Traverse {
-  const id = m.part?.id ?? '';
-  if (!has(WEAPONS, id)) return { kind: 'dorsal', center: 0, half: 0, layer: 'none', elev: 0 };
-  if (id === 'bomb') return { kind: 'ventral', center: 0, half: 0, layer: 'ground', elev: 0 };
-  if (id === 'artillery') return { kind: 'ventral', center: 0, half: FREE, layer: 'ground', elev: 0.85 };
-  if (id === 'pd') return { kind: 'omni', center: 0, half: FREE, layer: 'none', elev: 0.5 };
-  if (id === 'tesla') return { kind: 'omni', center: 0, half: FREE, layer: 'both', elev: 0 };
-  if (m.arc === 'broadside') {
-    // Outer battery guns sit in flank sponsons and train across their own beam only (sim: +-0.5 rad).
-    if (m.side) return { kind: 'side', center: -m.side * Math.PI / 2, half: 0.62, layer: 'both', elev: -0.2 };
-    // The centreline gun of a battery is a superfiring dorsal mount: all round, sky only.
-    return { kind: 'dorsal', center: 0, half: FREE, layer: 'air', elev: 0.55 };
-  }
-  // Bow arc: the bridge's gun is a forward casemate (sim cone +-0.35 rad); gun-deck mounts are dorsal turrets.
-  if (section === 'bridge') return { kind: 'bow', center: 0, half: 0.42, layer: 'both', elev: -0.1 };
-  return { kind: 'dorsal', center: 0, half: FREE, layer: 'air', elev: 0.5 };
+export function mountTraverse(m: Mount, _section?: SectionType): Traverse {
+  const id = m.part?.id ?? '', g = m.trav ?? FREE;
+  const half = g.sectors.reduce((a, s) => Math.max(a, s.h), 0);
+  const layer = g.layers === 'shots' || g.layers === 'none' ? 'none' : g.layers;
+  // A battery's centre gun covers both beams: it rests fore and aft, so dress it as a centreline turret.
+  const center = g.sectors.length === 1 ? -g.sectors[0].c : 0;
+  if (!has(WEAPONS, id)) return { kind: 'dorsal', center: 0, half: 0, layer: 'none', elev: 0, game: g };
+  if (id === 'bomb') return { kind: 'ventral', center: 0, half: 0, layer, elev: 0, game: g };
+  if (id === 'artillery') return { kind: 'ventral', center: 0, half, layer, elev: 0.85, game: g };
+  if (g.arc === 'omni') return { kind: 'omni', center, half, layer, elev: id === 'pd' ? 0.5 : 0, game: g };
+  if (g.arc === 'broadside') return m.side ? { kind: 'side', center, half, layer, elev: -0.2, game: g } : { kind: 'dorsal', center, half, layer, elev: 0.15, game: g };
+  if (g.arc === 'bow') return { kind: 'bow', center, half, layer, elev: -0.1, game: g };
+  return { kind: 'dorsal', center, half, layer, elev: 0.5, game: g };
 }
 
-/** Clamp a wanted yaw into a traverse; a target well outside the arc sends the gun back to rest. */
-export function clampYaw(t: Traverse, want: number) {
-  if (t.half >= FREE) return want;
-  let d = want - t.center; d = Math.atan2(Math.sin(d), Math.cos(d));
-  if (Math.abs(d) > t.half + 0.5) return t.center;
-  return t.center + Math.max(-t.half, Math.min(t.half, d));
+/**
+ * Renderer yaw for a field-space bearing, clamped into the traverse (clampTraverse; ghosts are mirrored).
+ * A bearing well outside every sector (across the hull) sends the gun back to rest instead.
+ */
+export function aimYaw(t: Traverse, fieldAngle: number, mirrored: boolean, cur: number) {
+  if (!t.game.sectors.length) return t.center;
+  const c = clampTraverse(t.game, fieldAngle, mirrored);
+  const off = Math.abs(Math.atan2(Math.sin(c - fieldAngle), Math.cos(c - fieldAngle)));
+  if (off > 0.5) return restYaw(t, cur);
+  return -fieldToShip(c, mirrored);
 }
+/** Rest: the centre of the sector nearest the current yaw (two-sector guns stay on their last beam). */
+export function restYaw(t: Traverse, cur: number) {
+  const ss = t.game.sectors; if (ss.length < 2) return t.center;
+  let best = t.center, bd = Infinity;
+  for (const s of ss) { const d = Math.abs(Math.atan2(Math.sin(-s.c - cur), Math.cos(-s.c - cur))); if (d < bd) { bd = d; best = -s.c; } }
+  return best;
+}
+/** Keep a renderer yaw inside the traverse (ship space, so mirroring does not matter). */
+export function holdYaw(t: Traverse, yaw: number) {
+  const ss = t.game.sectors; if (!ss.length || t.half >= Math.PI) return yaw;
+  const a = -yaw; let best = a, bd = Infinity;
+  for (const s of ss) { const d = Math.atan2(Math.sin(a - s.c), Math.cos(a - s.c)), k = Math.max(-s.h, Math.min(s.h, d)), off = Math.abs(d - k); if (off < bd) { bd = off; best = s.c + k; } }
+  return -best;
+}
+/** Is a field bearing inside the traverse? (player side, unmirrored) */
+export const bearingIn = (t: Traverse, fieldAngle: number) => !t.game.sectors.length || inTraverse(t.game, fieldAngle, false);
 
 /** Guns in a mount's cluster (the blueprint draws the same count). */
 export const gunCount = (id: string, tier: number) =>
