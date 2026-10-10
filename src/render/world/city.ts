@@ -278,8 +278,8 @@ export class CityLayer implements Layer {
         // Pinpoints are authored at their real size; from this altitude they need a couple of pixels to read, and they
         // stay just under the bloom threshold (a crisp point, not a glowing ball: only fires bloom).
         if (L.k === 9) { this.light(X(L.x), R(L.h), Z(L.cy), R(L.s), LIGHT_COL[L.c] ?? white, L.a, 9, 0, R(L.len ?? 10), L.ax ?? 0); continue; }
-        const pool = L.k === 1 || L.k === 4, sz = L.k === 4 ? L.s * 1.7 : pool ? L.s : Math.max(2.8, L.s * 2.6);
-        const i = this.light(X(L.x), R(L.h), Z(L.cy), R(sz), LIGHT_COL[L.c] ?? white, pool ? L.a * 1.3 : Math.min(0.4, 0.12 + L.a * 0.45), L.k, L.p);
+        const pool = L.k === 1 || L.k === 4, sz = L.k === 4 ? L.s * 2.3 : pool ? L.s : Math.max(2.8, L.s * 2.6);
+        const i = this.light(X(L.x), R(L.h), Z(L.cy), R(sz), LIGHT_COL[L.c] ?? white, pool ? L.a * (L.k === 4 ? 0.6 : 1.3) : Math.min(0.4, 0.12 + L.a * 0.45), L.k, L.p);
         if (L.b && i >= 0) this.bLights.push({ i, b: L.b });
         if (L.k === 8) this.sweeps.push({ x: X(L.x), y: R(L.h), z: Z(L.cy), s: R(L.s), seed: L.p, b: L.b });
       }

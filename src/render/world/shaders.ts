@@ -265,7 +265,7 @@ void main(){
   float a; vec3 col = vC.rgb;
   if (vKind > 0.5 && vKind < 1.5) a = pow(max(0.0, 1.0 - d), 1.6);
   // Floodlight pools: a broad, soft wash with no visible rim (a lit patch of ground, not a disc).
-  else if (vKind > 3.5 && vKind < 4.5) a = pow(max(0.0, 1.0 - d), 2.6) * (0.75 + 0.25 * (1.0 - d));
+  else if (vKind > 3.5 && vKind < 4.5) a = pow(max(0.0, 1.0 - d), 1.25) * 0.8;
   else if (vKind > 4.5 && vKind < 5.5) { vec2 q = abs(vUv * 2.0 - 1.0); a = pow(max(0.0, 1.0 - q.x), 1.4) * (1.0 - smoothstep(0.9, 1.0, q.y)) * powerAt(vP, 0.0); }
   else if (vKind > 8.5) { vec2 q = abs(vUv * 2.0 - 1.0); a = pow(max(0.0, 1.0 - q.x), 2.2) * (1.0 - smoothstep(0.92, 1.0, q.y)); }
   else {
