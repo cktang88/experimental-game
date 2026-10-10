@@ -51,6 +51,8 @@ export interface Bldg extends Decor {
   dead: boolean; chunk: Chunk;
   /** Rotation in radians about the vertical axis (houses, tanks). */
   rot: number;
+  /** Renderer bookkeeping: first instance index of its tiers and how many (-1 / 0 when not drawn). */
+  ri: number; rn: number;
 }
 export interface Crater extends Decor { type: 'crater'; born: number }
 export interface Pad { x0: number; y0: number; x1: number; y1: number; s: Surface }
@@ -178,7 +180,7 @@ function bldg(ch: Chunk, kind: BKind, x0: number, y0: number, x1: number, y1: nu
     type: 'bldg', kind, x: cx, y: cy + S.scrollY, cy, w, h, r: Math.hypot(w, h) / 2, hgt: top, tiers, style, seed: nextSeed(), floors,
     lit: rnd(0.25, 0.7), keepLit: Math.random() < 0.12, neon: 0,
     hp: maxHp, maxHp, value: scrapValue(kind, maxHp),
-    fire: 0, burnT: -1, collapseT: -1, dead: false, chunk: ch, rot: 0, ...o,
+    fire: 0, burnT: -1, collapseT: -1, dead: false, chunk: ch, rot: 0, ri: -1, rn: 0, ...o,
   };
   ch.bldgs.push(b); S.decor.push(b);
   return b;
