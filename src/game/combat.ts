@@ -1356,7 +1356,7 @@ function updatePickups(dt: number) {
       const step = Math.hypot(p.vx, p.vy) * dt;
       if (step >= d) { p.x = P.x; p.y = P.y; } else { p.x += p.vx * dt; p.y += p.vy * dt; }
       // a streak behind fast scrap: the stream whooshing into the hull
-      if (sp > 380 && p.kind === 'scrap' && Math.random() < 0.7) addFx({ type: 'spark', x: p.x, y: p.y, vx: p.vx * 0.35, vy: p.vy * 0.35, life: 0.16, max: 0.16, size: 1.4, drag: 6, tint: '#ffe08a' });
+      if (sp > 380 && p.kind === 'scrap' && Math.random() < 0.7) addFx({ type: 'spark', x: p.x, y: p.y, vx: p.vx * 0.5, vy: p.vy * 0.5, life: 0.2, max: 0.2, size: 2.2, drag: 5, tint: '#ffe08a' });
     } else { p.x += p.vx * dt; p.y += (p.vy + S.scroll) * dt; p.vx *= 1 - dt * 2; p.vy *= 1 - dt * 2; }
     if (alive && (hullDist(p.x, p.y) < MAGNET.collect || Math.hypot(P.x - p.x, P.y - p.y) < 28)) {
       if (p.kind === 'repair') { const amt = P.dv.maxHp * p.val * S.heat.heal; P.hp = Math.min(P.dv.maxHp, P.hp + amt); spark(P.x, P.y, '#8fe39a', 12); setBanner('REPAIR KIT', `+${Math.round(amt)} hull`, 0.9, '#8fe39a'); }
