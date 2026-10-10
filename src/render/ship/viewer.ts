@@ -1,5 +1,5 @@
 // Dev tool: the ship layer on its own, through the real engine (lighting, bloom, tone map) with a
-// zoomable camera. /tools/ship.html?build=starter|big|max&zoom=0.35&ghost=0|1&hp=1&fire=1&t=4
+// zoomable camera. /tools/ship.html?build=starter|big|max&zoom=0.35&ghost=0|1&hp=1&phase=1..3&fire=1&t=4
 import { Engine } from '../engine';
 import { ShipLayer } from './shipLayer';
 import { preloadKits } from '../assets';
@@ -32,7 +32,7 @@ const x = Number(q.get('x') || 800), y = Number(q.get('y') || 520);
 if (ghost) {
   const s = Math.min(1.9, 560 / dv.len, 760 / dv.width);
   S.boss = { ghost: { name: 'viewer' } as Ghost, build, dv, s, x, y, homeY: y, halfW: (dv.width * s) / 2, r: (dv.width * s) / 2, layer: 'both', isBoss: true, alive: true, dead: false,
-    hp: hp * 1000, maxHp: 1000, shield: 0, shieldMax: 0, shieldHitT: 9, regen: 0, tractor: 0, droneEvery: 0, droneT: 9, speedMul: 1, fireMul: 1, cdMul: 1, t: 0, phase: hp < 0.5 ? 2 : 1, flash: 0, entered: true,
+    hp: hp * 1000, maxHp: 1000, shield: 0, shieldMax: 0, shieldHitT: 9, regen: 0, tractor: 0, droneEvery: 0, droneT: 9, speedMul: 1, fireMul: 1, cdMul: 1, t: 0, phase: Number(q.get('phase')) || (hp > 0.66 ? 1 : hp > 0.33 ? 2 : 3), flash: 0, entered: true,
     weps: [] } as unknown as typeof S.boss;
   // A target for the ghost's guns (px/py, field units); not drawn.
   const tx = q.get('px'), ty = q.get('py');

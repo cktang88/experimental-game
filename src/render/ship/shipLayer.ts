@@ -31,6 +31,8 @@ interface Rig {
   roll: number; rollV: number; pitch: number; pitchV: number; yaw: number;
   seen: Map<number, number>; retarget: Map<number, number>; aims: Map<number, number>;
   fireAcc: number; sparkAcc: number; smokeAcc: number;
+  /** Ghosts: escalation 0..2 eased toward phase - 1, the phase last seen, seconds left of a phase-change blackout. */
+  esc: number; lastPh: number; outage: number;
 }
 
 export class ShipLayer implements Layer {
@@ -69,7 +71,7 @@ export class ShipLayer implements Layer {
     for (const t of m.turrets) seen.set(t.uid, fireLog.get(t.uid) ?? -1);
     return {
       model: m, sig, px: x, py: y, vx: 0, vy: 0, roll: 0, rollV: 0, pitch: 0, pitchV: 0, yaw: 0,
-      seen, retarget: new Map(), aims: new Map(), fireAcc: 0, sparkAcc: 0, smokeAcc: 0,
+      seen, retarget: new Map(), aims: new Map(), fireAcc: 0, sparkAcc: 0, smokeAcc: 0, esc: 0, lastPh: 0, outage: 0,
     };
   }
 
@@ -141,17 +143,27 @@ export class ShipLayer implements Layer {
       m.root.rotation.set(r.pitch + sink * 0.5, r.yaw, r.roll + sink * 0.7, 'YXZ');
       m.root.scale.set(s, s, -s);
       m.root.updateMatrixWorld(true);
-      // Ghost flicker: a slow breath with stutters, harder when the hull is breached.
-      const fl = 0.82 + 0.12 * Math.sin(t * 2.3) + 0.06 * Math.sin(t * 17.1) - (Math.sin(t * 5.7) * Math.sin(t * 3.1) > 0.85 ? 0.45 : 0) - (Bo.phase === 2 && Math.random() < 0.08 ? 0.4 : 0);
-      L.u.flicker.value = fl; lightUniforms.uFlick.value = fl;
-      if (m.edges) (m.edges.material as THREE.LineBasicMaterial).opacity = clamp(0.55 + 0.45 * fl, 0, 1);
+      // The ghost's signature (docs/ART.md "Ghost bosses"): failing power. A slow brownout breath with
+      // stutters that grow as it escalates, and a blackout on each phase change (66%, 33%) before the
+      // emergency lighting comes back with more of the ship dark.
+      if (Bo.phase !== r.lastPh) { if (r.lastPh) r.outage = 1.1; r.lastPh = Bo.phase; }
+      r.esc += (Bo.phase - 1 - r.esc) * (1 - Math.exp(-rdt * 1.2));
+      r.outage = Math.max(0, r.outage - rdt);
+      const esc = r.esc;
+      let fl = 0.84 + 0.08 * Math.sin(t * 1.3) + 0.05 * Math.sin(t * 7.9) - (Math.sin(t * 5.7) * Math.sin(t * 3.1) > 0.9 - 0.06 * esc ? 0.4 : 0) - (Math.random() < 0.025 * esc ? 0.35 : 0);
+      if (r.outage > 0) fl *= r.outage > 0.45 ? (Math.random() < 0.12 ? 0.6 : 0.06) : 1 - r.outage;
+      const pulse = 0.75 + 0.25 * Math.sin(t * 1.7);
+      L.u.flicker.value = fl; lightUniforms.uFlick.value = fl; L.u.time.value = t;
+      L.u.pulse.value = pulse; L.u.dead.value = 0.5 + 0.15 * esc; L.u.ember.value = 0.35 + 0.3 * esc + 0.1 * Math.sin(t * 2.1);
+      (m.lights.material as THREE.ShaderMaterial).uniforms.uAlarm.value = r.outage > 0.45 ? 0 : 0.3 + esc * 0.35;
+      if (m.edges) (m.edges.material as THREE.LineBasicMaterial).opacity = 0.55 * pulse * (0.7 + 0.3 * fl);
       this.turrets(r, S, rdt, t, true, Bo.x, Bo.y, s, null);
       this.animate(r, rdt, s);
-      this.plumes(r, t, s, true, 0.8);
+      this.plumes(r, t, s, true, 0.75 - 0.1 * esc, esc);
       this.steam(r, t, s);
-      this.damage(r, Bo.hp / Bo.maxHp, rdt, t, s, true);
-      // Menace: a low red aura under the hull and a pale hit flash.
-      e.toFlight(Bo.x, Bo.y, -40, v); e.glow.add(v.x, v.y, v.z, 0, Bo.halfW * 2.8, Bo.dv.len * s * 1.3, rgb('#ff3a2e'), 0.1 * fl, Shape.Soft);
+      this.damage(r, Bo.hp / Bo.maxHp, rdt, t, s, true, esc);
+      // A faint cold-red breath under the hull: menace without a glow sign.
+      e.toFlight(Bo.x, Bo.y, -40, v); e.glow.add(v.x, v.y, v.z, 0, Bo.halfW * 2.6, Bo.dv.len * s * 1.2, rgb('#ff3a2e'), 0.04 * pulse, Shape.Soft);
       if (Bo.flash > 0) { e.toFlight(Bo.x, Bo.y, 20, v); e.glow.add(v.x, v.y, v.z, 0, Bo.halfW * 2.2, Bo.dv.len * s * 1.1, rgb('#ffd0c0'), 0.25, Shape.Soft); }
       if (Bo.shield > 0) { e.toFlight(Bo.x, Bo.y, 14, v); e.glow.add(v.x, v.y, v.z, 0, Bo.halfW * 2 + 50, Bo.dv.len * s + 50, rgb('#4fd1e8'), (0.3 + 0.5 * Bo.shield / Bo.shieldMax) * (Bo.shieldHitT < 0.15 ? 1.8 : 1), Shape.Ring); }
     } else this.clear();
@@ -268,14 +280,16 @@ export class ShipLayer implements Layer {
   }
 
   /** Engine plumes: hot core, long streak and soft bloom per nozzle, flickering with thrust. */
-  private plumes(r: Rig, t: number, s: number, hostile: boolean, thrust: number) {
+  /** `esc` (ghosts): past phase 2 the drives sputter, one nozzle at a time cutting out. */
+  private plumes(r: Rig, t: number, s: number, hostile: boolean, thrust: number, esc = 0) {
     const e = this.engine, m = r.model, L = livery(hostile, e.renderer).light;
     d.set(0, 0, 1).transformDirection(m.root.matrixWorld);
     const rot = Math.atan2(d.z, d.x);
     for (let i = 0; i < m.nozzles.length; i++) {
       const n = m.nozzles[i];
       v.set(n.x, n.y, n.z).applyMatrix4(m.root.matrixWorld);
-      const fl = 0.85 + 0.15 * Math.sin(t * 31 + i * 2.1) + 0.08 * Math.sin(t * 13.3 + i);
+      let fl = 0.85 + 0.15 * Math.sin(t * 31 + i * 2.1) + 0.08 * Math.sin(t * 13.3 + i);
+      if (hostile) fl *= 0.8 + 0.2 * Math.sin(t * 4.3 + i * 1.7) - (esc > 0.8 && ((t * 0.6 + i * 0.41) % 1) < 0.08 * esc ? 0.6 : 0);
       if (n.main) {
         const rr = n.r * s, len = rr * (4.5 + 3.5 * thrust) * fl;
         e.glow.add(v.x, v.y, v.z, 0, rr * 2.6, rr * 2.6, rgb(L.engineHot), 0.9, Shape.Hot);
@@ -307,25 +321,57 @@ export class ShipLayer implements Layer {
     }
   }
 
-  /** Battle damage: scorch at 60%, sparks; fires, smoke and venting under 30%. */
-  private damage(r: Rig, frac: number, dt: number, t: number, s0: number, hostile: boolean) {
+  /**
+   * Battle damage. Player: scorch from 75%, sparks under 60%; fires, smoke and venting under 30%.
+   * Ghosts (`esc` 0..2, eased phase): the wreck is scarred from the start (scorch with smouldering embers,
+   * smoke trails streaming aft from its old wounds); phase 2 lights fires and venting, phase 3 sets the
+   * whole hull burning, and the last third of its hull adds more on top.
+   */
+  private damage(r: Rig, frac: number, dt: number, t: number, s0: number, hostile: boolean, esc = 0) {
     const e = this.engine, m = r.model, pts = m.dmgPts, n = pts.length, s = s0 * m.k;
-    const sc = clamp((0.75 - frac) / 0.6, 0, 1), nScorch = Math.floor(n * sc);
+    const sc = hostile ? Math.max(0.3 + 0.25 * esc, clamp((0.75 - frac) / 0.6, 0, 1)) : clamp((0.75 - frac) / 0.6, 0, 1), nScorch = Math.floor(n * sc);
     m.scorch.geometry.setDrawRange(0, nScorch * 6);
-    // Burnt-out sections: steady lights start to fail below 70% hull, most are dark near the end.
-    (m.lights.material as THREE.ShaderMaterial).uniforms.uDmg.value = clamp((0.7 - frac) / 0.7, 0, 0.8);
-    if (frac >= 0.6 || frac <= 0) return;
+    // Burnt-out sections: steady lights start to fail below 70% hull, most are dark near the end. A
+    // ghost's crew is dead: half its lights are out before the fight starts and more fail each phase.
+    (m.lights.material as THREE.ShaderMaterial).uniforms.uDmg.value = hostile ? clamp(0.38 + 0.2 * esc + Math.max(0, 0.33 - frac) * 0.3, 0, 0.94) : clamp((0.7 - frac) / 0.7, 0, 0.8);
+    if (frac <= 0) return;
     const toField = (p: THREE.Vector3) => { p.x += FIELD_W / 2; p.z += FIELD_H / 2; return p; };
-    r.sparkAcc += dt * (0.6 - frac) * 14;
-    while (r.sparkAcc > 1) {
-      r.sparkAcc -= 1;
-      const p = pts[Math.floor(Math.random() * Math.max(1, nScorch))];
-      toField(w.set(p[0], p[1], p[2]).applyMatrix4(m.root.matrixWorld));
-      for (let k = 0; k < 4; k++) { const a = Math.random() * Math.PI * 2, sp = 30 + Math.random() * 90; addFx({ type: 'spark', x: w.x, y: w.z, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.25 + Math.random() * 0.2, max: 0.45, size: 0.8, drag: 3, tint: '#ffd27a' }); }
-    }
-    if (frac >= 0.3) return;
-    const nf = Math.min(n, 4 + Math.floor(((0.3 - frac) / 0.3) * 16));
     d.set(0, 0, 1).transformDirection(m.root.matrixWorld);
+    if (hostile) {
+      // Old wounds: a smoulder and a long, thin smoke trail streaming aft from each.
+      const nw = Math.min(n, 3 + Math.round(esc * 2.5));
+      for (let i = 0; i < nw; i++) {
+        const p = pts[i];
+        v.set(p[0], p[1], p[2]).applyMatrix4(m.root.matrixWorld);
+        const fl = 0.7 + 0.3 * Math.sin(t * (5 + i) + i * 3);
+        e.glow.add(v.x, v.y + 1, v.z, 0, 3.2 * s * fl, 3.2 * s * fl, rgb(FIRE[2]), 0.35 * fl, Shape.Soft);
+        for (let k = 0; k < 5; k++) {
+          const q = (t * 0.32 + k / 5 + i * 0.23) % 1, sz = (2.5 + q * 13) * s;
+          e.dark.add(v.x + d.x * q * 70 * s + Math.sin(i * 2.1 + q * 5) * 3 * s, v.y + 3 + q * 12, v.z + d.z * q * 70 * s, q * 2 + i, sz, sz * 0.8, rgb('#1d1d20'), (1 - q) * Math.min(1, q * 6) * 0.42, DarkShape.Soft);
+        }
+      }
+      r.smokeAcc += dt * nw * (0.5 + 0.5 * esc);
+      while (r.smokeAcc > 1) {
+        r.smokeAcc -= 1;
+        const p = pts[Math.floor(Math.random() * nw)];
+        toField(w.set(p[0], p[1], p[2]).applyMatrix4(m.root.matrixWorld));
+        addFx({ type: 'smoke', x: w.x, y: w.z, vx: (Math.random() - 0.5) * 12, vy: d.z * 50 + Math.random() * 20, life: 1.6, max: 1.6, size: 2 * s, grow: 2.8, a: 0.4 });
+      }
+    }
+    const sparkRate = hostile ? 1.5 + 3.5 * esc + Math.max(0, 0.33 - frac) * 20 : (0.6 - frac) * 14;
+    if (sparkRate > 0) {
+      r.sparkAcc += dt * sparkRate;
+      while (r.sparkAcc > 1) {
+        r.sparkAcc -= 1;
+        const p = pts[Math.floor(Math.random() * Math.max(1, nScorch))];
+        toField(w.set(p[0], p[1], p[2]).applyMatrix4(m.root.matrixWorld));
+        for (let k = 0; k < 4; k++) { const a = Math.random() * Math.PI * 2, sp = 30 + Math.random() * 90; addFx({ type: 'spark', x: w.x, y: w.z, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.25 + Math.random() * 0.2, max: 0.45, size: 0.8, drag: 3, tint: '#ffd27a' }); }
+      }
+    }
+    const nf = hostile
+      ? Math.min(n, Math.floor(Math.max(0, esc - 0.4) * 7 + Math.max(0, 0.33 - frac) / 0.33 * 8))
+      : frac < 0.3 ? Math.min(n, 4 + Math.floor(((0.3 - frac) / 0.3) * 16)) : 0;
+    if (nf <= 0) return;
     for (let i = 0; i < nf; i++) {
       const p = pts[i];
       v.set(p[0], p[1], p[2]).applyMatrix4(m.root.matrixWorld);
@@ -339,16 +385,16 @@ export class ShipLayer implements Layer {
       e.glow.add(v.x, v.y + 2, v.z, 0, 12 * s * fl2, 12 * s * fl2, rgb(FIRE[3]), 0.2 * fl, Shape.Soft);
       e.glow.add(v.x, v.y + 2.5, v.z, i, (5 + 2.5 * fl) * s, (4 + 2 * fl) * s, rgb(FIRE[2]), 0.75 * fl, Shape.Soft);
       e.glow.add(v.x, v.y + 3, v.z, 0, 2.2 * s * fl2, 2.2 * s * fl2, rgb(FIRE[1]), 0.9 * fl, Shape.Hot);
-      // Venting: pale jets from the hull side nearest the fire.
-      if (i % 3 === 1) {
+      // Venting: pale jets (atmosphere and coolant) from the hull side nearest the fire.
+      if (i % 3 === 1 || (hostile && esc > 1.3 && i % 3 === 2)) {
         w.set(Math.sign(p[0] || 1) * 1, 0, 0).transformDirection(m.root.matrixWorld);
         const vl = (8 + 4 * Math.sin(t * 9 + i)) * s;
-        e.glow.add(v.x + w.x * vl * 0.6, v.y + 2, v.z + w.z * vl * 0.6, Math.atan2(w.z, w.x), vl, 1.6 * s, rgb(hostile ? '#ff9a7a' : '#cfe3f0'), 0.3 * fl2, Shape.Streak);
+        e.glow.add(v.x + w.x * vl * 0.6, v.y + 2, v.z + w.z * vl * 0.6, Math.atan2(w.z, w.x), vl, 1.6 * s, rgb(hostile ? '#b9cfca' : '#cfe3f0'), 0.3 * fl2, Shape.Streak);
       }
     }
-    r.smokeAcc += dt * nf * 3;
-    while (r.smokeAcc > 1) {
-      r.smokeAcc -= 1;
+    r.fireAcc += dt * nf * 3;
+    while (r.fireAcc > 1) {
+      r.fireAcc -= 1;
       const p = pts[Math.floor(Math.random() * nf)];
       toField(w.set(p[0], p[1], p[2]).applyMatrix4(m.root.matrixWorld));
       addFx({ type: 'smoke', x: w.x, y: w.z, vx: (Math.random() - 0.5) * 16, vy: 60 + Math.random() * 40, life: 1.3, max: 1.3, size: 2.2 * s, grow: 2.6, a: 0.5 });

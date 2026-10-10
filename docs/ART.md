@@ -70,10 +70,27 @@ Rules:
 
 - **One PBR material library.** Hull, turrets, enemy armor and props all use the Quaternius sci-fi trim sheets (`T_Trim_*` BaseColor/Normal/ORM/Emissive), tinted per faction:
   - player: gunmetal plus hazard
-  - ghost bosses: blood-oxide red plus hostile edge glow
+  - ghost bosses: the player's gunmetal, blackened and weathered (see "Ghost bosses" below)
   - enemy military: olive-drab and desert, with hostile lights
 - The city uses the Downtown kit textures (brick, concrete, metal, windows) under the same lighting.
 - No flat-colored primitives in the final game. A box is acceptable only as a placeholder in a baseline layer.
+
+## Ghost bosses
+
+A ghost is a dead player's dreadnought, rebuilt from their build at the same detail level as ours (same hull, greebles, turrets, utilities) and flown back at us bow-first. **The idea: a derelict warship whose crew is dead but whose guns still work.** It must read as colossal and menacing, never as a neon sign.
+
+| Element | Treatment |
+| --- | --- |
+| Hull | Our gunmetal trims, darker and colder, with soot blotches across the plating and rust and grime streaking down the walls (procedural, `ghostPatches` in `materials.ts`). Stencils and hazard stripes faded. Weaker sky reflection. |
+| Old wounds | Scorch scars from the first frame, their densest soot smouldering like banked embers; thin smoke trails stream aft from the worst of them. |
+| Lighting signature: **corpse light** | Every light that still works burns a cold, sickly pale teal-white (`#d0f0e6`, windows `#a8d4c8`), never our warm amber. Half the cabin windows and portholes are dead; a few of the dead ones flash as circuits fail. Floodlight pools are faint and cold. The whole ship's power breathes and stutters (brownouts). |
+| Emergency lights | Sparse red beacons (the masts' and pylons' beacon lights), the only red light on the hull. They pulse slowly in phase 1 and burn brighter and faster as the boss escalates. |
+| Drives | Guttering ember-orange plumes; past phase 2 they sputter, one nozzle cutting out at a time. |
+| Hostile identification | A **hairline** red rim on the hull silhouette (and a third as strong on superstructure roof edges), plus a faint red Fresnel rim on sloped plates, both breathing slowly; a very faint red breath under the hull. Nothing on the hull blooms red. Combined with the HUD's boss bar, symbology and the ship's sheer size, that is enough. |
+| Phase 2 (66%) | A blackout (the lights die for a second, then come back with fewer of them), fires break out at the wounds, coolant and atmosphere vent in pale jets, more smoke, sparks, faster emergency beacons. |
+| Phase 3 (33%) | Another blackout, the hull burning along its length, most lights dead, constant stutters, drives sputtering, more venting. The last third of its hull adds fires on top. |
+
+Rules: no magenta anywhere on the ghost (its broadside telegraphs, glints and lane markers are the brightest magenta things near it, drawn on top); red only for the beacons, the hairline rim and its own muzzle flashes; everything else in the corpse-light or fire families.
 
 ## Light
 

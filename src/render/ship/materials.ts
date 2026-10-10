@@ -22,8 +22,11 @@ export interface Livery {
   /** Base tints (multiplied with vertex colors) and light colors used by the builders. */
   paint: { hull: THREE.Color; plate: THREE.Color; dark: THREE.Color; accent: THREE.Color; deckLine: THREE.Color; full: THREE.Color };
   light: { window: string; edge: string; strobe: string; deck: string; engine: string; engineHot: string; energy: string; port: string; star: string; navPort: string; navStar: string };
-  /** Uniforms animated by the layer (ghost flicker, window pulse). */
-  u: { flicker: { value: number }; time: { value: number } };
+  /**
+   * Uniforms animated by the layer. Ghost only: flicker (power breath, stutters, blackouts), dead (share of
+   * dark cabin windows), pulse (the faint hostile rim), ember (smoulder in the scorch scars).
+   */
+  u: { flicker: { value: number }; time: { value: number }; dead: { value: number }; pulse: { value: number }; ember: { value: number } };
 }
 
 /* ---------------- procedural canvas maps ---------------- */
@@ -232,13 +235,60 @@ function stencilMap() {
   return stencilTex;
 }
 
+/* ---------------- ghost look ---------------- */
+/**
+ * Ghost bosses are the dead player's own ship: the same trim sheets, darker and scorched. Soot blotches
+ * (three octaves of value noise) blacken the plating, grime and rust run down the walls, and a faint red
+ * rim (the only hostile tint on the hull) breathes with `pulse` so the silhouette still reads as the boss.
+ */
+const GHOST_GLSL = `
+float gdH2(vec2 p){return fract(sin(dot(p,vec2(41.3,289.1)))*15731.743);}
+float gdVN(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+  return mix(mix(gdH2(i),gdH2(i+vec2(1,0)),f.x),mix(gdH2(i+vec2(0,1)),gdH2(i+vec2(1,1)),f.x),f.y);}`;
+function ghostPatches(mats: Record<MatKey, THREE.Material>, u: Livery['u']) {
+  for (const k of ['t1', 't2', 't3', 'dark'] as MatKey[]) {
+    addPatch(mats[k], 'ghostwear', (sh) => {
+      sh.uniforms.uPulse = u.pulse;
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uPulse;' + GHOST_GLSL)
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          {vec3 an=abs(vGdN);vec2 q=an.y>0.6?vGdP.xz:(an.x>an.z?vGdP.zy:vGdP.xy);
+           float n=gdVN(q*0.07)*0.55+gdVN(q*0.21+3.1)*0.3+gdVN(q*0.8+7.7)*0.15;
+           diffuseColor.rgb*=1.0-0.45*smoothstep(0.45,0.8,n);
+           if(an.y<0.6){float st=gdVN(vec2(q.x*1.9,q.y*0.06+q.x*0.01));
+             diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(1.2,0.78,0.58)*0.8,smoothstep(0.5,0.85,st)*0.75);}}`)
+        .replace('#include <emissivemap_fragment>',
+          '#include <emissivemap_fragment>\n{float rim=1.0-abs(dot(normalize(vViewPosition),normal));totalEmissiveRadiance+=vec3(1.0,0.16,0.08)*pow(rim,3.0)*0.16*uPulse;}');
+    });
+  }
+  // The dead ship's emissives breathe and stutter with its failing power.
+  for (const k of ['window', 'glass', 'lamp', 'glow', 'core'] as MatKey[]) {
+    addPatch(mats[k], 'ghostflick', (sh) => { sh.uniforms.uFlick = u.flicker; sh.fragmentShader = 'uniform float uFlick;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', 'outgoingLight *= uFlick;\n#include <opaque_fragment>'); });
+  }
+  // Dead crew: most cabins are dark; a few of the dark ones flash as their circuits fail.
+  addPatch(mats.window, 'ghostdead', (sh) => {
+    sh.uniforms.uDead = u.dead; sh.uniforms.uGTime = u.time;
+    sh.fragmentShader = 'uniform float uDead;uniform float uGTime;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      {vec2 cell=floor(vMapUv*vec2(32.0,4.0));float h=fract(sin(dot(cell,vec2(12.9898,78.233)))*43758.5453);
+       float fl=step(0.96,fract(sin(floor(uGTime*8.0)+h*91.0)*43758.5));
+       diffuseColor.rgb*=h<uDead?fl*0.7:1.0;}`);
+  });
+  // Old wounds smoulder: the densest soot of each scorch scar glows like banked embers.
+  addPatch(mats.scorch, 'ghostember', (sh) => {
+    sh.uniforms.uEmber = u.ember; sh.uniforms.uGTime = u.time;
+    sh.fragmentShader = 'uniform float uEmber;uniform float uGTime;\n' + sh.fragmentShader.replace('#include <alphamap_fragment>', `#include <alphamap_fragment>
+      {float cov=texture2D(alphaMap,vAlphaMapUv).g;float e=smoothstep(0.72,1.0,cov)*uEmber*(0.75+0.25*sin(uGTime*2.3+vAlphaMapUv.x*17.0));
+       diffuseColor.rgb=vec3(1.0,0.3,0.07)*e*1.3;}`);
+  });
+}
+
 /* ---------------- livery sets ---------------- */
 const cache = new Map<string, Livery>();
 export function livery(hostile: boolean, renderer: THREE.WebGLRenderer | null): Livery {
   const key = `${hostile}_${kitLoaded('scifi')}`;
   const hit = cache.get(key); if (hit) return hit;
   const T = kitTrims(), M = sharedMaps(), env = renderer ? shipEnv(renderer) : null;
-  const u = { flicker: { value: 1 }, time: { value: 0 } };
+  const u = { flicker: { value: 1 }, time: { value: 0 }, dead: { value: 0.7 }, pulse: { value: 1 }, ember: { value: 0.5 } };
   const pbr = (k: 't1' | 't2' | 't3' | 'dark', tint: string, o: Partial<THREE.MeshStandardMaterialParameters> = {}) => {
     const s = T?.[k];
     const m = new THREE.MeshStandardMaterial({
@@ -252,50 +302,37 @@ export function livery(hostile: boolean, renderer: THREE.WebGLRenderer | null): 
   };
   const glowBasic = (hex: string, k: number, o: THREE.MeshBasicMaterialParameters = {}) => { const m = new THREE.MeshBasicMaterial({ color: hex, vertexColors: true, ...o }); m.color.multiplyScalar(k); m.toneMapped = false; return m; };
   const P = hostile
-    ? { hull: '#4a3633', plate: '#3e2c2a', dark: '#1e1514', accent: '#8a2a1c', deckLine: '#7a2a22' }
+    ? { hull: '#484849', plate: '#3e3e40', dark: '#1a1a1b', accent: '#7a3a26', deckLine: '#5e5a56' }
     : { hull: '#58616b', plate: '#4a525b', dark: '#262b31', accent: '#f2a541', deckLine: '#c9c4b4' };
   const L = hostile
-    ? { window: '#ff7a5c', edge: '#ff5a4e', strobe: '#ff3a2e', deck: '#ff6a3d', engine: '#ff6a3d', engineHot: '#ffc0a0', energy: '#ff5a4e', port: '#ff3a2e', star: '#ff3a2e', navPort: '#ff3a2e', navStar: '#ff7a5c' }
+    // Dead crew: cold, dim corpse-light (pale sickly teal-white) where the player has warm cabins and
+    // amber deck lamps; sparse red emergency beacons (port) are the only red. Engines gutter like embers.
+    ? { window: '#a8d4c8', edge: '#d0f0e6', strobe: '#e6fff6', deck: '#b8e4d8', engine: '#e0663a', engineHot: '#ffc6a2', energy: '#c8eee0', port: '#ff3a2e', star: '#d0f0e6', navPort: '#d0f0e6', navStar: '#d0f0e6' }
     : { window: '#ffcf8a', edge: '#ffd9a0', strobe: '#f4fbff', deck: '#4fd1e8', engine: '#ffb347', engineHot: '#fff1c1', energy: '#4fd1e8', port: '#f2a541', star: '#8fe3ff', navPort: '#ff4636', navStar: '#3dff8a' };
   const mats: Record<MatKey, THREE.Material> = {
-    t1: pbr('t1', hostile ? '#d8a89a' : '#c8d0da'),
-    t2: pbr('t2', hostile ? '#c89a8e' : '#bcc6d0'),
-    t3: pbr('t3', hostile ? '#8a6058' : '#8a929c', { metalness: 0.5 }),
-    dark: pbr('dark', hostile ? '#5a3a36' : '#5a626c'),
+    t1: pbr('t1', hostile ? '#bab6b2' : '#c8d0da', hostile ? { envMapIntensity: 0.3 } : {}),
+    t2: pbr('t2', hostile ? '#aeaaa6' : '#bcc6d0', hostile ? { envMapIntensity: 0.3 } : {}),
+    t3: pbr('t3', hostile ? '#807c79' : '#8a929c', { metalness: 0.5 }),
+    dark: pbr('dark', hostile ? '#52504e' : '#5a626c'),
     black: new THREE.MeshStandardMaterial({ color: '#07090b', roughness: 0.6, metalness: 0.4, envMap: env, side: THREE.DoubleSide }),
     decal: new THREE.MeshStandardMaterial({
-      map: T?.decal.map ?? null, alphaMap: T?.decal.map ?? null, color: hostile ? '#c85a40' : '#d8d4c6', transparent: true, alphaTest: 0.35, roughness: 0.7, metalness: 0.1,
+      map: T?.decal.map ?? null, alphaMap: T?.decal.map ?? null, color: hostile ? '#7a6a60' : '#d8d4c6', transparent: true, alphaTest: 0.35, roughness: 0.7, metalness: 0.1,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false, envMap: env, envMapIntensity: 0.4,
     }),
     hazard: new THREE.MeshStandardMaterial({ map: M.hazard, vertexColors: true, roughness: 0.65, metalness: 0.2, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, envMap: env, envMapIntensity: 0.5 }),
     paint: new THREE.MeshStandardMaterial({ map: T?.t3.map ?? null, vertexColors: true, roughness: 0.75, metalness: 0.15, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, envMap: env, envMapIntensity: 0.4 }),
-    glass: glowBasic(L.window, hostile ? 0.9 : 1.3),
-    window: glowBasic(L.window, hostile ? 1.6 : 2.2, { map: M.window }),
-    lamp: glowBasic(L.edge, 3),
-    glow: glowBasic(L.energy, 3.2),
-    core: glowBasic(L.engine, 4.5),
+    glass: glowBasic(L.window, hostile ? 0.45 : 1.3),
+    window: glowBasic(L.window, hostile ? 1.5 : 2.2, { map: M.window }),
+    lamp: glowBasic(L.edge, hostile ? 1.4 : 3),
+    glow: glowBasic(L.energy, hostile ? 1.5 : 3.2),
+    core: glowBasic(L.engine, hostile ? 3 : 4.5),
     shadow: new THREE.MeshBasicMaterial({ color: '#000000', alphaMap: M.soft, transparent: true, opacity: 0.75, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }),
-    pool: new THREE.MeshBasicMaterial({ color: hostile ? '#ff5a3a' : '#ffb870', vertexColors: true, alphaMap: M.glow, transparent: true, opacity: hostile ? 0.3 : 0.4, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+    pool: new THREE.MeshBasicMaterial({ color: hostile ? '#8fb8ae' : '#ffb870', vertexColors: true, alphaMap: M.glow, transparent: true, opacity: hostile ? 0.2 : 0.4, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
     scorch: new THREE.MeshBasicMaterial({ color: '#000000', alphaMap: M.scorch, transparent: true, opacity: 0.85, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }),
-    stencil: new THREE.MeshStandardMaterial({ color: hostile ? '#9a4a3a' : '#d9d3c0', vertexColors: true, alphaMap: stencilMap(), transparent: true, alphaTest: 0.4, roughness: 0.8, metalness: 0.1, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, envMap: env, envMapIntensity: 0.3 }),
+    stencil: new THREE.MeshStandardMaterial({ color: hostile ? '#6e625a' : '#d9d3c0', vertexColors: true, alphaMap: stencilMap(), transparent: true, alphaTest: 0.4, roughness: 0.8, metalness: 0.1, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, envMap: env, envMapIntensity: 0.3 }),
   };
   for (const k of ['t1', 't2', 't3', 'dark'] as MatKey[]) addPatch(mats[k], 'seams', seamPatch);
-  if (hostile) {
-    // Ghostly flicker: the dead ship's emissives breathe and stutter.
-    for (const k of ['window', 'glass', 'lamp', 'glow', 'core'] as MatKey[]) {
-      const m = mats[k] as THREE.MeshBasicMaterial;
-      addPatch(m, 'ghostflick', (sh) => { sh.uniforms.uFlick = u.flicker; sh.fragmentShader = 'uniform float uFlick;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', 'outgoingLight *= uFlick;\n#include <opaque_fragment>'); });
-    }
-    // Rust-red rim on the hull so the silhouette smoulders even from straight above.
-    for (const k of ['t1', 't2', 't3'] as MatKey[]) {
-      const m = mats[k] as THREE.MeshStandardMaterial;
-      addPatch(m, 'ghostrim', (sh) => {
-        sh.uniforms.uFlick = u.flicker;
-        sh.fragmentShader = 'uniform float uFlick;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>',
-          '#include <emissivemap_fragment>\nfloat rim=1.0-abs(dot(normalize(vViewPosition),normal));totalEmissiveRadiance+=vec3(1.0,0.14,0.06)*pow(rim,4.0)*0.35*uFlick;');
-      });
-    }
-  }
+  if (hostile) ghostPatches(mats, u);
   const out: Livery = {
     hostile, mats, u,
     paint: { hull: new THREE.Color(P.hull), plate: new THREE.Color(P.plate), dark: new THREE.Color(P.dark), accent: new THREE.Color(P.accent), deckLine: new THREE.Color(P.deckLine), full: new THREE.Color(1, 1, 1) },

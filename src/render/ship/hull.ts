@@ -124,7 +124,7 @@ function tower(c: Ctx, poly: V2[], y0: number, y1: number, o: TowerOpts = {}) {
   if (o.roof !== false) roof(c, x0 + ins, z0 + ins, x1 - ins, z1 - ins, y1);
   if (o.edgeLights !== false) outlineLights(c, poly.map(([x, z]) => [x * 0.985, z] as V2), y1 + 0.12, 1.1, c.L.light.edge, 0.9, 0.22, 0.75, LMode.Steady, -0.4);
   if (o.claim !== false) claim(c, x0, z0, x1, z1);
-  c.edgeSegs.push(edgeRing(poly, y1));
+  if (o.edgeLights !== false) c.edgeSegs.push(edgeRing(poly, y1)); // small deck houses get no hostile rim line
   return { x0, x1, z0, z1 };
 }
 function edgeRing(poly: V2[], y: number) {
@@ -241,10 +241,10 @@ function hull(c: Ctx, st: Station[]) {
   hz.quad([-e, DECK + 0.04, zt - 2.2], [e, DECK + 0.04, zt - 2.2], [e, DECK + 0.04, zt], [-e, DECK + 0.04, zt], [0, 0], [e / 4, 0], [e / 4, 1], [0, 1], P.accent, [0, 1, 0]);
   // Edge silhouette for the ghost livery.
   const ep: number[] = [];
-  for (let i = 0; i < st.length - 1; i++) for (const sx of [1, -1]) for (const k of [0, 3]) {
+  for (let i = 0; i < st.length - 1; i++) for (const sx of [1, -1]) for (const k of [3]) {
     const pa = profile(st[i].hw)[k], pb = profile(st[i + 1].hw)[k]; ep.push(sx * pa[0], pa[1], st[i].z, sx * pb[0], pb[1], st[i + 1].z);
   }
-  const eg = new THREE.BufferGeometry(); eg.setAttribute('position', new THREE.Float32BufferAttribute(ep, 3)); c.edgeSegs.push(eg);
+  const eg = new THREE.BufferGeometry(); eg.setAttribute('position', new THREE.Float32BufferAttribute(ep, 3)); eg.userData.k = 1; c.edgeSegs.push(eg);
 }
 
 /** Deck plating: parallel strakes (fixed x lanes), broken into staggered plates of varied tone, clipped to the deck edge. */
@@ -634,10 +634,17 @@ export function buildShip(dv: Derived, L: Livery, sigText: string, callsign = ''
   scorch.geometry.setDrawRange(0, 0);
   let edges: THREE.LineSegments | null = null;
   if (L.hostile && c.edgeSegs.length) {
-    const pos: number[] = [];
-    for (const g of c.edgeSegs) { const a = g.getAttribute('position'); for (let i = 0; i < a.count; i++) pos.push(a.getX(i), a.getY(i) + 0.05, a.getZ(i)); g.dispose(); }
-    const eg = new THREE.BufferGeometry(); eg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    const em = new THREE.LineBasicMaterial({ color: '#ff5040', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }); em.color.multiplyScalar(1.5); em.toneMapped = false;
+    // The hostile identification: a hairline rim, not a neon outline. The hull silhouette carries it at
+    // full strength, superstructure roof edges at a third; the layer breathes the opacity slowly. It stays
+    // well under the bloom threshold, so it never thickens into a glow.
+    const pos: number[] = [], cl: number[] = [];
+    for (const g of c.edgeSegs) {
+      const a = g.getAttribute('position'), w = g.userData.k ?? 0.35;
+      for (let i = 0; i < a.count; i++) { pos.push(a.getX(i), a.getY(i) + 0.05, a.getZ(i)); cl.push(w, w, w); }
+      g.dispose();
+    }
+    const eg = new THREE.BufferGeometry(); eg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); eg.setAttribute('color', new THREE.Float32BufferAttribute(cl, 3));
+    const em = new THREE.LineBasicMaterial({ color: '#ff4636', vertexColors: true, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }); em.color.multiplyScalar(0.9); em.toneMapped = false;
     edges = new THREE.LineSegments(eg, em); edges.userData.own = true; body.add(edges);
   } else for (const g of c.edgeSegs) g.dispose();
   let tris = 0; body.traverse((o) => { const g = (o as THREE.Mesh).geometry; if ((o as THREE.Mesh).isMesh && g) tris += (g.index ? g.index.count : g.getAttribute('position').count) / 3; });
