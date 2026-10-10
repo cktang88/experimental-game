@@ -277,9 +277,9 @@ export class ShipLayer implements Layer {
         e.glow.add(v.x + d.x * rr, v.y - 4, v.z + d.z * rr, 0, rr * 6, rr * 6, rgb(L.engine), 0.22 * thrust, Shape.Soft);
       } else {
         // Manoeuvring jets fire against lateral motion.
-        const side = Math.sign(n.x) * (hostile ? -1 : 1), q = n.r > 2 ? 0.6 : clamp((side < 0 ? r.vx : -r.vx) / 260, 0, 1);
+        const aft = n.aft ?? n.r > 2, side = Math.sign(n.x) * (hostile ? -1 : 1), q = aft ? 0.6 : clamp((side < 0 ? r.vx : -r.vx) / 260, 0, 1);
         if (q > 0.05) {
-          const ox = n.r > 2 ? d.x : Math.sign(n.x) * (hostile ? -1 : 1), oz = n.r > 2 ? d.z : 0, rr = n.r * s;
+          const ox = aft ? d.x : Math.sign(n.x) * (hostile ? -1 : 1), oz = aft ? d.z : 0, rr = n.r * s;
           e.glow.add(v.x + ox * rr * 2, v.y, v.z + oz * rr * 2, Math.atan2(oz, ox), rr * 5 * q * fl, rr * 1.2, rgb(L.engine), 0.7 * q, Shape.Streak);
         }
       }
