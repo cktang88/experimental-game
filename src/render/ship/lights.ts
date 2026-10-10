@@ -41,9 +41,10 @@ export const lightUniforms = { uTime: { value: 0 }, uPx: { value: 900 }, uFlick:
 export function lightMaterial(hostile: boolean) {
   return new THREE.ShaderMaterial({
     // uDmg 0..1: battle damage knocks out a growing share of the steady lights (dark, burnt-out sections).
-    uniforms: { ...lightUniforms, uFlick: hostile ? lightUniforms.uFlick : { value: 1 }, uDmg: { value: 0 } },
+    // uAlarm 0..1 (ghosts): the red emergency beacons burn brighter and turn faster as the boss escalates.
+    uniforms: { ...lightUniforms, uFlick: hostile ? lightUniforms.uFlick : { value: 1 }, uDmg: { value: 0 }, uAlarm: { value: 0 } },
     vertexShader: `attribute vec3 aCol;attribute float aSize;attribute float aPh;attribute float aMode;
-      uniform float uTime;uniform float uPx;uniform float uDmg;varying vec3 vCol;varying float vA;
+      uniform float uTime;uniform float uPx;uniform float uDmg;uniform float uAlarm;varying vec3 vCol;varying float vA;
       void main(){vec4 mv=modelViewMatrix*vec4(position,1.0);gl_Position=projectionMatrix*mv;
         // modelViewMatrix carries the ship scale: grow lights with it.
         float sc=length(modelViewMatrix[0].xyz);
@@ -52,7 +53,7 @@ export function lightMaterial(hostile: boolean) {
         if(aMode>0.5&&aMode<1.5){float t=fract(uTime*0.7+aPh);a=step(t,0.06)*2.5;}
         else if(aMode>1.5&&aMode<2.5){float t=fract(uTime*0.9-aPh);a=0.25+1.6*pow(max(0.0,1.0-t*5.0),2.0);}
         else if(aMode>2.5&&aMode<3.5){a=0.75+0.25*sin(uTime*(3.0+aPh*9.0)+aPh*40.0);}
-        else if(aMode>3.5){a=0.35+0.65*pow(0.5+0.5*sin(uTime*3.2+aPh*6.28),3.0);}
+        else if(aMode>3.5){a=(0.35+0.65*pow(0.5+0.5*sin(uTime*(3.2+uAlarm*4.0)+aPh*6.28),3.0))*(1.0+uAlarm*1.3);}
         if(aMode<0.5){float k=fract(aPh*7.31+position.x*0.013+position.z*0.017);
           if(k<uDmg){float f=fract(sin(floor(uTime*9.0)+aPh*91.0)*43758.5);a*=step(0.93,f)*1.5;}}
         vA=a*clamp(px/1.3,0.2,1.0);gl_PointSize=max(1.15,px);vCol=aCol;}`,
