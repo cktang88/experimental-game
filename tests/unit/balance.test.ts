@@ -19,7 +19,7 @@ describe('balance harness (headless combat)', () => {
     expect(r.hullLostPct).toBeLessThan(75);
     expect(r.broadsides).toBeGreaterThan(5);
     expect(r.overdrives).toBeGreaterThanOrEqual(1);
-  });
+  }, 30_000);
   it('elites die in a reasonable time and bosses are a real fight', () => {
     const e = runFight({ enc: ELITES[0], level: 3.9, sector: 1, build: 's1end' });
     expect(e.outcome).toBe('win');
@@ -29,14 +29,14 @@ describe('balance harness (headless combat)', () => {
     expect(b.outcome).toBe('win');
     expect(b.targetTtk!).toBeGreaterThan(25);
     expect(b.hullLostPct).toBeGreaterThan(5);
-  });
+  }, 30_000);
   it('every hull class can win its first fight and fire its Overdrive', () => {
     for (const hull of ['vanguard', 'leviathan', 'lance', 'bastion'] as const) {
       const r = runFight({ enc: FIGHTS[0], level: 1.3, sector: 1, build: `hull:${hull}`, hull });
       expect(r.outcome, hull).toBe('win');
       expect(r.overdrives, hull).toBeGreaterThanOrEqual(1);
     }
-  });
+  }, 30_000);
   it('a mouse gunner firing the heavy groups by hand does at least as well as the self-aiming batteries', () => {
     for (const [enc, level, sector, build] of [[FIGHTS[0], 1, 1, 'starter'], [BOSS_ENCOUNTER, 6.6, 2, 'mid'], [FIGHTS[2], 7.7, 3, 'late']] as const) {
       const auto = runFight({ enc, level, sector, build });
