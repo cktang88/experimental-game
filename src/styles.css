@@ -783,3 +783,67 @@ ol.heat-list li.shut { opacity: .5; }
 .slot.w { box-shadow: inset 3px 0 0 var(--arc), inset 0 1px 3px rgba(0, 0, 0, .7); }
 .bank.arc .plate-k { color: var(--arc); }
 .bank .lamp.arc-on { background: radial-gradient(circle at 35% 30%, #fff, var(--arc) 45%, #222 110%); box-shadow: 0 0 0 1px #000, 0 0 7px var(--arc); }
+
+/* ---------------- daily strike duty roster (fan-fold line-printer paper) ---------------- */
+.roster { --rs-row: 24px; --rs-cols: 46px minmax(0, 1fr) 96px 104px 64px 96px; position: relative; margin-top: 18px; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, .45)); }
+.rs-sheet { position: relative; padding: 4px 38px 14px; color: #26291f; background: var(--fibre), linear-gradient(176deg, #f0ecdd, #e6e1cf 60%, #ddd7c2); transform: rotate(.35deg); }
+/* pin-feed margins: punched holes, and the perforation you would tear them off along */
+.rs-sheet::before, .rs-sheet::after { content: ""; position: absolute; top: 0; bottom: 0; width: 28px; pointer-events: none; background: radial-gradient(circle at 50% 50%, #0d0f12 0 4.2px, rgba(60, 50, 30, .55) 4.8px, transparent 5.6px) 0 6px / 100% 18px repeat-y; }
+.rs-sheet::before { left: 0; border-right: 1px dashed rgba(60, 50, 30, .35); }
+.rs-sheet::after { right: 0; border-left: 1px dashed rgba(60, 50, 30, .35); }
+.rs-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; padding: 12px 0 10px; border-bottom: 2px solid #2b2e25; }
+.rs-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.rs-title b { font-family: var(--f-stencil); font-weight: 400; font-size: 24px; line-height: 1.05; letter-spacing: .06em; text-transform: uppercase; color: #1d2025; }
+.rs-k { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: #6a6450; }
+.rs-count { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+.rs-count .flaps { font-size: 18px; }
+.rs-cols, .rs-row { display: grid; grid-template-columns: var(--rs-cols); gap: 0 10px; align-items: center; padding: 0 8px; font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rs-cols { padding-top: 7px; padding-bottom: 5px; font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: #6a6450; border-bottom: 1px solid rgba(43, 46, 37, .5); }
+.rs-n { text-align: right; }
+.rs-rows { position: relative; margin: 0; padding: 0; list-style: none; max-height: calc(var(--rs-row) * 16); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #a59c80 transparent;
+  /* green-bar listing paper: bands two lines tall that scroll with the rows */
+  background: repeating-linear-gradient(rgba(126, 160, 112, .22) 0 calc(var(--rs-row) * 2), transparent calc(var(--rs-row) * 2) calc(var(--rs-row) * 4)) local; }
+.rs-row { position: relative; height: var(--rs-row); font-size: 14px; color: #2a2c24; animation: rs-print .2s steps(5, end) backwards; animation-delay: calc(var(--i, 0) * 55ms + .15s); }
+.roster.printed .rs-row { animation: none; }
+@keyframes rs-print { from { clip-path: inset(0 100% 0 0); } }
+.rs-row > span { overflow: hidden; text-overflow: ellipsis; }
+.rs-rk { color: #6a6450; }
+.rs-cs { letter-spacing: .04em; color: #15171a; }
+.rs-hull, .rs-at { font-size: 12.5px; letter-spacing: .06em; color: #4c4637; }
+.rs-row.won .rs-at { color: #275f31; letter-spacing: .14em; }
+.rs-sc { color: #15171a; }
+.rs-gap { color: #8a8270; letter-spacing: .4em; }
+.rs-gap span { grid-column: 1 / -1; text-align: center; }
+.rs-empty { height: auto; padding: 14px 8px; white-space: normal; font-size: 13px; color: #4c4637; }
+.rs-empty span { grid-column: 1 / -1; }
+.rs-row.local .rs-rk { color: var(--stamp); }
+/* the pilot's own line, marked with a highlighter by whoever tore the sheet off */
+.rs-row.you { color: #000; }
+.rs-row.you::before { content: ""; position: absolute; inset: 3px -4px 2px -6px; z-index: 0; background: linear-gradient(176deg, rgba(255, 214, 10, .72), rgba(255, 196, 0, .62)); mix-blend-mode: multiply; border-radius: 2px 6px 3px 8px / 6px 2px 8px 3px; transform: rotate(-.35deg) skewX(-6deg); pointer-events: none; }
+.rs-row.you > span { position: relative; z-index: 1; }
+.rs-row.you .rs-cs, .rs-row.you .rs-sc { font-weight: 700; color: #000; }
+.rs-you { margin-left: 8px; font-family: var(--f-ui); font-style: normal; font-weight: 700; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--stamp); }
+.rs-foot { display: flex; align-items: center; gap: 8px; min-height: 2.6em; margin: 0; padding: 8px 8px 0; max-width: none; font-family: var(--f-mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #4c4637; border-top: 1px solid rgba(43, 46, 37, .5); }
+.rs-foot .lamp { flex: none; width: 9px; height: 9px; }
+.rs-foot.off { color: var(--stamp); }
+.rs-stamp-slot .stamp { top: 14px; right: 190px; }
+.rs-stamp b { font-size: 24px; }
+.rs-brief { margin: 12px 0 2px; font-size: 13.5px; color: #a9b8c6; max-width: none; }
+.rs-days { display: flex; gap: 0; margin-top: 12px; border-bottom: 2px solid #000; }
+.rs-days .tab small { font-size: 11px; letter-spacing: .06em; color: var(--faint); }
+.daily-console { max-width: 900px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.daily-console .roster { margin-top: 14px; }
+.daily-console .foot { margin-top: 18px; }
+.daily-console .foot .switch { width: auto; min-width: 320px; }
+.report-sheet .roster { margin: 20px -6px 0; }
+@media (max-width: 700px) {
+  .roster { --rs-cols: 34px minmax(0, 1fr) 76px 52px 70px; }
+  .rs-sheet { padding: 4px 24px 10px; }
+  .rs-sheet::before, .rs-sheet::after { width: 18px; background-size: 100% 16px; }
+  .rs-hull { display: none; }
+  .rs-row { font-size: 12.5px; }
+  .rs-title b { font-size: 18px; }
+  .rs-stamp-slot .stamp { right: 30px; top: 40px; }
+  .rs-you { display: none; }
+  .daily-console .foot .switch { min-width: 0; width: 100%; }
+}

@@ -110,6 +110,8 @@ export function dateKey(d = new Date()) {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+/** UTC calendar day. The daily strike runs on UTC days so every pilot, in every time zone, flies the same route. */
+export const utcDateKey = (d = new Date()) => d.toISOString().slice(0, 10);
 /** Everyone flying on the same calendar day gets the same seed (FNV-1a of the date). */
 export function dailySeed(key = dateKey()) {
   let h = 2166136261;
@@ -118,6 +120,17 @@ export function dailySeed(key = dateKey()) {
 }
 export function dailyShareLine(r: { date: string; sector: number; floor: number; kills: number; score: number; won: boolean }) {
   return `GHOST DREADNOUGHT DAILY ${r.date} · ${r.won ? 'VICTORY' : `SECTOR ${r.sector} FLOOR ${r.floor + 1}`} · ${r.kills} KILLS · ${Math.round(r.score).toLocaleString('en-US')} PTS`;
+}
+
+/**
+ * Daily strike score (the duty roster ranks by it). Combat score already carries enemy value, level and the carnage
+ * multiplier; on top of it the route pays for depth and for the hard targets, so a careful pilot who goes further
+ * beats one who farms the first sector. Documented in docs/TECH.md.
+ */
+export const DAILY_SCORE = { node: 2500, elite: 1500, ghost: 6000, structure: 5, victory: 25000 } as const;
+export function dailyScore(s: Pick<RunSummary, 'score' | 'nodes' | 'elites' | 'bosses' | 'structures' | 'won'>) {
+  const k = DAILY_SCORE;
+  return Math.max(0, Math.round(s.score + k.node * s.nodes + k.elite * s.elites + k.ghost * s.bosses + k.structure * s.structures + (s.won ? k.victory : 0)));
 }
 
 /* ---------------- settling a run ---------------- */
@@ -153,6 +166,8 @@ export interface Settlement {
   profile: Profile; xp: XpLine[]; xpTotal: number;
   rankBefore: number; rankAfter: number; goals: GoalDef[]; newHulls: HullId[]; heatUnlocked: number | null;
   newBest: boolean; dailyLine: string | null;
+  /** The settled run, and its daily strike score (null unless it was a daily run). */
+  summary: RunSummary; dailyScore: number | null;
 }
 /** Fold a finished run into the profile. Pure: returns a new profile and what changed for the report. */
 export function settleRun(prev: Profile, s: RunSummary): Settlement {
@@ -182,11 +197,12 @@ export function settleRun(prev: Profile, s: RunSummary): Settlement {
   if (!s.daily && (!p.best || s.score > p.best.score)) { p.best = { score: s.score, sector: s.sector, floor: s.floor, hull: s.hull, heat: s.heat, won: s.won, kills: s.kills, date: s.date }; newBest = true; }
   let dailyLine: string | null = null;
   if (s.daily) {
-    dailyLine = dailyShareLine({ date: s.daily, sector: s.sector, floor: s.floor, kills: s.kills, score: s.score, won: s.won });
-    if (!p.daily || p.daily.date !== s.daily || s.score > p.daily.score) p.daily = { date: s.daily, score: s.score, sector: s.sector, floor: s.floor, kills: s.kills, won: s.won, line: dailyLine };
+    const score = dailyScore(s);
+    dailyLine = dailyShareLine({ date: s.daily, sector: s.sector, floor: s.floor, kills: s.kills, score, won: s.won });
+    if (!p.daily || p.daily.date !== s.daily || score > p.daily.score) p.daily = { date: s.daily, score, sector: s.sector, floor: s.floor, kills: s.kills, won: s.won, line: dailyLine };
   }
   p.history = [s, ...p.history].slice(0, 8);
-  return { profile: p, xp: lines, xpTotal: total + goals.reduce((a, g) => a + g.xp, 0), rankBefore, rankAfter, goals, newHulls, heatUnlocked: heatAfter > heatBefore ? heatAfter : null, newBest, dailyLine };
+  return { profile: p, xp: lines, xpTotal: total + goals.reduce((a, g) => a + g.xp, 0), rankBefore, rankAfter, goals, newHulls, heatUnlocked: heatAfter > heatBefore ? heatAfter : null, newBest, dailyLine, summary: s, dailyScore: s.daily ? dailyScore(s) : null };
 }
 export function mergeCodex(c: Codex, seen: RunSummary['seen']) {
   for (const [k, n] of Object.entries(seen.enemies)) c.enemies[k] = (c.enemies[k] || 0) + n;
