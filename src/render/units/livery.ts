@@ -8,6 +8,7 @@
 //   aFx.x = hit flash (0..1), aFx.y = burn (0 = intact, 1 = charred wreck with glowing embers).
 import * as THREE from 'three';
 import type { Detail } from './kit';
+import { flirUniform } from '../flir';
 
 /**
  * rim: the silhouette edge light (fresnel) every unit carries, so it reads as a hard-edged object over
@@ -23,6 +24,8 @@ export const LIVERY = {
   elite: { paint: 0x5a2a26, metal: 0x2e3236, lamp: '#ff5a4e', lampK: 4, rim: '#ff6a4e', rimK: 1.4 },
   /** Salvage: worn hazard-yellow (scrap colour) over steel; lamps glow scrap gold. */
   salvage: { paint: 0x8a6a2a, metal: 0x4c5157, lamp: '#ffc24a', lampK: 3.5, rim: '#ffc24a', rimK: 1.0 },
+  /** Poured concrete (flak towers): pale enough to read as a mass against the night city. */
+  concrete: { paint: 0x8d8b84, metal: 0x5d6064, lamp: '#ff5a4e', lampK: 3, rim: '#ff5a4e', rimK: 1.1 },
   /** Infantry fatigues. */
   fatigue: { paint: 0x46502f, metal: 0x2a2c2a, lamp: '#fff1d6', lampK: 3, rim: '#ff5a4e', rimK: 0.55 },
 } satisfies Record<string, Livery>;
@@ -32,12 +35,21 @@ export const liveryUniforms = { uTime: { value: 0 } };
 let blank: THREE.DataTexture | null = null;
 const blankTex = () => blank ?? (blank = Object.assign(new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1), { needsUpdate: true }));
 
-export interface LiveryOpts { map?: THREE.Texture | null; normalMap?: THREE.Texture | null; detailScale?: number; double?: boolean }
+export interface LiveryOpts { map?: THREE.Texture | null; normalMap?: THREE.Texture | null; detailScale?: number; double?: boolean;
+  /** A ground unit: its depth is lifted over the rooftops (GROUND_LIFT). */ ground?: boolean }
+/**
+ * Ground units are true scale and live at any field point, which is usually inside a city block: the buildings
+ * would bury a 10 m tank. Their vertices are slid along the camera ray toward the eye by GROUND_LIFT world units of
+ * depth: the projected position is unchanged (same pixels), only the depth test now sees them above the roofs,
+ * and still far below the flight plane, so the dreadnought and aircraft still cover them. unitLayer lifts their
+ * lights and halos the same way (liftToward).
+ */
+export const GROUND_LIFT = 110;
 const cache = new Map<string, THREE.MeshStandardMaterial>();
 
 /** A shared livery material (cached by livery + texture). */
 export function liveryMaterial(name: LiveryName, detail: Detail | null, o: LiveryOpts = {}) {
-  const key = `${name}|${o.map?.uuid ?? 'vc'}|${o.detailScale ?? 1}|${o.double ? 1 : 0}`;
+  const key = `${name}|${o.map?.uuid ?? 'vc'}|${o.detailScale ?? 1}|${o.double ? 1 : 0}|${o.ground ? 1 : 0}`;
   const hit = cache.get(key); if (hit) return hit;
   const L: Livery = LIVERY[name];
   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6, metalness: 0.4, side: o.double ? THREE.DoubleSide : THREE.FrontSide });
@@ -47,7 +59,7 @@ export function liveryMaterial(name: LiveryName, detail: Detail | null, o: Liver
   const lamp = new THREE.Color(L.lamp).multiplyScalar(L.lampK), rimC = new THREE.Color(L.rim).multiplyScalar(L.rimK);
   const uniforms = {
     uPaint: { value: new THREE.Color(L.paint) }, uMetal: { value: new THREE.Color(L.metal) }, uLamp: { value: lamp }, uRim: { value: rimC },
-    uGrunge: { value: detail?.grunge ?? blankTex() }, uDetail: { value: 1 / (o.detailScale ?? 22) }, uTime: liveryUniforms.uTime,
+    uGrunge: { value: detail?.grunge ?? blankTex() }, uDetail: { value: 1 / (o.detailScale ?? 22) }, uTime: liveryUniforms.uTime, uFlir: flirUniform,
   };
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms);
@@ -55,10 +67,12 @@ export function liveryMaterial(name: LiveryName, detail: Detail | null, o: Liver
       .replace('#include <common>', `#include <common>
 attribute vec2 aFx; varying vec2 vFx; varying vec3 vObjPos; varying vec3 vObjN;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-vFx = aFx; vObjPos = position; vObjN = normal;`);
+vFx = aFx; vObjPos = position; vObjN = normal;`)
+      .replace('#include <project_vertex>', o.ground ? `#include <project_vertex>
+{ float zf = -mvPosition.z; gl_Position = projectionMatrix * vec4(mvPosition.xyz * (max(zf - ${GROUND_LIFT.toFixed(1)}, zf * 0.5) / zf), 1.0); }` : '#include <project_vertex>');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-uniform vec3 uPaint; uniform vec3 uMetal; uniform vec3 uLamp; uniform vec3 uRim; uniform sampler2D uGrunge; uniform float uDetail; uniform float uTime;
+uniform vec3 uPaint; uniform vec3 uMetal; uniform vec3 uLamp; uniform vec3 uRim; uniform sampler2D uGrunge; uniform float uDetail; uniform float uTime; uniform float uFlir;
 varying vec2 vFx; varying vec3 vObjPos; varying vec3 vObjN;
 float tri(vec3 p, vec3 w) { return texture2D(uGrunge, p.yz).r * w.x + texture2D(uGrunge, p.xz).r * w.y + texture2D(uGrunge, p.xy).r * w.z; }`)
       .replace('#include <map_fragment>', `
@@ -92,9 +106,13 @@ float tri(vec3 p, vec3 w) { return texture2D(uGrunge, p.yz).r * w.x + texture2D(
   // Moonlit fill: the paint stays legible in the dark (chunky, readable silhouettes over a quiet city).
   totalEmissiveRadiance += base * 0.32 * (1.0 - vFx.y);
   float ember = smoothstep(0.58, 0.8, gr2) * (0.55 + 0.45 * sin(uTime * 6.0 + vObjPos.x * 0.7 + vObjPos.z * 0.5));
-  totalEmissiveRadiance += vec3(1.0, 0.32, 0.06) * ember * vFx.y * 1.6;`);
+  totalEmissiveRadiance += vec3(1.0, 0.32, 0.06) * ember * vFx.y * 1.6;
+  // FLIR: a running machine is warmer than the night: the body glows grey-white, lamps and engines hotter,
+  // the lower hull (tracks, wheels, engine bay) hottest; wrecks stay hot while they burn.
+  float bodyHeat = 0.55 + 0.35 * smoothstep(0.7, -0.2, vObjN.y) + lampM * 1.2 + vFx.y * 0.8;
+  totalEmissiveRadiance = mix(totalEmissiveRadiance, vec3(bodyHeat), uFlir);`);
   };
-  m.customProgramCacheKey = () => `livery|${o.map ? 1 : 0}|${o.normalMap ? 1 : 0}`;
+  m.customProgramCacheKey = () => `livery|${o.map ? 1 : 0}|${o.normalMap ? 1 : 0}|${o.ground ? 1 : 0}`;
   cache.set(key, m);
   return m;
 }

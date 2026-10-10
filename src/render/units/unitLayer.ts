@@ -11,16 +11,18 @@
 // become burning, charred wrecks that scroll away with the ground. Nothing pops in or out.
 import * as THREE from 'three';
 import type { Engine, FrameCtx, Layer } from '../engine';
-import { FIELD_W, FIELD_H } from '../engine';
+import { FIELD_W, FIELD_H, FLIGHT } from '../engine';
 import type { Enemy } from '../../game/combat';
 import type { EnemyType } from '../../data/enemies';
 import { boomFx } from '../../game/vfx';
-import { rgb, Shape, DarkShape } from '../fx/quads';
+import { rgb, Shape, DarkShape, type QuadBatch } from '../fx/quads';
 import { loadUnitsKit, unitsKitReady } from './kit';
-import { liveryUniforms } from './livery';
+import { liveryUniforms, GROUND_LIFT } from './livery';
 import { buildSpecs, type UnitSpec, type PartDef } from './specs';
 import { Particles, PK } from './particles';
 import type { InstPool } from './pool';
+import { SCALE_STATE } from './scale';
+import { FLIR } from '../flir';
 
 const TAU = Math.PI * 2;
 const enum St { Alive = 0, Falling = 1, Wreck = 2, Vanish = 3, Corpse = 4 }
@@ -32,24 +34,30 @@ interface Vis {
   yaw: number; pitch: number; roll: number; sc: number; heads: Float32Array; rack: number;
   flash: number; burn: number; age: number; born: number; seed: number;
   state: St; st: number; dur: number; spin: number; rollV: number; h: number; sink: number;
-  lastCd: number; lastBurst: number; muzzleT: number; recoil: number; emit: number;
+  lastCd: number; lastBurst: number; muzzleT: number; recoil: number; emit: number; barrel: number; smokeT: number;
   pop: Float32Array; trail: Float32Array; trailN: number; trailHead: number;
 }
 
 // Scratch objects (no per-frame allocation).
-const U = new THREE.Matrix4(), SQ = new THREE.Matrix4(), SQ2 = new THREE.Matrix4(), P = new THREE.Matrix4(), T1 = new THREE.Matrix4(), R1 = new THREE.Matrix4(), S1 = new THREE.Matrix4(), H = new THREE.Matrix4();
+const U = new THREE.Matrix4(), UB = new THREE.Matrix4(), SQ = new THREE.Matrix4(), SQ2 = new THREE.Matrix4(), SQ3 = new THREE.Matrix4(), P = new THREE.Matrix4(), T1 = new THREE.Matrix4(), R1 = new THREE.Matrix4(), S1 = new THREE.Matrix4(), H = new THREE.Matrix4();
 const q = new THREE.Quaternion(), eu = new THREE.Euler(0, 0, 0, 'YXZ'), vpos = new THREE.Vector3(), vsc = new THREE.Vector3();
 const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3(), vfwd = new THREE.Vector3();
 const C = {
   port: rgb('#ff2a1f'), stbd: rgb('#33ff77'), strobe: rgb('#ffffff'), beacon: rgb('#ff3b2e'), engine: rgb('#ffb070'), engineHot: rgb('#ff6a3d'),
   head: rgb('#fff1d6'), cone: rgb('#ffe2b0'), scrap: rgb('#ffc24a'), deck: rgb('#ffcf8a'), fire: rgb('#ff7a2d'), fireHot: rgb('#ffd27a'),
   muzzle: rgb('#ffcf7a'), contrail: rgb('#b9c6d4'), shadow: rgb('#000000'), mark: rgb('#ff5a4e'), markScrap: rgb('#ffc24a'),
+  /** Thermal hot spots: warm white with a breath of the hostile red family (never threat magenta). */
+  heat: rgb('#ffe6d8'), heatRim: rgb('#ff8a70'),
 };
 /**
- * Display scale over the gameplay size: enemies are drawn chunky (Blackhawk Striker readable) while the city
- * below is shrunk to sell the dreadnought's size. Hit radii are unchanged (src/data/enemies.ts).
+ * TRUE SCALE (src/render/units/scale.ts): every model is drawn at its real size in metres (spec.scale), one world
+ * unit per metre, on the flight plane or on the ground far below. Nothing is cheated bigger; what keeps a 6-pixel
+ * tank readable is light (heat cores, lamps, muzzle flashes, dust, contrails, shadows) plus the tactical symbology
+ * the HUD draws over it (symbology.ts). Hit radii are unchanged (src/data/enemies.ts).
+ *
+ * Lights get a floor in screen units so a lamp stays a point of light at any size: LIGHT_MIN[kind] screen units.
  */
-const DISP_AIR = 1.25, DISP_GROUND = 1.4;
+const LIGHT_MIN: Record<string, number> = { port: 2.6, stbd: 2.6, strobe: 3.2, beacon: 3, engine: 3.4, head: 2.2, scrap: 6, deck: 1.6, heat: 3.2 };
 /** Air units' drop shadows land this far (field units) down-right of them: the moon is up-left. */
 const SHADOW_DX = 34, SHADOW_DY = 44;
 const ease = (t: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
@@ -93,7 +101,7 @@ export class UnitLayer implements Layer {
     Object.assign(v, {
       en, spec, type: en.type, stamp: this.frame, x: en.x, y: en.y, px: en.x, py: en.y, vx: en.vx ?? 0, vy: 0, alt: 0,
       yaw: 0, pitch: 0, roll: 0, sc: 1, rack: 0, flash: 0, burn: 0, age: 0, born: onscreen ? 1 : 0, seed: Math.random() * 1000,
-      state: St.Alive, st: 0, dur: 0, spin: 0, rollV: 0, h: 1, sink: 0, lastCd: en.cd, lastBurst: en.burst ?? 0, muzzleT: 0, recoil: 0, emit: 0,
+      state: St.Alive, st: 0, dur: 0, spin: 0, rollV: 0, h: 1, sink: 0, lastCd: en.cd, lastBurst: en.burst ?? 0, muzzleT: 0, recoil: 0, emit: 0, barrel: 0, smokeT: 0,
       trailN: 0, trailHead: 0,
     });
     v.pop.fill(0);
@@ -162,7 +170,8 @@ export class UnitLayer implements Layer {
     for (const v of this.vis.values()) this.draw(v, e);
     for (const v of this.dying) this.draw(v, e);
     for (const p of this.pools) p.end();
-    const k = e.groundScale;
+    const k = e.groundScale; SCALE_STATE.k = k;
+    SCALE_STATE.camFx = e.camPos.x + FIELD_W / 2; SCALE_STATE.camFy = e.camPos.z + FIELD_H / 2; SCALE_STATE.camH = e.camPos.y - FLIGHT;
     this.parts.update(dt, S.scroll * k, S.scroll);
     this.parts.draw(e);
   }
@@ -196,13 +205,27 @@ export class UnitLayer implements Layer {
       v.alt = Math.abs(Math.sin(v.age * 9 + v.seed)) * 0.6;
     }
     v.sc = v.born ? Math.min(1, ease(v.age / 0.35) * 1.08) : 1;
+    (en as { visAlt?: number }).visAlt = air ? v.alt : 0; // the HUD symbology follows a descending aircraft
     if (v.born && v.age < 0.35) v.flash = Math.max(v.flash, 1 - v.age / 0.35);
     // firing: cooldown reset or a burst shot means a muzzle event
     const fired = (en.cd ?? 0) > v.lastCd + 0.4 || (en.burst ?? 0) < v.lastBurst;
     v.lastCd = en.cd ?? 0; v.lastBurst = en.burst ?? 0;
-    if (fired && spec.muzzles.length) { v.muzzleT = 0.08; v.recoil = 1; }
-    v.muzzleT = Math.max(0, v.muzzleT - dt); v.recoil = Math.max(0, v.recoil - dt * 4);
-    if (en.type === 'sam' && fired) { this.worldOf(v, 0, vb.set(0, 9, 2)); for (let i = 0; i < 6; i++) this.parts.add(PK.Dust, vb.x, vb.y, vb.z, (Math.random() - 0.5) * 30, 8, (Math.random() - 0.5) * 30, 1.4, 14 * this.engine.groundScale, 1.2, 1); }
+    if (fired && spec.muzzles.length) { v.muzzleT = 0.08; v.recoil = 1; v.barrel = 1; }
+    v.muzzleT = Math.max(0, v.muzzleT - dt); v.recoil = Math.max(0, v.recoil - dt * 4); v.barrel = Math.max(0, v.barrel - dt * 0.4);
+    // damaged: the engine smokes (thicker the closer to death), from the first heat core
+    const hurt = en.maxHp > 0 ? 1 - en.hp / en.maxHp : 0;
+    if (hurt > 0.45 && dt > 0 && v.type !== 'infantry') {
+      v.smokeT -= dt;
+      if (v.smokeT <= 0) {
+        v.smokeT = 0.16 / hurt;
+        let hp = -1; for (let i = 0; i < spec.lights.length; i++) if (spec.lights[i].kind === 'heat') { hp = i; break; }
+        this.worldOf(v, -1, hp >= 0 ? vb.copy(spec.lights[hp].p) : vb.set(0, 0, 0));
+        const fs = this.fxs(v);
+        this.parts.add(PK.Smoke, vb.x, vb.y + 1, vb.z, 0, 10, 0, 1.6, fs * (0.5 + hurt * 0.6), 1.2, 1);
+        if (hurt > 0.75 && Math.random() < 0.5) this.parts.add(PK.Fire, vb.x, vb.y + 1, vb.z, 0, 6, 0, 0.3, fs * 0.5, 0.5, 1);
+      }
+    }
+    if (en.type === 'sam' && fired) { this.worldOf(v, 0, vb.set(0, 9, 2)); for (let i = 0; i < 6; i++) this.parts.add(PK.Dust, vb.x, vb.y, vb.z, (Math.random() - 0.5) * 30, 8, (Math.random() - 0.5) * 30, 1.4, 22, 1.2, 1); }
     // track dust
     if (spec.tracks && Math.abs(v.vx) > 4 && dt > 0) {
       v.emit += dt;
@@ -210,8 +233,9 @@ export class UnitLayer implements Layer {
         v.emit -= 0.06;
         for (const s of [-1, 1]) {
           this.worldOf(v, -1, vb.set(s * spec.tracks, 1, -spec.size * 0.85));
-          const k = this.engine.groundScale;
-          this.parts.add(PK.Dust, vb.x, vb.y, vb.z, (Math.random() - 0.5) * 10 * k, 2, (Math.random() - 0.5) * 10 * k, 1.1, spec.size * 0.5 * k, 1.4, 1);
+          // armour throws a dust plume far bigger than itself: the first thing the eye finds
+          const fs = this.fxs(v);
+          this.parts.add(PK.Dust, vb.x, vb.y, vb.z, (Math.random() - 0.5) * 8, 2, (Math.random() - 0.5) * 8, 1.6, Math.max(6, fs * 1.6), 1.6, 1);
         }
       }
     }
@@ -220,7 +244,7 @@ export class UnitLayer implements Layer {
   /* ------------------------------------------------------------ deaths */
   private startDeath(v: Vis, S: FrameCtx['S']) {
     v.st = 0; v.flash = 0;
-    const big = v.spec.size;
+    const big = this.fxs(v);
     if (v.type === 'canister') { v.state = St.Vanish; v.dur = 0.3; }
     else if (v.type === 'infantry') { v.state = St.Corpse; v.dur = 4; }
     else if (v.spec.air) {
@@ -256,18 +280,18 @@ export class UnitLayer implements Layer {
         // smoke trail and fire
         this.position(v, vpos);
         v.emit += dt;
-        const step = v.spec.size > 30 ? 0.02 : 0.035;
+        const step = this.fxs(v) > 30 ? 0.02 : 0.035;
         while (v.emit > step) {
           v.emit -= step;
-          const s = v.spec.size;
+          const s = this.fxs(v);
           this.parts.add(PK.Smoke, vpos.x + (Math.random() - 0.5) * s * 0.4, vpos.y - s * 0.3, vpos.z + (Math.random() - 0.5) * s * 0.4, 0, 6, 0, 1.6 + s * 0.03, s * 0.55, 1.4, 1 - v.h);
           this.parts.add(PK.Fire, vpos.x, vpos.y + 2, vpos.z, (Math.random() - 0.5) * 20, 0, (Math.random() - 0.5) * 20, 0.35, s * 0.9, 0.6, 1 - v.h);
         }
         if (f >= 1) {
           // impact: flash and fireball on the ground, then a burning wreck that scrolls with the city
-          boomFx(v.x, v.y, Math.min(48, v.spec.size * 1.1), '#ff8a3d', true);
+          boomFx(v.x, v.y, Math.max(10, Math.min(48, this.fxs(v) * 0.9)), '#ff8a3d', true);
           v.state = St.Wreck; v.st = 0; v.h = 0; v.burn = 1;
-          v.pitch = (Math.random() - 0.5) * 0.4; v.roll = (Math.random() - 0.5) * 0.7; v.sink = v.spec.size * 0.12;
+          v.pitch = (Math.random() - 0.5) * 0.4; v.roll = (Math.random() - 0.5) * 0.7; v.sink = this.fxs(v) * 0.12;
           for (let i = 0; i < 14; i++) { const a = Math.random() * TAU, sp = 40 + Math.random() * 90; this.parts.add(PK.Spark, vpos.x, 2, vpos.z, Math.cos(a) * sp, 60 + Math.random() * 120, Math.sin(a) * sp, 0.6 + Math.random() * 0.5, 3, 0, 1); }
         }
         return true;
@@ -284,7 +308,7 @@ export class UnitLayer implements Layer {
         const heat = Math.max(0, 1 - v.st / 14);
         if (heat > 0) {
           this.position(v, vpos); v.emit += dt;
-          const step = 0.08 / (0.4 + heat), s = v.spec.size * (v.spec.air ? 1 : k);
+          const step = 0.08 / (0.4 + heat), s = this.fxs(v);
           while (v.emit > step) {
             v.emit -= step;
             this.parts.add(PK.Smoke, vpos.x + (Math.random() - 0.5) * s * 0.5, vpos.y + 2, vpos.z + (Math.random() - 0.5) * s * 0.5, 0, 22 + Math.random() * 12, 0, 2.2, s * 0.7, 1.0, 1);
@@ -297,6 +321,9 @@ export class UnitLayer implements Layer {
     return false;
   }
 
+  /** Effects half-size in metres (smoke, fire, dust), with a floor so a 10 m tank still burns visibly. */
+  private fxs(v: Vis) { return Math.max(v.spec.air ? 5 : 6, v.spec.size * v.spec.scale); }
+
   /* ------------------------------------------------------------ transforms */
   /** World position of the unit root. */
   private position(v: Vis, out: THREE.Vector3) {
@@ -305,13 +332,13 @@ export class UnitLayer implements Layer {
       if (v.state === St.Falling) { e.toFlight(v.x, v.y, 0, va); e.toGround(v.x, v.y, vb); out.lerpVectors(vb, va, v.h); out.y += 6; return out; }
       return e.toFlight(v.x, v.y, v.alt, out);
     }
-    e.toGround(v.x, v.y, out); out.y += (v.alt - v.sink) * (v.spec.air ? 1 : e.groundScale);
+    e.toGround(v.x, v.y, out); out.y += (v.alt - v.sink) * (v.spec.air ? 1 : v.spec.scale);
     if (v.spec.air) out.y += 2;
     return out;
   }
   /** Unit root matrix into U. */
   private rootMatrix(v: Vis) {
-    const air = v.spec.air, s = (air ? DISP_AIR : this.engine.groundScale * DISP_GROUND) * v.sc;
+    const s = v.spec.scale * v.sc;
     this.position(v, vpos);
     q.setFromEuler(eu.set(v.pitch, v.yaw, v.roll, 'YXZ'));
     return U.compose(vpos, q, vsc.set(s, s, s));
@@ -357,100 +384,127 @@ export class UnitLayer implements Layer {
     return P.multiply(T1.makeTranslation(-p.origin.x, -p.origin.y, -p.origin.z));
   }
 
+  /** True while drawing a unit that sits in the city: its quads are lifted over the rooftops (see GROUND_LIFT). */
+  private lift = false;
+  /** Adds a quad to a batch; for ground units it slides it toward the camera by GROUND_LIFT along the eye ray
+   *  (same pixels, shallower depth), scaling its size to match. */
+  private gq(b: QuadBatch, x: number, y: number, z: number, rot: number, len: number, wid: number, c: readonly number[], a: number, shape: number) {
+    if (this.lift) {
+      const cp = this.engine.camPos, dx = x - cp.x, dy = y - cp.y, dz = z - cp.z, d = Math.hypot(dx, dy, dz);
+      const t = Math.max(0.5, (d - GROUND_LIFT) / d);
+      x = cp.x + dx * t; y = cp.y + dy * t; z = cp.z + dz * t; len *= t; wid *= t;
+    }
+    b.add(x, y, z, rot, len, wid, c, a, shape);
+  }
+
   /* ------------------------------------------------------------ drawing */
   private draw(v: Vis, e: Engine) {
-    const spec = v.spec, air = spec.air, k = air ? DISP_AIR : e.groundScale * DISP_GROUND, alive = v.state === St.Alive;
-    this.rootMatrix(v);
-    const wreckAir = air && v.state === St.Wreck;
-    for (const p of spec.parts) {
-      const isRotor = p.anim === 'rotor' || p.anim === 'rotorV';
-      if (isRotor && wreckAir) continue; // blades are gone
-      if (spec.squad) {
-        // A squad: the same part at each figure's offset, scaled up so it reads from altitude.
-        const sq = spec.squadScale ?? 1, m = this.partMatrix(v, p);
-        for (let i = 0; i < spec.squad.length; i++) {
-          const o = spec.squad[i];
-          SQ.makeTranslation(o.x, o.y, o.z).multiply(SQ2.makeScale(sq, sq, sq));
-          p.pool.push(SQ2.multiplyMatrices(m, SQ), v.flash, v.burn);
-        }
-        continue;
+    const spec = v.spec, air = spec.air, alive = v.state === St.Alive;
+    /** World units per screen unit on this unit's layer (the city is ~1.65x farther from the camera). */
+    const px = air ? 1 : e.groundScale;
+    this.rootMatrix(v); UB.copy(U);
+    // ground units (and wrecks lying in the city) draw their quads lifted over the rooftops like their meshes
+    this.lift = !air || (v.state === St.Wreck && v.h <= 0);
+    const wreckAir = air && v.state === St.Wreck, slots = spec.squad, n = slots ? slots.length : 1;
+    const t = this.time + v.seed, s = spec.scale * v.sc, flir = FLIR.k;
+    // parts that stand once at the origin (a battery's revetment)
+    if (slots) for (const p of spec.parts) if (p.once) p.pool.push(this.partMatrix(v, p), v.flash, v.burn);
+    for (let si = 0; si < n; si++) {
+      if (slots) { const sl = slots[si]; SQ.makeTranslation(sl.x, 0, sl.z).multiply(SQ2.makeRotationY(sl.yaw)).multiply(SQ3.makeScale(sl.s, sl.s, sl.s)); U.multiplyMatrices(UB, SQ); }
+      for (const p of spec.parts) {
+        if (slots && p.once) continue;
+        const isRotor = p.anim === 'rotor' || p.anim === 'rotorV';
+        if (isRotor && wreckAir) continue; // blades are gone
+        p.pool.push(this.partMatrix(v, p), v.flash, isRotor ? 0 : v.burn);
       }
-      p.pool.push(this.partMatrix(v, p), v.flash, isRotor ? 0 : v.burn);
+      if (alive) this.lights(v, e, px, s, t, flir);
     }
-    const t = this.time + v.seed, s = k * v.sc;
+    U.copy(UB);
     // ----- contrails (jets): wingtip history drifting back with the air
     if (v.type === 'jet' && alive) this.contrail(v, e);
     if (!alive) {
-      if (v.state === St.Falling || (v.state === St.Wreck && v.st < 14)) {
-        // flickering fire light on the wreck
-        const heat = v.state === St.Falling ? 1 : Math.max(0, 1 - v.st / 14);
+      if (v.state === St.Falling || (v.state === St.Wreck && v.st < 22)) {
+        // flickering fire light on the wreck, and the hull stays hot long after the flames die
+        const heat = v.state === St.Falling ? 1 : Math.max(0, 1 - v.st / 14), warm = v.state === St.Falling ? 1 : Math.max(0, 1 - v.st / 22);
         this.position(v, vpos);
-        const fl = 0.6 + 0.4 * Math.sin(t * 23) * Math.sin(t * 7.3);
-        e.glow.add(vpos.x, vpos.y + 3, vpos.z, 0, spec.size * 3.2 * s * heat, spec.size * 3.2 * s * heat, C.fire, 0.35 * fl * heat, Shape.Soft);
+        const fl = 0.6 + 0.4 * Math.sin(t * 23) * Math.sin(t * 7.3), fs = this.fxs(v);
+        this.gq(e.glow, vpos.x, vpos.y + 3, vpos.z, 0, fs * 4.5 * heat, fs * 4.5 * heat, C.fire, 0.35 * fl * heat, Shape.Soft);
+        const hc = Math.max(fs * 0.9, 3.5 * px);
+        this.gq(e.glow, vpos.x, vpos.y + 2, vpos.z, 0, hc, hc, C.heat, (0.35 + 0.5 * flir) * warm, Shape.Hot);
       }
-      if (v.state === St.Vanish) { this.position(v, vpos); e.glow.add(vpos.x, vpos.y, vpos.z, 0, 60 * (1 - v.st / v.dur), 60 * (1 - v.st / v.dur), C.scrap, 1, Shape.Hot); }
+      if (v.state === St.Vanish) { this.position(v, vpos); this.gq(e.glow, vpos.x, vpos.y, vpos.z, 0, 60 * (1 - v.st / v.dur), 60 * (1 - v.st / v.dur), C.scrap, 1, Shape.Hot); }
       return;
     }
-    // ----- lights
-    const fwdYaw = v.yaw;
+    // ----- cut-out: a dark halo under every unit so its lights read over the city; aircraft cast a drop shadow
+    // on the city far below (offset down-right, away from the moon), true to size, which sells their altitude.
+    // Target markings are the HUD's job now (symbology.ts): no brackets in the 3D scene.
+    this.position(v, vpos);
+    const fade = v.sc, halo = Math.max(spec.mark * s * 2.4, 12 * px), fwdYaw = v.yaw;
+    if (!air) this.gq(e.dark, vpos.x, 1.5, vpos.z, fwdYaw, halo, halo, C.shadow, 0.6 * fade, DarkShape.Soft);
+    else {
+      this.gq(e.dark, vpos.x, vpos.y - 8, vpos.z, 0, halo, halo, C.shadow, 0.45 * fade, DarkShape.Soft);
+      const sh = 1 - v.alt / 900;
+      if (sh > 0) {
+        e.toGround(v.x + SHADOW_DX, v.y + SHADOW_DY, vb);
+        const ss = spec.size * s;
+        this.gq(e.dark, vb.x, 1.6, vb.z, Math.atan2(Math.cos(fwdYaw), Math.sin(fwdYaw)), Math.max(ss * 2.2, 6), Math.max(ss * 1.7, 5), C.shadow, 0.55 * sh * fade, DarkShape.Soft);
+      }
+    }
+  }
+
+  /** Lights, heat cores and muzzle flashes of one model (U is that model's frame). */
+  private lights(v: Vis, e: Engine, px: number, s: number, t: number, flir: number) {
+    const spec = v.spec, air = spec.air, fwdYaw = v.yaw;
     for (let i = 0; i < spec.lights.length; i++) {
       const L = spec.lights[i];
       vb.copy(L.p);
       if (L.head >= 0) { this.headMatrix(v, L.head); vb.applyMatrix4(H); } else vb.applyMatrix4(U);
-      const sz = L.size * s;
+      const sz = Math.max(L.size * s, LIGHT_MIN[L.kind] * px);
       switch (L.kind) {
-        case 'port': e.glow.add(vb.x, vb.y + 1, vb.z, 0, sz, sz, C.port, 0.95, Shape.Hot); break;
-        case 'stbd': e.glow.add(vb.x, vb.y + 1, vb.z, 0, sz, sz, C.stbd, 0.85, Shape.Hot); break;
-        case 'strobe': { const ph = (t * 0.85) % 1; if (ph < 0.035 || (ph > 0.11 && ph < 0.145)) e.glow.add(vb.x, vb.y + 1.5, vb.z, 0, sz * 2.2, sz * 2.2, C.strobe, 1.2, Shape.Hot); break; }
-        case 'beacon': { const a = Math.pow(0.5 + 0.5 * Math.sin(t * 4.2), 3); e.glow.add(vb.x, vb.y + 1, vb.z, 0, sz * 1.6, sz * 1.6, C.beacon, a, Shape.Hot); break; }
-        case 'deck': { const a = ((i * 0.13 - t * 1.6) % 1 + 1) % 1; e.glow.add(vb.x, vb.y + 1, vb.z, 0, sz, sz, C.deck, 0.25 + 0.75 * Math.pow(a, 6), Shape.Hot); break; }
-        case 'scrap': { const a = 0.45 + 0.35 * Math.sin(t * 3.1); e.glow.add(vb.x, vb.y + 1, vb.z, 0, sz, sz, C.scrap, a * (v.type === 'cache' ? 2 : 0.6), v.type === 'cache' ? Shape.Hot : Shape.Soft); if (v.type === 'cache' && Math.sin(t * 5.5) > 0.6) e.glow.add(vb.x, vb.y + 1, vb.z, 0, sz * 4, sz * 4, C.scrap, 0.5, Shape.Soft); break; }
+        case 'port': this.gq(e.glow, vb.x, vb.y + 1, vb.z, 0, sz, sz, C.port, 0.95, Shape.Hot); break;
+        case 'stbd': this.gq(e.glow, vb.x, vb.y + 1, vb.z, 0, sz, sz, C.stbd, 0.85, Shape.Hot); break;
+        case 'strobe': { const ph = (t * 0.85) % 1; if (ph < 0.035 || (ph > 0.11 && ph < 0.145)) this.gq(e.glow, vb.x, vb.y + 1.5, vb.z, 0, sz * 2.2, sz * 2.2, C.strobe, 1.2, Shape.Hot); break; }
+        case 'beacon': { const a = Math.pow(0.5 + 0.5 * Math.sin(t * 4.2), 3); this.gq(e.glow, vb.x, vb.y + 1, vb.z, 0, sz * 1.6, sz * 1.6, C.beacon, a, Shape.Hot); break; }
+        case 'deck': { const a = ((i * 0.13 - t * 1.6) % 1 + 1) % 1; this.gq(e.glow, vb.x, vb.y + 1, vb.z, 0, sz, sz, C.deck, 0.25 + 0.75 * Math.pow(a, 6), Shape.Hot); break; }
+        case 'scrap': { const a = 0.45 + 0.35 * Math.sin(t * 3.1); this.gq(e.glow, vb.x, vb.y + 1, vb.z, 0, sz, sz, C.scrap, a * (v.type === 'cache' ? 2 : 0.6), v.type === 'cache' ? Shape.Hot : Shape.Soft); if (v.type === 'cache' && Math.sin(t * 5.5) > 0.6) this.gq(e.glow, vb.x, vb.y + 1, vb.z, 0, sz * 4, sz * 4, C.scrap, 0.5, Shape.Soft); break; }
+        case 'heat': {
+          // thermal core: small and crisp; hotter while moving and after firing, white-hot in the FLIR view
+          const work = Math.min(1, Math.hypot(v.vx, v.vy) / 40) * 0.15 + v.barrel * 0.25;
+          const a = 0.5 + work + flir * 0.7, c = sz * (1 + flir * 0.25);
+          this.gq(e.glow, vb.x, vb.y + 1, vb.z, 0, c, c, C.heat, a, Shape.Hot);
+          this.gq(e.glow, vb.x, vb.y + 0.5, vb.z, 0, c * 2.4, c * 2.4, C.heatRim, 0.1 + flir * 0.25, Shape.Soft);
+          break;
+        }
         case 'engine': {
           // engine core plus an exhaust plume whose length follows airspeed (hovering craft barely show one)
           const fl = 0.85 + 0.15 * Math.sin(t * 40 + i), sp = Math.min(1, Math.hypot(v.vx, v.vy) / 260);
-          e.glow.add(vb.x, vb.y, vb.z, 0, sz * 0.8 * fl, sz * 0.8 * fl, C.engine, 0.9, Shape.Hot);
+          this.gq(e.glow, vb.x, vb.y, vb.z, 0, sz * 0.8 * fl, sz * 0.8 * fl, C.engine, 0.9, Shape.Hot);
           vfwd.set(Math.sin(fwdYaw), 0, Math.cos(fwdYaw));
           const len = sz * (0.7 + 2.6 * sp);
-          e.glow.add(vb.x - vfwd.x * len * 0.5, vb.y - 0.5, vb.z - vfwd.z * len * 0.5, Math.atan2(vfwd.z, vfwd.x), len, sz * 0.45, C.engineHot, (0.35 + 0.4 * sp) * fl, Shape.Streak);
+          this.gq(e.glow, vb.x - vfwd.x * len * 0.5, vb.y - 0.5, vb.z - vfwd.z * len * 0.5, Math.atan2(vfwd.z, vfwd.x), len, sz * 0.45, C.engineHot, (0.35 + 0.4 * sp) * fl, Shape.Streak);
           break;
         }
         case 'head': {
-          // headlamp and its cone on the ground ahead
-          const yaw = v.type === 'infantry' ? fwdYaw : fwdYaw;
-          vfwd.set(Math.sin(yaw), 0, Math.cos(yaw));
-          e.glow.add(vb.x, vb.y + 0.5, vb.z, 0, sz * 1.4, sz * 1.4, C.head, 0.9, Shape.Hot);
-          const inf = v.type === 'infantry', len = (inf ? 22 : 52) * s, wid = (inf ? 9 : 22) * s;
-          e.glow.add(vb.x + vfwd.x * len * 0.5, 0.6, vb.z + vfwd.z * len * 0.5, Math.atan2(vfwd.z, vfwd.x), len, wid, C.cone, inf ? 0.22 : 0.14, Shape.Soft);
+          // headlamp and its beam on the ground ahead, in metres (a tank's beams reach ~40 m)
+          vfwd.set(Math.sin(fwdYaw), 0, Math.cos(fwdYaw));
+          this.gq(e.glow, vb.x, vb.y + 0.5, vb.z, 0, sz * 1.4, sz * 1.4, C.head, 0.9, Shape.Hot);
+          const inf = v.type === 'infantry', len = inf ? 9 : 40, wid = inf ? 4 : 15;
+          this.gq(e.glow, vb.x + vfwd.x * len * 0.5, 0.6, vb.z + vfwd.z * len * 0.5, Math.atan2(vfwd.z, vfwd.x), len, wid, C.cone, (inf ? 0.2 : 0.16) * (1 - flir * 0.7), Shape.Soft);
           break;
         }
       }
     }
-    // ----- muzzle flashes
-    if (v.muzzleT > 0 && spec.muzzles.length) {
-      const n = spec.heads.length ? spec.heads.length : 1;
-      for (let h = 0; h < n; h++) for (const m of spec.muzzles) {
+    // ----- muzzle flashes, and barrels that stay hot after firing
+    if (spec.muzzles.length && (v.muzzleT > 0 || v.barrel > 0.05)) {
+      const nh = spec.heads.length ? spec.heads.length : 1, inf = v.type === 'infantry';
+      for (let h = 0; h < nh; h++) for (const m of spec.muzzles) {
         vb.copy(m);
         if (spec.heads.length) { this.headMatrix(v, h); vb.applyMatrix4(H); } else vb.applyMatrix4(U);
-        const z = (air ? 22 : 14) * s * (0.8 + Math.random() * 0.4);
-        e.glow.add(vb.x, vb.y + 1, vb.z, Math.random() * TAU, z, z, C.muzzle, 1.2, Shape.Hot);
-      }
-    }
-    // ----- hostile marking (docs/ART.md "Readability"): every unit is cut out of the city by a dark halo;
-    // ground units also carry thin target brackets; aircraft cast a drop shadow on the city far below.
-    this.position(v, vpos);
-    const mk = spec.mark * s, fade = v.sc;
-    if (!air) {
-      const salvage = v.type === 'cache' || v.type === 'wreck';
-      e.dark.add(vpos.x, 1.2 * k, vpos.z, fwdYaw, mk * 2.8, mk * 2.8, C.shadow, 0.78 * fade, DarkShape.Soft);
-      const pulse = 0.85 + 0.15 * Math.sin(t * 3);
-      // Infantry come in clumps of squads: overlapping brackets turn to confetti, so they get the halo only.
-      if (v.type !== 'infantry') e.glow.add(vpos.x, 1.6 * k, vpos.z, 0, mk * 2.0, mk * 2.0, salvage ? C.markScrap : C.mark, (salvage ? 0.6 : 0.75) * pulse * fade, Shape.Bracket);
-    } else {
-      e.dark.add(vpos.x, vpos.y - 8, vpos.z, 0, mk * 2.6, mk * 2.6, C.shadow, 0.55 * fade, DarkShape.Soft);
-      const sh = 1 - v.alt / 900;
-      if (sh > 0) {
-        e.toGround(v.x + SHADOW_DX, v.y + SHADOW_DY, vb);
-        e.dark.add(vb.x, 1.6, vb.z, Math.atan2(Math.cos(fwdYaw), Math.sin(fwdYaw)), spec.size * 2.3 * k * 0.55, spec.size * 1.7 * k * 0.55, C.shadow, 0.5 * sh * fade, DarkShape.Soft);
+        if (v.muzzleT > 0) {
+          const z = Math.max((air ? 22 : 14) * s, (inf ? 3.5 : air ? 9 : 7) * px) * (0.8 + Math.random() * 0.4);
+          this.gq(e.glow, vb.x, vb.y + 1, vb.z, Math.random() * TAU, z, z, C.muzzle, 1.2, Shape.Hot);
+        }
+        if (v.barrel > 0.05 && !inf) { const z = 2.4 * px; this.gq(e.glow, vb.x, vb.y + 1, vb.z, 0, z, z, C.heatRim, v.barrel * (0.5 + flir), Shape.Hot); }
       }
     }
   }

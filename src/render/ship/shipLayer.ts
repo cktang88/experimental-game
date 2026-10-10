@@ -7,6 +7,7 @@ import type { Engine, FrameCtx, Layer } from '../engine';
 import { FIELD_W, FIELD_H } from '../engine';
 import { buildToGhost, derive, starterBuild, type Derived } from '../../data/parts';
 import { rgb, Shape, DarkShape } from '../fx/quads';
+const DRONE_HULL = rgb('#2a3038');
 import { clamp, angDiff } from '../../util/rng';
 import { dronePos, fireLog, manualAimFor, type Ent } from '../../game/combat';
 import { addFx, FIRE } from '../../game/vfx';
@@ -119,7 +120,13 @@ export class ShipLayer implements Layer {
       this.damage(r, P.hp / P.dv.maxHp, rdt, t, 1, false);
       if (P.flash > 0) { e.toFlight(P.x, P.y, 30, v); e.glow.add(v.x, v.y, v.z, 0, P.dv.width * 1.5, P.dv.len * 1.2, rgb('#ffffff'), P.flash * 0.3, Shape.Soft); }
       if (P.shield > 0) { e.toFlight(P.x, P.y, 8, v); e.glow.add(v.x, v.y, v.z, 0, P.dv.width + 40, P.dv.len + 40, rgb('#4fd1e8'), (0.3 + 0.4 * (P.shield / P.dv.shieldMax)) * (P.lastHit < 0.2 ? 1.8 : 1), Shape.Ring); }
-      for (let i = 0; i < P.dv.drones; i++) { const p = dronePos(i, P.dv.drones); e.toFlight(p.x, p.y, 10, v); e.glow.add(v.x, v.y, v.z, 0, 22, 22, rgb('#7fb6ff'), 0.95, Shape.Hot); e.glow.add(v.x, v.y, v.z, 0, 5, 5, rgb('#ffffff'), 0.9, Shape.Hot); }
+      // Escort drones at warship scale: a small dark airframe, a pinpoint engine and a blinking strobe (no glow balls).
+      for (let i = 0; i < P.dv.drones; i++) {
+        const p = dronePos(i, P.dv.drones); e.toFlight(p.x, p.y, 10, v);
+        e.dark.add(v.x, v.y, v.z, i, 6, 6, DRONE_HULL, 0.85, DarkShape.Rect);
+        e.glow.add(v.x, v.y, v.z, 0, 4, 4, rgb('#7fb6ff'), 0.7, Shape.Hot);
+        if (((t * 1.6 + i * 0.37) % 1) < 0.12) e.glow.add(v.x, v.y, v.z, 0, 3, 3, rgb('#ffffff'), 0.9, Shape.Hot);
+      }
     } else if (this.player) this.player.model.root.visible = false;
 
     const Bo = S.boss;
@@ -277,9 +284,9 @@ export class ShipLayer implements Layer {
         e.glow.add(v.x + d.x * rr, v.y - 4, v.z + d.z * rr, 0, rr * 6, rr * 6, rgb(L.engine), 0.22 * thrust, Shape.Soft);
       } else {
         // Manoeuvring jets fire against lateral motion.
-        const side = Math.sign(n.x) * (hostile ? -1 : 1), q = n.r > 2 ? 0.6 : clamp((side < 0 ? r.vx : -r.vx) / 260, 0, 1);
+        const aft = n.aft ?? n.r > 2, side = Math.sign(n.x) * (hostile ? -1 : 1), q = aft ? 0.6 : clamp((side < 0 ? r.vx : -r.vx) / 260, 0, 1);
         if (q > 0.05) {
-          const ox = n.r > 2 ? d.x : Math.sign(n.x) * (hostile ? -1 : 1), oz = n.r > 2 ? d.z : 0, rr = n.r * s;
+          const ox = aft ? d.x : Math.sign(n.x) * (hostile ? -1 : 1), oz = aft ? d.z : 0, rr = n.r * s;
           e.glow.add(v.x + ox * rr * 2, v.y, v.z + oz * rr * 2, Math.atan2(oz, ox), rr * 5 * q * fl, rr * 1.2, rgb(L.engine), 0.7 * q, Shape.Streak);
         }
       }

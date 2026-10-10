@@ -11,6 +11,8 @@ import { EN } from '../data/enemies';
 import { wCd, autoMounts, LAYERS_TAG, type Part, type Mount } from '../data/parts';
 import { OVERDRIVES, type OverdriveKind } from '../data/hulls';
 import { drawIcon } from '../ui/icons';
+import { fieldToScreen, screenScale } from './view';
+import { drawSymbology } from './units/symbology';
 
 const F_MONO = '"Share Tech Mono", ui-monospace, monospace';
 const F_STEN = '"Saira Stencil One", "Chakra Petch", sans-serif';
@@ -281,7 +283,7 @@ function weapons(c: CanvasRenderingContext2D) {
   }
   if (manual && groups.length) {
     const keys = groups.length > 1 ? `1-${groups.length} / Q E / WHEEL SELECT` : '';
-    label(c, `LMB FIRE GROUP · RMB SALVO ALL${keys ? ' · ' + keys : ''}`, x + 12, y + h - 8, C.faint, 9);
+    label(c, `LMB FIRE GROUP · RMB SALVO ALL${keys ? ' · ' + keys : ''} · SHIFT/T FLIR`, x + 12, y + h - 8, C.faint, 9);
   }
 }
 
@@ -298,14 +300,15 @@ function reticle(c: CanvasRenderingContext2D) {
   const sel = groups[aim.group] ?? groups[0], act = aim.salvo ? groups : [sel];
   const ms = act.flatMap((g) => g.mounts), bearing = ms.filter((m) => aim.bears[m.part!.uid] !== false);
   const can = bearing.length > 0, col = can ? (aim.salvo ? C.hazard : sel.def.col) : '#7d8a96';
-  const x = aim.x, y = aim.y;
+  // aim is a field point; draw it where the camera shows it (src/render/view.ts)
+  const sp = fieldToScreen(aim.x, aim.y), x = sp.x, y = sp.y, zs = screenScale(aim.x, aim.y);
   const punch = clamp(1 - (S.t - aim.shotAt) / 0.18, 0, 1);
   const pulling = aim.fire || aim.salvo;
   c.save();
   c.lineCap = 'square';
   // ground ordnance: the impact ring on the city, and the reach of each ventral mount when the reticle is beyond it
   if (act.some((g) => g.def.aim === 'ground')) {
-    const g = act.find((q) => q.def.aim === 'ground')!, rad = g.family === 'bomb' ? 50 : 40;
+    const g = act.find((q) => q.def.aim === 'ground')!, rad = (g.family === 'bomb' ? 50 : 40) * zs;
     c.strokeStyle = can ? g.def.col : '#7d8a96'; c.globalAlpha = 0.85; c.lineWidth = 2;
     c.setLineDash([7, 5]); c.lineDashOffset = -st.t * 30;
     c.beginPath(); c.ellipse(x, y, rad, rad * 0.92, 0, 0, Math.PI * 2); c.stroke(); c.setLineDash([]);
@@ -313,14 +316,15 @@ function reticle(c: CanvasRenderingContext2D) {
     if (act.some((q) => q.def.aim === 'ground' && q.mounts.some((m) => aim.why[m.part!.uid] === 'range'))) {
       for (const q of act) if (q.def.aim === 'ground') for (const m of q.mounts) {
         c.globalAlpha = 0.35; c.strokeStyle = q.def.col; c.lineWidth = 1.5; c.setLineDash([4, 8]);
-        c.beginPath(); c.arc(P.x + m.ox, P.y + m.oy, q.def.reach, 0, Math.PI * 2); c.stroke(); c.setLineDash([]);
+        const mp = fieldToScreen(P.x + m.ox, P.y + m.oy);
+        c.beginPath(); c.arc(mp.x, mp.y, q.def.reach * zs, 0, Math.PI * 2); c.stroke(); c.setLineDash([]);
       }
     }
     c.globalAlpha = 1;
   }
   // rails: a firing line from every gun that bears; the traverse wedge of those that do not
   for (const g of act) if (g.def.aim === 'line') for (const m of g.mounts) {
-    const mx = P.x + m.ox, my = P.y + m.oy;
+    const mp = fieldToScreen(P.x + m.ox, P.y + m.oy), mx = mp.x, my = mp.y;
     if (aim.bears[m.part!.uid] !== false) {
       c.strokeStyle = g.def.col; c.globalAlpha = pulling ? 0.7 : 0.35; c.lineWidth = 1.2; c.setLineDash([10, 6]); c.lineDashOffset = -st.t * 60;
       c.beginPath(); c.moveTo(mx, my); c.lineTo(x, y); c.stroke(); c.setLineDash([]);
@@ -337,10 +341,11 @@ function reticle(c: CanvasRenderingContext2D) {
       // grey when no missile mount can take this lock (a top-deck pod on a ground target)
       const takes = act.some((g) => g.family === 'missile' && g.mounts.some((m) => aim.bears[m.part!.uid] !== false));
       const k = clamp(aim.lockT / 0.25, 0, 1), rr = (L.isBoss ? Math.min(90, L.halfW * 0.5) : L.r + 12) * (2 - k);
-      c.save(); c.translate(L.x, L.y); c.rotate((1 - k) * Math.PI / 4);
+      const lp = fieldToScreen(L.x, L.y), lx = lp.x, ly = lp.y;
+      c.save(); c.translate(lx, ly); c.rotate((1 - k) * Math.PI / 4);
       c.strokeStyle = takes ? '#ff9f5a' : '#7d8a96'; c.lineWidth = 2.5; brackets(c, 0, 0, rr, rr * 0.45);
       c.restore();
-      if (k >= 1 && takes) { label(c, 'LOCK', L.x + rr + 6, L.y - rr + 4, '#ff9f5a', 11, 'left'); c.strokeStyle = 'rgba(255,159,90,.35)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y); c.lineTo(L.x, L.y); c.stroke(); }
+      if (k >= 1 && takes) { label(c, 'LOCK', lx + rr + 6, ly - rr + 4, '#ff9f5a', 11, 'left'); c.strokeStyle = 'rgba(255,159,90,.35)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y); c.lineTo(lx, ly); c.stroke(); }
     }
   }
   // the reticle itself
@@ -566,6 +571,7 @@ export function drawHud(c: CanvasRenderingContext2D, scale: number, dpr: number,
   if (S.boss) st.bossLag = ease(st.bossLag, clamp(S.boss.hp / S.boss.maxHp, 0, 1));
   if (S.elite) st.eliteLag = ease(st.eliteLag, clamp(S.elite.hp / S.elite.maxHp, 0, 1));
   consumeEvents();
+  drawSymbology(c, st.t);
   letterbox(c);
   threats(c);
   hullCluster(c);

@@ -6,7 +6,7 @@ You command a dreadnought the size of an aircraft carrier, crewed by thousands. 
 
 ## Pillars
 
-1. **Scale you can feel.** The ship is a building-sized object over a city of thousands of lit windows. Enemies are small, numerous and brave. The camera, the parallax, the sound and the pace of the ship all sell mass: it accelerates like a freighter, its broadsides shake the screen, and its shadow covers whole blocks.
+1. **Scale you can feel.** The ship is a building-sized object over a city of thousands of lit windows. Enemies are true to scale: small, numerous and brave, a tank a speck of light next to the hull, while a flak tower or a siege crawler is big because it is big. The fire-control computer (tactical symbology, the FLIR view) is how a dreadnought's crew sees them. The camera, the parallax, the sound and the pace of the ship all sell mass: it accelerates like a freighter, its broadsides shake the screen, and its shadow covers whole blocks.
 2. **Power with weight.** Every weapon has wind-up, recoil, a muzzle event, travel, impact and an aftermath (scorch, fire, smoke, debris, secondary explosions). The player spends their time destroying things in ways that look and sound expensive.
 3. **One world, one hand.** Every entity, effect, icon and panel comes from one material language: blackened gunmetal, worn hazard paint, plasma cyan, sodium amber city light, hostile red. No mismatched packs and no SaaS-dashboard UI.
 4. **Craft in the basics.** Movement, aiming, readability of threats, menu transitions and saving are smooth, predictable and polished before any feature is added. Nothing appears or disappears without a transition. Nothing important is ever unreadable.
@@ -20,6 +20,7 @@ You command a dreadnought the size of an aircraft carrier, crewed by thousands. 
 - The reticle tells the pilot everything: the selected group, its reload, a ground ring where bombs and shells will land, missile lock brackets, the firing lines of rails that bear, and why a group cannot fire (out of arc, out of reach, air only).
 - **Scrap magnet:** wrecks spill scrap that streams into the hull from a generous radius, accelerating as it comes. Nothing you earn is lost off the screen. Salvage Magnets and the Magnetized Hull relic widen the pull.
 - On touch screens the ship flies by drag and every gun aims itself.
+- **FLIR** (hold Shift, or T to latch): the main view switches to a white-hot thermal camera, like a gunship's sensor turret. The city goes cool and dark, every engine, crew and fire glows, and a 4x zoom inset shows the true-scale target under the reticle. It costs nothing but attention: a way to find the tanks hiding in a lit city, and to feel how small they are.
 - **Overdrive** (the active skill, on Space): charge it by destroying things, then unleash it. Each hull class has its own. The first is a *Ventral Lance*, a sustained beam that carves a burning line through the city below.
 - **Dopamine beats:**
   - Chains of secondary explosions.

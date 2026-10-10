@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { DARK } from '../../game/worldgen';
 import { TERR, FIRE } from '../../game/terrain';
+import { flirUniform } from '../flir';
 
 /** Blackout grid (see worldgen DARK): CITY.time each cell went dark, 0 = lit. */
 export const darkTex = new THREE.DataTexture(DARK.data, DARK.n, DARK.n, THREE.RedFormat, THREE.FloatType);
@@ -48,16 +49,15 @@ export const U = {
   /** Where the night city's traffic may run: +1 the city is biome A, -1 it is biome B, 0 no city. */
   uCityW: { value: 1 },
   /**
-   * Thermal-view hook (0 normal .. 1 thermal): every world shader blends to a white-hot heat value. Cool terrain,
-   * colder water, warm lit windows and traffic, fires hottest. Set with setWorldThermal().
+   * FLIR thermal view 0..1 (src/render/flir.ts, white-hot in the post grade): every world shader blends to a heat
+   * value. Terrain, water, snow and sand go cool grey, lamps and windows drop to ~15-20%, fires, flares and burning
+   * oil stay hot.
    */
-  uThermal: { value: 0 },
+  uFlir: flirUniform,
 };
-/** Thermal / FLIR view hook for the world layer (0..1). */
-export function setWorldThermal(k: number) { U.uThermal.value = Math.max(0, Math.min(1, k)); }
 
 export const GLSL_COMMON = /* glsl */ `
-uniform float uTime; uniform sampler2D uDark; uniform vec4 uDarkMap; uniform float uThermal;
+uniform float uTime; uniform sampler2D uDark; uniform vec4 uDarkMap; uniform float uFlir;
 float h12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
   return mix(mix(h12(i), h12(i+vec2(1,0)), f.x), mix(h12(i+vec2(0,1)), h12(i+vec2(1,1)), f.x), f.y); }
@@ -159,7 +159,7 @@ const BLD_FRAG = /* glsl */ `
     if (glass > 0.5) { wc *= vec3(0.75, 0.9, 1.1); diffuseColor.rgb *= vec3(0.8, 0.95, 1.25); }
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.015, 0.018, 0.024), inWin * 0.75);
     totalEmissiveRadiance += wc * on * power * (1.0 - vFall) * 0.7;
-    heat += on * power * 0.35;
+    heat += on * power * 0.12;
     // Hangars: the door side glows where the doors stand open.
     if (sty > 9.5 && sty < 10.5 && faceId > 1.5 && faceId < 2.5) {
       float door = step(vH, vSz.y * 0.75) * step(0.15, fract(u / (6.0 * uK)));
@@ -188,9 +188,9 @@ const BLD_FRAG = /* glsl */ `
     totalEmissiveRadiance += vec3(1.0, 0.33, 0.06) * em * (0.1 + fire * 1.2) * flick * vFall;
     heat += em * fire;
   }
-  if (uThermal > 0.001) {
-    diffuseColor.rgb *= 1.0 - uThermal;
-    totalEmissiveRadiance = mix(totalEmissiveRadiance, vec3(min(1.4, heat)), uThermal);
+  if (uFlir > 0.001) {
+    diffuseColor.rgb *= 1.0 - uFlir;
+    totalEmissiveRadiance = mix(totalEmissiveRadiance, vec3(min(1.4, heat)), uFlir);
   }
 }
 `;
@@ -228,7 +228,7 @@ void main(){
   if (aK.x > 5.5 && aK.x < 6.5) { float f = fract(uTime * 1.6 - aK.y * 0.9); blink = f < 0.07 ? 1.0 : 0.0; }
   if (aK.x > 6.5 && aK.x < 7.5) { float f = fract(uTime * 0.45 + aK.y); float g = fract(f * 2.0); blink = smoothstep(0.0, 0.08, g) * (1.0 - smoothstep(0.12, 0.24, g)); lc = f < 0.5 ? aC.rgb : vec3(0.35, 1.6, 1.1); }
   if (aK.x > 7.5) blink = 0.55 + 1.6 * smoothstep(0.9, 1.0, fract(uTime * 0.2 + aK.y));
-  vC = vec4(lc * (1.0 - 0.5 * uThermal), aC.a * pw * blink);
+  vC = vec4(lc * (1.0 - 0.82 * uFlir), aC.a * pw * blink);
   bool road = aK.x > 4.5 && aK.x < 5.5;
   vec2 sz = road ? (aK.w > 0.5 ? vec2(aK.z, aL.w) : vec2(aL.w, aK.z)) : vec2(aL.w);
   vUv = road && aK.w > 0.5 ? uv.yx : uv;
@@ -268,7 +268,7 @@ void main(){
   float z = uLoop.x + mod(aT.y + uTime * aT.z + uScrollZ, uLoop.y);
   vec3 p = vec3(aT.x + position.x * 0.7 * uDarkMap.z, 0.9, z + position.z * aT.w);
   float pw = powerAt(p - vec3(0.0, 0.0, uScrollZ), fract(aT.y * 0.013));
-  vC.a *= 0.35 + 0.65 * pw;
+  vC.a *= (0.35 + 0.65 * pw) * (1.0 - 0.45 * uFlir);
   // Only on the night city's ground (the other biome's weight is in the terrain's alpha).
   float fx = aT.x / uDarkMap.z + 800.0, fy = (z - uScrollZ - uDarkMap.w) / uDarkMap.z + 450.0 + uDarkMap.w;
   float wb = texture2D(uTerr, vec2((fx - uTerrMap.x) / uTerrMap.z, fy / uTerrMap.w)).a;
@@ -415,9 +415,9 @@ const TER_FRAG = /* glsl */ `
   }
   diffuseColor.rgb = alb;
   totalEmissiveRadiance += em;
-  if (uThermal > 0.001) {
-    diffuseColor.rgb *= 1.0 - uThermal;
-    totalEmissiveRadiance = mix(totalEmissiveRadiance, vec3(heat), uThermal);
+  if (uFlir > 0.001) {
+    diffuseColor.rgb *= 1.0 - uFlir;
+    totalEmissiveRadiance = mix(totalEmissiveRadiance, vec3(heat), uFlir);
   }
 }
 `;

@@ -223,7 +223,8 @@ function flankPoint(side: number, dist: number) {
   const P = S.P!;
   return { x: clamp(P.x + side * dist, 40, W - 40), y: clamp(P.y + rnd(-P.dv.len * 0.5, P.dv.len * 0.5), 90, H - 60) };
 }
-function spawnGroup(k: EnemyType) {
+/** Spawns one group of type k the way the director does (also the `__gd.spawn` debug hook). */
+export function spawnGroup(k: EnemyType) {
   const P = S.P!, x = rnd(60, W - 60), side = pick([-1, 1]);
   switch (k) {
     case 'heli': {
@@ -248,12 +249,17 @@ function spawnGroup(k: EnemyType) {
     case 'drone': { const bx = rnd(120, W - 120); for (let i = 0; i < 7; i++) spawnEnemy('drone', bx, -20 - i * 24, { baseX: bx, phase: i * 0.5 }); break; }
     case 'gunship': spawnEnemy('gunship', side < 0 ? -40 : W + 40, rnd(150, H - 250), { side, life: 20 }); break;
     case 'bomber': { const y = clamp(P.y + rnd(-160, 60), 90, H - 120); spawnEnemy('bomber', side < 0 ? -50 : W + 50, y, { vx: -side * 70, hdg: side < 0 ? 0 : Math.PI }); break; }
-    case 'tank': { const n = S.level >= 2 ? 3 : 2; for (let i = 0; i < n; i++) spawnEnemy('tank', clamp(x + (i - 1) * 46, 30, W - 30), -20 - i * 30, { vx: pick([-1, 1]) * rnd(10, 26) }); break; }
+    case 'tank': {
+      // a platoon drives as a column down one street: true-scale armour reads as a convoy (one marker, a count)
+      const n = S.level >= 2 ? 3 : 2, dir = pick([-1, 1]), v = rnd(12, 24), y = -20 - rnd(0, 20);
+      for (let i = 0; i < n; i++) spawnEnemy('tank', clamp(x - dir * i * 15, 30, W - 30), y + rnd(-2, 2), { vx: dir * v });
+      break;
+    }
     case 'infantry': for (let i = 0; i < 7; i++) spawnEnemy('infantry', clamp(x + rnd(-36, 36), 10, W - 10), -20 + rnd(-24, 24)); break;
     default: spawnEnemy(k, x, -24);
   }
 }
-function spawnElite(type: EnemyType) {
+export function spawnElite(type: EnemyType) {
   const e = type === 'crawler' ? spawnEnemy('crawler', W / 2, -60, { holdY: H * 0.42 })
     : type === 'ace' ? spawnEnemy('ace', W / 2, -60, { dir: pick([-1, 1]) })
       : spawnEnemy(type, W / 2, -60, { hoverY: 150, dir: 1 });

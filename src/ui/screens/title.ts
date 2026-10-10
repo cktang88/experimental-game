@@ -98,7 +98,7 @@ export function titleView(o: TitleOpts) {
       ),
     ),
     el('div', 'letterbox bottom',
-      el('span', 'keys', keycap('WASD'), ' steer · light guns fire on their own · ', keycap('Mouse'), ' aim · ', keycap('LMB'), ' fire heavy group · ', keycap('RMB'), ' salvo · ', keycap('1-9'), ' group · ', keycap('Space'), ' overdrive · ', keycap('P'), ' pause · ', keycap('M'), ' mute'),
+      el('span', 'keys', keycap('WASD'), ' steer · light guns fire on their own · ', keycap('Mouse'), ' aim · ', keycap('LMB'), ' fire heavy group · ', keycap('RMB'), ' salvo · ', keycap('1-9'), ' group · ', keycap('Space'), ' overdrive · ', keycap('Shift'), ' FLIR · ', keycap('P'), ' pause · ', keycap('M'), ' mute'),
       el('span', 'spacer'),
       el('span', 'mono dim', 'BUILD 0.2 · ICONS GAME-ICONS.NET (CC BY 3.0)')),
   );

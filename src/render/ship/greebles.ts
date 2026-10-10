@@ -15,6 +15,8 @@ export interface GCtx {
   bk: Buckets; L: Livery; lights: LightSet; occ: [number, number, number, number][];
   /** Deck half width (inner terrace edge) and hull half width at z. */
   de: (z: number) => number; hw: (z: number) => number; z0: number; z1: number;
+  /** Belt stretches (side, z0, z1) already taken by module hardware (armour courses, thruster pods). */
+  belt?: [number, number, number][];
 }
 export type Box4 = [number, number, number, number];
 
@@ -107,7 +109,7 @@ export function heatsink(c: GCtx, x0: number, z0: number, x1: number, z1: number
   const P = c.L.paint, alongX = x1 - x0 < z1 - z0;
   if (alongX) for (let x = x0 + 0.2; x < x1 - 0.1; x += 0.42) box(c.bk, B.rail, 0.1, h, z1 - z0, P.dark, Tm(x, y + h / 2, (z0 + z1) / 2));
   else for (let z = z0 + 0.2; z < z1 - 0.1; z += 0.42) box(c.bk, B.rail, x1 - x0, h, 0.1, P.dark, Tm((x0 + x1) / 2, y + h / 2, z));
-  c.bk.get('core').quad([x0, y + 0.05, z0], [x1, y + 0.05, z0], [x1, y + 0.05, z1], [x0, y + 0.05, z1], [0, 0], [1, 0], [1, 1], [0, 1], col(P.full, 0.07), [0, 1, 0]);
+  c.bk.get('core').quad([x0, y + 0.05, z0], [x1, y + 0.05, z0], [x1, y + 0.05, z1], [x0, y + 0.05, z1], [0, 0], [1, 0], [1, 1], [0, 1], col(P.full, 0.045), [0, 1, 0]);
 }
 
 /**
@@ -172,6 +174,7 @@ export function beltGreebles(c: GCtx, rnd: Rng, za: number, zb: number, type: st
   for (const sx of [-1, 1]) {
     let z = za + 2 + rnd() * 3;
     while (z < zb - 3) {
+      if (c.belt?.some((b) => b[0] === sx && z < b[2] && z + 4 > b[1])) { z += 1; continue; }
       const hw = Math.min(c.hw(z), c.hw(z + 3)), x = sx * (hw + 0.04), k = rnd();
       const yTop = deckY - 3.9, yBot = deckY - 7.6;
       if ((type === 'armor' || type === 'spine' || type === 'battery') && k < 0.3 && zb - z > 8) {
@@ -185,7 +188,7 @@ export function beltGreebles(c: GCtx, rnd: Rng, za: number, zb: number, type: st
       } else if (k < 0.55) {
         // External pipe run along the belt.
         const L = 5 + rnd() * 10, yy = yBot + 0.6 + rnd() * (yTop - yBot - 1.2), m = Tm(x + sx * 0.25, yy, z).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-        lathe(c.bk, B.rail, [[0.18, 0], [0.18, Math.min(L, zb - 1 - z)]], 6, P.dark, m, false, 1);
+        lathe(c.bk, B.rail, [[0.18, 0], [0.18, Math.max(0.5, Math.min(L, zb - 1 - z, ...(c.belt ?? []).filter((b) => b[0] === sx && b[1] > z).map((b) => b[1] - 0.5 - z)))]], 6, P.dark, m, false, 1);
         z += 1.5 + rnd() * 2;
       } else if (k < 0.8) {
         // Bolted access plate / armour patch.
