@@ -8,16 +8,41 @@
 //  Decor.x / Decor.y are kept in field space every tick for gameplay code; the renderer works from cy.
 //  Rows are generated upward (decreasing cy) and dropped once they scroll past the bottom edge.
 //  Heights (hgt, tier.z0, tier.hgt) are field units too; the renderer multiplies everything by
-//  engine.groundScale. FLOOR is one storey.
+//  engine.groundScale.
+//
+// SCALE
+//  The dreadnought is an aircraft carrier (~330 m) seen from far above: a city block is a small
+//  fraction of its hull and buildings read as tiny lit rectangles. The fillers below are authored in
+//  DESIGN units (a block is ~100-200 design units, FLOOR is one storey) and every row is shrunk by
+//  CITY_K into field units about the field's centre line as it is generated (see shrinkRow).
+//  Hit points and scrap values are computed from the design size, so a building takes as many bomb
+//  hits as before; there are just many more of them under every blast (cityPay() rebalances that).
 import { rnd, pick, clamp } from '../util/rng';
 import { FIELD_W as W, FIELD_H as H } from './field';
 import { S, groundBlast } from './combat';
 import { addFx, boomFx, V } from './vfx';
 
+/** Field units per design unit: how far below the ship the city is shrunk. */
+export const CITY_K = 0.25;
+/** One storey, in design units (STOREY is the same in field units). */
 export const FLOOR = 4.4;
+export const STOREY = FLOOR * CITY_K;
+/**
+ * Every blast now covers about 1/CITY_K^2 times as many buildings, each still paying 1-4 scrap.
+ * Combat multiplies worldBlast()'s scrap by cityPay() so city destruction pays what it did at the old scale.
+ */
+export const CITY_PAY = [0.12, 0.11, 0.095, 0.08, 0.3];
+/** CITY_PAY for the city on screen now (tuned per theme against tests/unit/economy.test.ts). */
+export const cityPay = () => CITY_PAY[CITY.theme % CITY_PAY.length];
 /** City generated across this x span (wider than the field: the top of the view is wider). */
 export const X0 = -330, X1 = W + 330;
+/** The same span in design units, and the design <-> field mapping (about the field's centre line). */
+const DX0 = W / 2 + (X0 - W / 2) / CITY_K, DX1 = W / 2 + (X1 - W / 2) / CITY_K;
+const fx = (dx: number) => W / 2 + (dx - W / 2) * CITY_K;
+const toDX = (x: number) => W / 2 + (x - W / 2) / CITY_K;
 const GEN_TOP = -380, DROP_BOTTOM = H + 90;
+/** A generated chunk holds whole block rows until it is at least this tall (field units). */
+const CHUNK_MIN = 120;
 
 export type Surface = 'walk' | 'plaza' | 'grass' | 'park' | 'lot' | 'gravel' | 'yard' | 'dock' | 'rail' | 'ash' | 'snow' | 'dirt' | 'bund';
 export const SURFACES: Surface[] = ['walk', 'plaza', 'grass', 'park', 'lot', 'gravel', 'yard', 'dock', 'rail', 'ash', 'snow', 'dirt', 'bund'];
@@ -102,7 +127,7 @@ export const CITY = {
  * DARK.n x DARK.n cells (DARK.cell field units each) over [X0, ...) x city y, holding the CITY.time
  * each cell went dark (0 = still lit). Shaders sample it to switch windows, lamps and signs off.
  */
-export const DARK = { cell: 40, n: 64, x0: X0, data: new Float32Array(64 * 64), ver: 0 };
+export const DARK = { cell: 20, n: 128, x0: X0, data: new Float32Array(128 * 128), ver: 0 };
 const darkRow = (cy: number) => ((Math.floor(cy / DARK.cell) % DARK.n) + DARK.n) % DARK.n;
 function clearDarkRows(cy0: number, cy1: number) {
   for (let y = cy0; y <= cy1 + DARK.cell; y += DARK.cell) DARK.data.fill(0, darkRow(y) * DARK.n, darkRow(y) * DARK.n + DARK.n);
@@ -126,9 +151,9 @@ function blackout(x: number, y: number, rad: number) {
 function makePlan(theme: number): Plan {
   const cols: Col[] = [], aves: Ave[] = [];
   const wide = theme === 1 ? [190, 300] : theme === 3 ? [150, 210] : theme === 4 ? [110, 170] : [130, 200];
-  let x = X0 - 40, n = 0;
-  const coast = theme === 0 ? rnd(330, 460) : -9999;
-  while (x < X1 + 40) {
+  let x = DX0 - 40, n = 0;
+  const coast = theme === 0 ? toDX(rnd(330, 460)) : -9999;
+  while (x < DX1 + 40) {
     const major = n % 3 === 0;
     const aw = major ? (theme === 4 ? 34 : 30) : theme === 3 ? 16 : 20;
     if (!(theme === 0 && x + aw < coast)) aves.push({ x0: x, x1: x + aw, major });
@@ -140,11 +165,12 @@ function makePlan(theme: number): Plan {
   // Zones per column.
   const mid = W / 2;
   cols.forEach((c, i) => {
-    const cx = (c.x0 + c.x1) / 2, dc = Math.abs(cx - mid) / (W / 2);
+    // Zones are laid out across the screen (field units), so the view keeps its composition.
+    const cx = (c.x0 + c.x1) / 2, dc = (Math.abs(cx - mid) * CITY_K) / (W / 2);
     switch (theme) {
-      case 0: c.zone = c.x1 < coast ? 'water' : c.x0 < coast + 40 ? 'docks' : cx < coast + 360 ? 'harbor' : dc < 0.45 ? 'core' : 'down'; break;
+      case 0: c.zone = c.x1 < coast ? 'water' : c.x0 < coast + 40 ? 'docks' : cx < coast + 700 ? 'harbor' : dc < 0.45 ? 'core' : 'down'; break;
       case 1: c.zone = i % 3 === 1 ? 'tanks' : dc < 0.25 ? 'refinery' : i % 3 === 2 ? 'works' : 'refinery'; break;
-      case 2: c.zone = Math.abs(cx - mid) < 260 ? 'rail' : dc < 0.75 ? 'yard' : 'housing'; break;
+      case 2: c.zone = Math.abs(cx - mid) < 560 ? 'rail' : dc < 0.75 ? 'yard' : 'housing'; break;
       case 3: c.zone = dc < 0.3 ? 'ruins' : 'suburb'; break;
       default: c.zone = dc < 0.55 ? 'neon' : 'core';
     }
@@ -152,7 +178,7 @@ function makePlan(theme: number): Plan {
   if (theme === 0) {
     // Fill the water: one wide water column ending at the coast.
     const first = cols.findIndex((c) => c.zone !== 'water');
-    if (first > 0) { cols.splice(0, first, { x0: X0 - 60, x1: cols[first].x0, zone: 'water' }); }
+    if (first > 0) { cols.splice(0, first, { x0: DX0 - 60, x1: cols[first].x0, zone: 'water' }); }
   }
   if (theme === 2) {
     // The rail yard is one wide corridor without avenues through it.
@@ -267,7 +293,9 @@ function fillDense(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, y1
     for (let i = 0; i < 6; i++) ch.props.push({ k: 'tree', x: rnd(x0 + 4, x1 - 4), cy: pick([rnd(y0 + 3, y0 + 8), rnd(y1 - 8, y1 - 3)]), w: rnd(4, 6), d: 0, h: rnd(4, 7), rot: 0, v: Math.random() });
     return;
   }
-  const sz = zone === 'neon' || zone === 'core' ? [38, 70] : [24, 46];
+  // Lots are coarser than a real city's: from the ship's altitude a lot is a few pixels, and fewer,
+  // larger footprints keep the instance count sane.
+  const sz = zone === 'neon' || zone === 'core' ? [56, 96] : [36, 64];
   const xs = splits(x0, x1, sz[0], sz[1]), ys = splits(y0, y1, sz[0], sz[1]);
   for (let i = 0; i < xs.length - 1; i++) for (let j = 0; j < ys.length - 1; j++) {
     const g = Math.random() < 0.85 ? rnd(0.6, 2.2) : 0;
@@ -290,14 +318,14 @@ function fillDocks(ch: Chunk, plan: Plan, x0: number, y0: number, x1: number, y1
   ch.pads.push({ x0, y0, x1, y1, s: 'dock' });
   const qx = plan.coast;
   for (let y = y0 + rnd(5, 20); y < y1 - 20; y += rnd(36, 60)) ch.props.push({ k: 'crane', x: qx + 10, cy: y, w: 14, d: 12, h: rnd(36, 46), rot: 0, v: Math.random() });
-  // Container stacks on the quay.
-  for (let y = y0 + 6; y < y1 - 10; y += 9) for (let x = qx + 26; x < x1 - 12; x += 16) if (Math.random() < 0.7)
-    ch.props.push({ k: 'container', x, cy: y, w: 13, d: 5, h: Math.floor(rnd(1, 4.4)) * 2.8, rot: 0, v: Math.random() });
+  // Container stacks on the quay (each prop is a block of boxes: from up here they are coloured specks).
+  for (let y = y0 + 8; y < y1 - 12; y += 17) for (let x = qx + 34; x < x1 - 16; x += 30) if (Math.random() < 0.7)
+    ch.props.push({ k: 'container', x, cy: y, w: 26, d: 12, h: Math.floor(rnd(1, 4.4)) * 2.8, rot: 0, v: Math.random() });
   for (let i = 0; i < 4; i++) ch.props.push({ k: 'lamp', x: rnd(qx + 4, x1 - 4), cy: rnd(y0, y1), w: 0, d: 0, h: 9, rot: 0, v: 1 });
 }
 
 function fillWaterRow(ch: Chunk, plan: Plan, y0: number, y1: number) {
-  ch.water.push({ x0: X0 - 100, y0, x1: plan.coast, y1 });
+  ch.water.push({ x0: DX0 - 100, y0, x1: plan.coast, y1 });
   // A pier with a moored ship every few rows.
   if (Math.random() < 0.55) {
     const py = rnd(y0 + 10, y1 - 20), len = rnd(160, 300);
@@ -315,7 +343,7 @@ function fillRefinery(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number,
   if (zone === 'tanks') {
     // Tank farm: big storage tanks inside bunds, chains of secondaries when hit.
     ch.pads.push({ x0, y0, x1, y1, s: 'bund' });
-    const s = rnd(30, 44), cnt = Math.floor((x1 - x0) / (s + 8)), cntY = Math.max(1, Math.floor((y1 - y0) / (s + 8)));
+    const s = rnd(48, 70), cnt = Math.floor((x1 - x0) / (s + 8)), cntY = Math.max(1, Math.floor((y1 - y0) / (s + 8)));
     const ox = x0 + ((x1 - x0) - cnt * (s + 8)) / 2 + 4 + s / 2, oy = y0 + ((y1 - y0) - cntY * (s + 8)) / 2 + 4 + s / 2;
     for (let i = 0; i < cnt; i++) for (let j = 0; j < cntY; j++) {
       if (Math.random() < 0.12) continue;
@@ -363,15 +391,15 @@ function fillRefinery(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number,
 function fillRail(ch: Chunk, x0: number, y0: number, x1: number, y1: number) {
   ch.pads.push({ x0, y0, x1, y1, s: 'rail' });
   // Tracks every 11 units; trains sit on some of them (moving trains are animated by the renderer).
-  const tracks = Math.floor((x1 - x0 - 10) / 11);
+  const tracks = Math.floor((x1 - x0 - 10) / 16);
   for (let i = 0; i < tracks; i++) {
-    const tx = x0 + 10 + i * 11;
+    const tx = x0 + 10 + i * 16;
     if (Math.random() < 0.5) {
       let y = y0 + rnd(0, 30);
       const moving = Math.random() < 0.25;
       while (y < y1 - 18) {
-        ch.props.push({ k: 'railcar', x: tx, cy: y + 8, w: 4.6, d: 16, h: 4.2, rot: moving ? 1 : 0, v: Math.random() });
-        y += 18.5;
+        ch.props.push({ k: 'railcar', x: tx, cy: y + 16, w: 5, d: 34, h: 4.2, rot: moving ? 1 : 0, v: Math.random() });
+        y += 37;
         if (Math.random() < 0.08) break;
       }
     }
@@ -384,7 +412,7 @@ function fillSuburb(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, y
   ch.pads.push({ x0, y0, x1, y1, s: 'ash' });
   if (zone === 'ruins') {
     // Burned-out downtown remnants: broken mid-rises, rubble, fires.
-    const xs = splits(x0 + 3, x1 - 3, 30, 52), ys = splits(y0 + 3, y1 - 3, 30, 52);
+    const xs = splits(x0 + 3, x1 - 3, 44, 70), ys = splits(y0 + 3, y1 - 3, 44, 70);
     for (let i = 0; i < xs.length - 1; i++) for (let j = 0; j < ys.length - 1; j++) {
       if (Math.random() < 0.25) { ch.props.push({ k: 'rubble', x: (xs[i] + xs[i + 1]) / 2, cy: (ys[j] + ys[j + 1]) / 2, w: xs[i + 1] - xs[i] - 4, d: ys[j + 1] - ys[j] - 4, h: rnd(3, 7), rot: 0, v: Math.random() }); continue; }
       const g = 2;
@@ -392,12 +420,12 @@ function fillSuburb(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, y
       b.lit = b.style === Style.Charred ? 0 : rnd(0.02, 0.15);
     }
   } else {
-    // Rows of houses facing the street, back yards between.
+    // Terraces facing the street, back yards between.
     const rowsY = [y0 + 12, y1 - 12];
-    for (const ry of rowsY) for (let x = x0 + 9; x < x1 - 9; x += rnd(19, 25)) {
-      if (Math.random() < 0.12) { ch.props.push({ k: 'rubble', x, cy: ry, w: 14, d: 12, h: 2.5, rot: 0, v: Math.random() }); continue; }
-      const w = rnd(11, 15), d = rnd(10, 13);
-      const b = bldg(ch, 'house', x - w / 2, ry - d / 2, x + w / 2, ry + d / 2, [tier(w, d, 0, FLOOR * (Math.random() < 0.3 ? 2 : 1))], Math.random() < burnt ? Style.Charred : Style.House, { rot: Math.random() < 0.5 ? 0 : Math.PI / 2 });
+    for (const ry of rowsY) for (let x = x0 + 22; x < x1 - 22; x += rnd(46, 60)) {
+      if (Math.random() < 0.2) { ch.props.push({ k: 'rubble', x, cy: ry, w: 28, d: 12, h: 2.5, rot: 0, v: Math.random() }); continue; }
+      const w = rnd(30, 40), d = rnd(12, 16);
+      const b = bldg(ch, 'house', x - w / 2, ry - d / 2, x + w / 2, ry + d / 2, [tier(w, d, 0, FLOOR * (Math.random() < 0.3 ? 2 : 1))], Math.random() < burnt ? Style.Charred : Style.House);
       b.lit = b.style === Style.Charred ? 0 : rnd(0.1, 0.55);
       for (let t = 0; t < 2; t++) if (Math.random() < 0.6) ch.props.push({ k: 'tree', x: x + rnd(-10, 10), cy: (y0 + y1) / 2 + rnd(-12, 12), w: rnd(4, 7), d: 0, h: rnd(4, 7), rot: 0, v: Math.random() < burnt ? 1 : Math.random() * 0.5 });
     }
@@ -410,7 +438,7 @@ function fillSuburb(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, y
 function fillYard(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, y1: number) {
   ch.pads.push({ x0, y0, x1, y1, s: 'snow' });
   if (zone === 'housing') {
-    const xs = splits(x0 + 3, x1 - 3, 26, 40);
+    const xs = splits(x0 + 3, x1 - 3, 40, 60);
     for (let i = 0; i < xs.length - 1; i++) {
       const b = bldg(ch, 'mid', xs[i] + 3, y0 + 8, xs[i + 1] - 3, y0 + 8 + rnd(14, 20), [tier(xs[i + 1] - xs[i] - 6, 16, 0, Math.round(rnd(4, 12)) * FLOOR)], pick([Style.Panel, Style.Concrete]));
       b.h = b.tiers[0].h; b.lit = rnd(0.35, 0.7);
@@ -427,24 +455,24 @@ function fillYard(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, y1:
       bldg(ch, 'warehouse', xs[i] + 3, y0 + 6, xs[i + 1] - 3, y0 + 6 + hh, [tier(xs[i + 1] - xs[i] - 6, hh, 0, Math.round(rnd(2, 3)) * FLOOR)], Style.Industrial, { lit: rnd(0.05, 0.3) });
     }
   }
-  for (let y = y0 + (r < 0.55 ? (y1 - y0) * 0.75 : 8); y < y1 - 6; y += 8) for (let x = x0 + 12; x < x1 - 12; x += 15) if (Math.random() < 0.6)
-    ch.props.push({ k: 'container', x, cy: y, w: 13, d: 5, h: Math.floor(rnd(1, 3.4)) * 2.8, rot: 0, v: Math.random() });
+  for (let y = y0 + (r < 0.55 ? (y1 - y0) * 0.75 : 10); y < y1 - 8; y += 16) for (let x = x0 + 16; x < x1 - 16; x += 30) if (Math.random() < 0.6)
+    ch.props.push({ k: 'container', x, cy: y, w: 26, d: 11, h: Math.floor(rnd(1, 3.4)) * 2.8, rot: 0, v: Math.random() });
   for (let i = 0; i < 3; i++) ch.props.push({ k: 'lamp', x: rnd(x0, x1), cy: rnd(y0, y1), w: 0, d: 0, h: 12, rot: 0, v: 1 });
 }
 
 /** Density along the city: a slowly wandering downtown core. */
 const densAt = (cy: number) => clamp(0.55 + 0.45 * Math.sin(cy * 0.0021 + CITY.nextId * 0.0) + 0.25 * Math.sin(cy * 0.0057 + 1.7), 0.15, 1.25);
 
-function genRow(plan: Plan) {
+/** One row of blocks (design units) below design y cy1 into the chunk; returns the row's top. */
+function genBlockRow(ch: Chunk, plan: Plan, cy1: number) {
   const th = plan.theme;
-  const blockD = th === 1 ? rnd(150, 230) : th === 3 ? rnd(64, 80) : th === 4 ? rnd(90, 140) : rnd(100, 160);
+  const blockD = th === 1 ? rnd(150, 230) : th === 3 ? rnd(96, 124) : th === 4 ? rnd(90, 140) : rnd(100, 160);
   const streetW = th === 1 && Math.random() < 0.3 ? 0 : th === 3 ? 14 : th === 4 ? 20 : 18;
-  const cy1 = CITY.nextCy, cy0 = cy1 - blockD - streetW;
-  const ch: Chunk = { id: CITY.nextId++, cy0, cy1, theme: th, bldgs: [], pads: [], roads: [], props: [], water: [] };
-  const sx0 = th === 0 ? plan.coast : X0 - 60;
-  if (streetW > 0) ch.roads.push({ x0: sx0, x1: X1 + 60, y0: cy1 - streetW, y1: cy1, dir: 1, lanes: 2, major: false });
+  const cy0 = cy1 - blockD - streetW;
+  const sx0 = th === 0 ? plan.coast : DX0 - 60;
+  if (streetW > 0) ch.roads.push({ x0: sx0, x1: DX1 + 60, y0: cy1 - streetW, y1: cy1, dir: 1, lanes: 2, major: false });
   for (const a of plan.aves) ch.roads.push({ x0: a.x0, x1: a.x1, y0: cy0, y1: cy1, dir: 0, lanes: a.major ? 4 : 2, major: a.major });
-  const by0 = cy0, by1 = cy1 - streetW, dens = densAt(cy0);
+  const by0 = cy0, by1 = cy1 - streetW, dens = densAt(cy0 * CITY_K);
   for (const c of plan.cols) {
     const s = 4; // sidewalk width
     if (c.zone === 'water') { fillWaterRow(ch, plan, cy0, cy1); continue; }
@@ -459,8 +487,43 @@ function genRow(plan: Plan) {
       default: fillDense(ch, c.zone, x0, y0, x1, y1, c.zone === 'core' || c.zone === 'neon' ? dens + 0.2 : dens * 0.8);
     }
   }
-  CITY.nextCy = cy0;
-  clearDarkRows(cy0, cy1);
+  return cy0;
+}
+
+/** Shrinks a chunk generated in design units into field units (see SCALE in the header). */
+function shrinkRow(ch: Chunk) {
+  const k = CITY_K;
+  for (const b of ch.bldgs) {
+    b.x = fx(b.x); b.cy *= k; b.y = b.cy + S.scrollY;
+    b.w *= k; b.h *= k; b.r *= k; b.hgt *= k;
+    for (const t of b.tiers) { t.ox *= k; t.oy *= k; t.w *= k; t.h *= k; t.z0 *= k; t.hgt *= k; }
+  }
+  for (const p of ch.pads) { p.x0 = fx(p.x0); p.x1 = fx(p.x1); p.y0 *= k; p.y1 *= k; }
+  for (const r of ch.roads) { r.x0 = fx(r.x0); r.x1 = fx(r.x1); r.y0 *= k; r.y1 *= k; }
+  for (const w of ch.water) { w.x0 = fx(w.x0); w.x1 = fx(w.x1); w.y0 *= k; w.y1 *= k; }
+  // From this high a park's trees, a quay's lamps and the ruins' fires merge into texture: keep a
+  // sample of them (trees as larger canopy clumps), so the city stays quieter than the fight above it.
+  let n = 0;
+  for (const p of ch.props) {
+    const keep = p.k === 'tree' ? 0.08 : p.k === 'container' ? 0.4 : p.k === 'railcar' ? 0.7 : p.k === 'lamp' ? 0.3 : p.k === 'fire' ? 0.18 : p.k === 'searchlight' ? 0.15 : p.k === 'rubble' || p.k === 'hulk' ? 0.5 : 1;
+    if (keep < 1 && Math.random() > keep) continue;
+    if (p.k === 'tree') { p.w *= 2.8; p.h *= 1.4; }
+    p.x = fx(p.x); p.cy *= k; p.w *= k; p.d *= k; p.h *= k;
+    ch.props[n++] = p;
+  }
+  ch.props.length = n;
+}
+
+/** Generates the next chunk above the city: whole rows of blocks, at least CHUNK_MIN field units tall. */
+function genRow(plan: Plan) {
+  const ch: Chunk = { id: CITY.nextId++, cy0: 0, cy1: CITY.nextCy, theme: plan.theme, bldgs: [], pads: [], roads: [], props: [], water: [] };
+  const bottom = CITY.nextCy / CITY_K;
+  let top = bottom;
+  while ((bottom - top) * CITY_K < CHUNK_MIN) top = genBlockRow(ch, plan, top);
+  shrinkRow(ch);
+  ch.cy0 = top * CITY_K;
+  CITY.nextCy = ch.cy0;
+  clearDarkRows(ch.cy0, ch.cy1);
   CITY.chunks.push(ch);
   return ch;
 }
@@ -491,7 +554,7 @@ export function updateBg(dt: number) {
   const plan = CITY.plan!;
   while (CITY.nextCy + S.scrollY > GEN_TOP) genRow(plan);
   // Drop rows that have scrolled away.
-  if (CITY.chunks.length && CITY.chunks[0].cy0 + S.scrollY > DROP_BOTTOM) {
+  while (CITY.chunks.length && CITY.chunks[0].cy0 + S.scrollY > DROP_BOTTOM) {
     const gone = CITY.chunks.shift()!;
     S.decor = S.decor.filter((d) => d.type !== 'bldg' || (d as Bldg).chunk !== gone);
     CITY.burning = CITY.burning.filter((b) => b.chunk !== gone);
@@ -546,21 +609,21 @@ function collapse(b: Bldg) {
   b.dead = true; b.hp = 0; b.collapseT = CITY.time;
   ignite(b, 0.5);
   const sz = Math.max(b.w, b.h);
-  const big = b.hgt > 60;
+  const big = b.hgt > 60 * CITY_K;
   // Dust plume rolling out from the base, debris and a lingering smoke column.
   for (let i = 0; i < (big ? 9 : 5); i++) {
-    const a = Math.random() * 6.28, s = rnd(10, 40) * (big ? 1.5 : 1);
-    addFx({ type: 'smoke', x: b.x + Math.cos(a) * sz * 0.3, y: b.y + Math.sin(a) * sz * 0.3, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rnd(1.6, 3), max: 3, size: sz * rnd(0.35, 0.6), grow: 1.6, a: 0.55, drag: 0.8, ground: true });
+    const a = Math.random() * 6.28, s = rnd(4, 16) * (big ? 1.5 : 1);
+    addFx({ type: 'smoke', x: b.x + Math.cos(a) * sz * 0.3, y: b.y + Math.sin(a) * sz * 0.3, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rnd(1.6, 3), max: 3, size: Math.max(4, sz * rnd(0.5, 0.8)), grow: 1.6, a: 0.5, drag: 0.8, ground: true });
   }
   for (let i = 0; i < (big ? 10 : 5); i++) {
-    const a = Math.random() * 6.28, s = rnd(40, 140);
-    addFx({ type: 'debris', x: b.x, y: b.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rnd(0.5, 1.1), max: 1.1, size: rnd(1.5, 3.5), rot: rnd(0, 6.28), vr: rnd(-10, 10), drag: 1.8, col: '#4a4540', ground: true });
+    const a = Math.random() * 6.28, s = rnd(15, 60);
+    addFx({ type: 'debris', x: b.x, y: b.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rnd(0.5, 1.1), max: 1.1, size: rnd(0.8, 1.8), rot: rnd(0, 6.28), vr: rnd(-10, 10), drag: 1.8, col: '#4a4540', ground: true });
   }
   if (big) V.shake = Math.min(18, V.shake + 6);
   if (b.kind === 'tank' || b.kind === 'silo' || b.kind === 'flare') {
     // Fuel goes up: a fireball now and a chain blast that can take the neighbours with it.
-    boomFx(b.x, b.y, Math.max(26, b.w * 0.9), '#ffb347', true);
-    CITY.pending.push({ t: rnd(0.15, 0.45), x: b.x, cy: b.cy, r: Math.max(36, b.w * 1.25), dmg: 40 });
+    boomFx(b.x, b.y, Math.max(16, b.w * 1.8), '#ffb347', true);
+    CITY.pending.push({ t: rnd(0.15, 0.45), x: b.x, cy: b.cy, r: Math.max(10, b.w * 1.3), dmg: 40 });
     ignite(b, 1);
   }
 }
@@ -570,14 +633,14 @@ export function worldBlast(x: number, y: number, r: number, dmg: number): number
   let scrap = 0;
   for (const ch of CITY.chunks) {
     const fy0 = ch.cy0 + S.scrollY, fy1 = ch.cy1 + S.scrollY;
-    if (fy1 < y - r - 220 || fy0 > y + r + 40) continue;
+    if (fy1 < y - r - 90 || fy0 > y + r + 30) continue;
     for (const b of ch.bldgs) {
       if (b.dead) continue;
       // Distance from the blast to the building, measured to its footprint and to its roof as seen.
       const hw = b.w / 2, hh = b.h / 2;
       let ddx = Math.max(0, Math.abs(x - b.x) - hw), ddy = Math.max(0, Math.abs(y - b.y) - hh);
       let d = Math.hypot(ddx, ddy);
-      if (b.hgt > 12 && d > 0) {
+      if (b.hgt > 12 * CITY_K && d > 0) {
         CITY.project(b.x, b.y, b.hgt, proj);
         ddx = Math.max(0, Math.abs(x - proj.x) - hw); ddy = Math.max(0, Math.abs(y - proj.y) - hh);
         d = Math.min(d, Math.hypot(ddx, ddy) * 1.15);

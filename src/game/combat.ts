@@ -165,10 +165,10 @@ export function startCombat(c: CombatSetup) {
 /* ---------------- world ---------------- */
 // World generation (city, roads, clouds) lives in ./worldgen; re-exported for existing callers.
 export { seedDecor, updateBg } from './worldgen';
-import { seedDecor, updateBg, worldBlast } from './worldgen';
+import { seedDecor, updateBg, worldBlast, cityPay } from './worldgen';
 /** Every ground blast goes through here: buildings it destroys pay scrap (times carnage) and feed carnage/overdrive. */
 export function groundBlast(x: number, y: number, r: number, d: number, lance = false) {
-  const sc = worldBlast(x, y, r, d);
+  const sc = worldBlast(x, y, r, d) * cityPay(); // cityPay(): the city is drawn far below at a small scale (worldgen.ts)
   if (sc > 0) {
     S.stats.structures++; if (lance) S.stats.lanceStructures++;
     // Buildings feed the rampage, but less than kills: the city is dense, and at the old 3 + 1.5/scrap every street

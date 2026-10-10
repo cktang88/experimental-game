@@ -18,7 +18,7 @@ export const U = {
   uScrollZ: { value: 0 },
   uDark: { value: darkTex },
   /** x0 (field), cell size (field), groundScale k, camera z. */
-  uDarkMap: { value: new THREE.Vector4(-330, 40, 1.65, 641) },
+  uDarkMap: { value: new THREE.Vector4(DARK.x0, DARK.cell, 1.65, 641) },
   /** groundScale and one storey in world units. */
   uK: { value: 1.65 }, uFloor: { value: 7 },
   uWinCol: { value: new THREE.Color('#ffb347') },
@@ -36,8 +36,8 @@ float vnoise(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
 float powerAt(vec3 cp, float r){
   float fx = cp.x / uDarkMap.z + 800.0;
   float fy = (cp.z - uDarkMap.w) / uDarkMap.z + 450.0 + uDarkMap.w;
-  float cx = clamp(floor((fx - uDarkMap.x) / uDarkMap.y), 0.0, 63.0);
-  float cy = mod(floor(fy / uDarkMap.y), 64.0);
+  float cx = clamp(floor((fx - uDarkMap.x) / uDarkMap.y), 0.0, ${DARK.n - 1}.0);
+  float cy = mod(floor(fy / uDarkMap.y), ${DARK.n}.0);
   float d = texelFetch(uDark, ivec2(int(cx), int(cy)), 0).r;
   return d <= 0.0 ? 1.0 : 1.0 - smoothstep(0.0, 0.25, uTime - (d + r * 2.2));
 }
@@ -60,7 +60,7 @@ vH = z0 + position.y * sy;
 if (aS.x > 0.0) {
   // Collapse: the block shudders, sinks into its own footprint and spreads into a low heap.
   float p = clamp((uTime - aS.x) / 1.7, 0.0, 1.0), e = p * p;
-  float heap = z0 > 0.5 ? 0.0 : min(sy, 5.0 * uK + sy * 0.06);
+  float heap = z0 > 0.2 ? 0.0 : min(sy, 1.4 * uK + sy * 0.06);
   float wy = mix(vH, position.y * heap, e);
   transformed.y = (wy - z0) / max(sy, 0.001);
   transformed.xz *= mix(1.0, 1.14 + 0.1 * fract(aB.x * 13.0), e);
@@ -83,9 +83,9 @@ const BLD_FRAG = /* glsl */ `
   if (n.y > 0.5) {
     // Roof: dark membrane with a lighter parapet lip that catches the moon.
     float edge = min(vSz.x * 0.5 - abs(vObj.x), vSz.z * 0.5 - abs(vObj.z));
-    float lip = 1.0 - smoothstep(0.5 * uK, 1.4 * uK, edge);
-    diffuseColor.rgb *= mix(0.2, 0.75, lip) * (0.8 + 0.4 * h12(floor(vCity.xz / (6.0 * uK)) + seed));
-    float firePatch = smoothstep(0.55, 0.9, vnoise(vCity.xz / (3.5 * uK) + seed * 9.0 + vec2(uTime * 0.4, 0.0)));
+    float lip = 1.0 - smoothstep(0.15 * uK, 0.45 * uK, edge);
+    diffuseColor.rgb *= mix(0.2, 0.6, lip) * (0.8 + 0.4 * h12(floor(vCity.xz / (2.0 * uK)) + seed));
+    float firePatch = smoothstep(0.55, 0.9, vnoise(vCity.xz / (1.2 * uK) + seed * 9.0 + vec2(uTime * 0.4, 0.0)));
     diffuseColor.rgb *= 1.0 - 0.6 * fire;
     totalEmissiveRadiance += vec3(1.0, 0.38, 0.08) * fire * flick * firePatch * 1.4 * (1.0 - vFall);
   } else if (n.y > -0.5) {
@@ -106,7 +106,7 @@ const BLD_FRAG = /* glsl */ `
     vec2 f = vec2(fract(u / bay), fract(vH / uFloor));
     float inWin = step(abs(f.x - 0.5), ww * 0.5) * step(abs(f.y - wy - wh * 0.5), wh * 0.5) * (1.0 - none);
     // Keep whole bays off the very edges so corners read as solid.
-    inWin *= step(0.6 * uK, u) * step(u, (xf ? vSz.z : vSz.x) - 0.6 * uK);
+    inWin *= step(0.2 * uK, u) * step(u, (xf ? vSz.z : vSz.x) - 0.2 * uK);
     float h = h12(cell + vec2(faceId * 17.0, seed * 331.0));
     float on = step(h, litF) * inWin;
     // Far away the grid would alias into noise: fade it to its average glow.
@@ -127,14 +127,14 @@ const BLD_FRAG = /* glsl */ `
     // Neon trim along the top storey (Neon Sprawl).
     if (neon > 0.5) {
       vec3 nc = neon < 1.5 ? NEON0 : neon < 2.5 ? NEON1 : neon < 3.5 ? NEON2 : NEON3;
-      float band = step(abs(vObj.y - vSz.y + 1.2 * uK), 0.45 * uK);
+      float band = step(abs(vObj.y - vSz.y + 0.4 * uK), 0.18 * uK);
       totalEmissiveRadiance += nc * band * 1.6 * power * (1.0 - vFall);
     }
   }
   if (vFall > 0.0) {
     // Rubble: dust-grey heap with embers that cool over time.
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.035, 0.032, 0.03), vFall);
-    float em = smoothstep(0.72, 0.95, vnoise(vCity.xz / (2.2 * uK) + seed * 7.0));
+    float em = smoothstep(0.72, 0.95, vnoise(vCity.xz / (0.8 * uK) + seed * 7.0));
     totalEmissiveRadiance += vec3(1.0, 0.33, 0.06) * em * (0.1 + fire * 1.2) * flick * vFall;
   }
 }
@@ -199,7 +199,7 @@ varying vec2 vUv; varying vec4 vC;
 void main(){
   vUv = uv; vC = aC;
   float z = uLoop.x + mod(aT.y + uTime * aT.z + uScrollZ, uLoop.y);
-  vec3 p = vec3(aT.x + position.x * 1.6 * uDarkMap.z, 0.9, z + position.z * aT.w);
+  vec3 p = vec3(aT.x + position.x * 0.7 * uDarkMap.z, 0.9, z + position.z * aT.w);
   float pw = powerAt(p - vec3(0.0, 0.0, uScrollZ), fract(aT.y * 0.013));
   vC.a *= 0.35 + 0.65 * pw;
   gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);

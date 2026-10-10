@@ -11,10 +11,12 @@ import type { Engine, FrameCtx, Layer } from '../engine';
 import { FIELD_W, FIELD_H, FLIGHT } from '../engine';
 import { THEMES } from '../palette';
 import { rgb, Shape, DarkShape } from '../fx/quads';
-import { CITY, DARK, FLOOR, type Bldg, type Cloud, type Surface } from '../../game/worldgen';
+import { CITY, DARK, STOREY, CITY_K, type Bldg, type Cloud, type Surface } from '../../game/worldgen';
 import { U, darkTex, buildingMaterial, lightMaterial, trafficMaterial, craterMaterial, beamMaterial } from './shaders';
 
-const MAX_BLD = 4096, MAX_FLAT = 3072, MAX_PROP = 6144, MAX_LIGHT = 12288, MAX_CARS = 1024, MAX_CRATER = 96;
+const MAX_BLD = 12288, MAX_FLAT = 12288, MAX_PROP = 8192, MAX_LIGHT = 8192, MAX_CARS = 2048, MAX_CRATER = 96;
+/** Detail sizes authored for the old ground scale shrink with the city (see worldgen CITY_K). */
+const CK = CITY_K;
 const v = new THREE.Vector3(), w = new THREE.Vector3(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s3 = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0), col = new THREE.Color();
 const SMOKE = rgb('#25242a'), STEAM = rgb('#5d5c63'), FIRE_A = rgb('#ff8a2a'), FIRE_B = rgb('#ffcf6a'), EMBER = rgb('#ff5a1a');
@@ -70,7 +72,7 @@ export class CityLayer implements Layer {
     if (import.meta.env.DEV) (window as unknown as { __cityLayer: unknown }).__cityLayer = this;
     this.k = e.groundScale; this.cz = e.camPos.z;
     U.uDarkMap.value.set(DARK.x0, DARK.cell, this.k, this.cz);
-    U.uK.value = this.k; U.uFloor.value = FLOOR * this.k;
+    U.uK.value = this.k; U.uFloor.value = STOREY * this.k;
     e.scene.add(this.root);
     CITY.camH = e.camPos.y; CITY.groundK = this.k;
     const cam = e.camPos;
@@ -139,10 +141,11 @@ export class CityLayer implements Layer {
       const lanes = a.major ? 4 : 2, wid = this.R(a.x1 - a.x0), cx = this.X((a.x0 + a.x1) / 2);
       for (let i = 0; i < lanes; i++) {
         const dir = i < lanes / 2 ? 1 : -1, off = ((i % (lanes / 2)) + 0.5) * (wid / lanes) * (dir > 0 ? 1 : -1) * 0.9;
-        const cars = Math.round((L / (a.major ? 110 : 190)) * dens);
+        // From this altitude traffic is a faint drift of light along the avenues, not individual cars.
+        const cars = Math.round((L / (a.major ? 260 : 520)) * dens);
         for (let c = 0; c < cars && n < MAX_CARS; c++, n++) {
-          aT.setXYZW(n, cx + off, Math.random() * L, dir * this.R(a.major ? 60 + Math.random() * 30 : 40 + Math.random() * 25), this.R(6));
-          if (dir > 0) aC.setXYZW(n, 1.0, 0.9, 0.72, 0.9); else aC.setXYZW(n, 1.0, 0.42, 0.14, 0.55);
+          aT.setXYZW(n, cx + off, Math.random() * L, dir * this.R((a.major ? 60 + Math.random() * 30 : 40 + Math.random() * 25) * CK), this.R(9 * CK));
+          if (dir > 0) aC.setXYZW(n, 1.0, 0.9, 0.72, 0.45); else aC.setXYZW(n, 1.0, 0.42, 0.14, 0.3);
         }
       }
     }
@@ -182,22 +185,12 @@ export class CityLayer implements Layer {
       for (const p of ch.pads) nf = this.flat(nf, p.x0, p.y0, p.x1, p.y1, 0.4, surf[p.s]);
       for (const r of ch.roads) {
         nf = this.flat(nf, r.x0, r.y0, r.x1, r.y1, 0.8, road);
-        // The street itself glows with its lamps: the grid reads as light between dark blocks.
-        if (r.dir === 0) this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.x1 - r.x0) * 1.5), lamp, r.major ? 0.19 : 0.13, 5, 0, R(r.y1 - r.y0), 0);
-        else this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.y1 - r.y0) * 1.5), lamp, 0.13, 5, 0, R(r.x1 - r.x0), 1);
-        // Street lamps down both kerbs, a pool of sodium light under each.
-        const step = r.major ? 26 : 34;
-        if (r.dir === 0) {
-          for (let y = r.y0 + 8; y < r.y1; y += step) for (const x of [r.x0 + 1.5, r.x1 - 1.5]) {
-            this.light(X(x), R(3), Z(y), R(2.6), lampHot, 1, 0);
-            this.light(X(x), 1.4, Z(y), R(r.major ? 15 : 12), lamp, 0.16, 1);
-          }
-        } else {
-          for (let x = r.x0 + 10; x < r.x1; x += step) for (const y of [r.y0 + 1.5, r.y1 - 1.5]) {
-            this.light(X(x), R(3), Z(y), R(2.6), lampHot, 1, 0);
-            this.light(X(x), 1.4, Z(y), R(12), lamp, 0.16, 1);
-          }
-        }
+        // The street itself glows with its lamps: from this high the grid reads as faint lines of
+        // light between dark blocks (kept dim: the city is the backdrop, never the subject).
+        if (r.dir === 0) this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.x1 - r.x0) * 1.6), lamp, r.major ? 0.13 : 0.075, 5, 0, R(r.y1 - r.y0), 0);
+        else this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.y1 - r.y0) * 1.6), lamp, 0.075, 5, 0, R(r.x1 - r.x0), 1);
+        // Lamp heads only along the major avenues, a pixel of sodium every so often.
+        if (r.major && r.dir === 0) for (let y = r.y0 + 6; y < r.y1; y += 22) for (const x of [r.x0 + 0.6, r.x1 - 0.6]) this.light(X(x), R(1), Z(y), R(1.3), lampHot, 0.55, 0);
       }
       for (const b of ch.bldgs) {
         const st = STYLE_TINT[b.style] ?? STYLE_TINT[1];
@@ -215,37 +208,37 @@ export class CityLayer implements Layer {
           nb++; b.rn++;
         }
         const roofY = R(top.z0 + top.hgt), cx = X(b.x + top.ox), cz = Z(b.cy + top.oy);
-        if (b.kind === 'flare') { this.fires.push({ x: cx, y: roofY, z: cz, s: R(10), seed: b.seed, b }); continue; }
+        if (b.kind === 'flare') { this.fires.push({ x: cx, y: roofY, z: cz, s: R(4), seed: b.seed, b }); continue; }
         if (b.kind === 'chimney' || b.kind === 'cooler') { this.stacks.push({ x: cx, y: roofY, z: cz, s: R(top.w * (b.kind === 'cooler' ? 0.7 : 1)), seed: b.seed, b }); }
         // Aviation beacons on the tall ones (white and amber: red is reserved for threats).
-        if (b.hgt > 44 && !b.dead) {
-          const i = this.light(cx, roofY + R(1.5), cz, R(5), b.seed > 0.5 ? white : amber, 1, 3, b.seed * 7);
+        if (b.hgt > 40 && !b.dead) {
+          const i = this.light(cx, roofY + R(0.6), cz, R(2.2), b.seed > 0.5 ? white : amber, 0.8, 3, b.seed * 7);
           if (i >= 0) this.bLights.push({ i, b });
         }
       }
       for (const p of ch.props) {
         const x = X(p.x), z = Z(p.cy);
         switch (p.k) {
-          case 'lamp': this.light(x, R(p.h || 3), z, R(2.8), lampHot, 1, p.v > 0.5 ? 2 : 0); this.light(x, 1.4, z, R(16), lamp, 0.14, 1); break;
+          case 'lamp': this.light(x, R(p.h || 1), z, R(1.3), lampHot, 0.6, p.v > 0.5 ? 2 : 0); this.light(x, 1.4, z, R(5), lamp, 0.1, 1); break;
           case 'tree': np = this.box(np, x, 0, z, R(p.w), R(p.h), R(p.w), 0, col.setHSL(0.3, 0.25, p.v > 0.9 ? 0.03 : 0.06 + p.v * 0.03)); break;
           case 'container': np = this.box(np, x, 0, z, R(p.w), R(p.h), R(p.d), p.rot, CONTAINERS[Math.floor(p.v * CONTAINERS.length)].clone().multiplyScalar(0.5)); break;
           case 'railcar': case 'loco': np = this.box(np, x, 0, z, R(p.w), R(p.h), R(p.d), 0, col.setHSL(0.06, 0.2, 0.08 + p.v * 0.05)); break;
           case 'pipe': np = this.box(np, x, R(2), z, R(p.w), R(p.h), R(p.d), 0, col.setHSL(0.08, 0.1, 0.16)); break;
           case 'rubble': case 'hulk': np = this.box(np, x, 0, z, R(p.w), R(p.h), R(p.d), p.rot, col.setHSL(0.05, 0.05, 0.07)); break;
-          case 'pylon': np = this.box(np, x, 0, z, R(1.2), R(p.h), R(1.2), 0, col.setHSL(0.6, 0.05, 0.12)); break;
+          case 'pylon': np = this.box(np, x, 0, z, R(0.5), R(p.h), R(0.5), 0, col.setHSL(0.6, 0.05, 0.12)); break;
           case 'crane': {
-            np = this.box(np, x, 0, z, R(4), R(p.h), R(4), 0, col.setHSL(0.09, 0.5, 0.2));
-            np = this.box(np, x - R(16), R(p.h - 4), z, R(46), R(2.5), R(3), 0, col.setHSL(0.09, 0.5, 0.2));
-            this.light(x - R(38), R(p.h - 2), z, R(4), amber, 1, 3, p.v * 5);
+            np = this.box(np, x, 0, z, R(4 * CK), R(p.h), R(4 * CK), 0, col.setHSL(0.09, 0.5, 0.2));
+            np = this.box(np, x - R(16 * CK), R(p.h - 4 * CK), z, R(46 * CK), R(2.5 * CK), R(3 * CK), 0, col.setHSL(0.09, 0.5, 0.2));
+            this.light(x - R(38 * CK), R(p.h - 2 * CK), z, R(1.6), amber, 0.7, 3, p.v * 5);
             break;
           }
           case 'ship': {
             np = this.box(np, x, 0, z, R(p.w), R(p.h), R(p.d), 0, col.setHSL(0.6, 0.08, 0.09));
-            np = this.box(np, x + R(p.w * 0.36), R(p.h), z, R(p.w * 0.12), R(8), R(p.d * 0.7), 0, col.setHSL(0.6, 0.04, 0.2));
-            for (let i = 0; i < 6; i++) this.light(x + R((i / 5 - 0.5) * p.w * 0.85), R(p.h + 1), z, R(2.4), lampHot, 1, 2);
+            np = this.box(np, x + R(p.w * 0.36), R(p.h), z, R(p.w * 0.12), R(8 * CK), R(p.d * 0.7), 0, col.setHSL(0.6, 0.04, 0.2));
+            for (let i = 0; i < 4; i++) this.light(x + R((i / 3 - 0.5) * p.w * 0.85), R(p.h + 0.3), z, R(1.2), lampHot, 0.6, 2);
             break;
           }
-          case 'searchlight': this.anchors.push({ x, z, y: R(p.h) + 2, phase: p.v * 10, b: p.on }); break;
+          case 'searchlight': this.anchors.push({ x, z, y: R(p.h) + 1, phase: p.v * 10, b: p.on }); break;
           case 'fire': this.fires.push({ x, y: 1, z, s: R(p.w), seed: p.v }); break;
         }
       }
@@ -323,11 +316,11 @@ export class CityLayer implements Layer {
       glow.add(x + ox, y + 2 + i, z + oz, 0, sz * (0.45 + 0.25 * f) * fl, sz * (0.45 + 0.25 * f) * fl, i === 0 ? FIRE_B : FIRE_A, 0.38 * f * fl, Shape.Soft);
     }
     glow.add(x, 2, z, 0, sz * 2.4, sz * 2.4, EMBER, 0.12 * f, Shape.Soft);
-    for (let i = 0; i < 6; i++) {
-      const ph = (t * 0.22 + i / 6 + seed * 3.7) % 1;
-      const h = y + ph * 300 * k * (0.4 + 0.6 * f);
-      const s = (sz * 0.6 + ph * 70 * k) * (0.6 + 0.6 * f);
-      dark.add(x + ph * ph * 90 * k + Math.sin(seed * 20 + i * 3) * sz * 0.2, h, z + ph * 40 * k, ph * 3 + seed, s, s, SMOKE, (1 - ph) * (ph < 0.08 ? ph / 0.08 : 1) * 0.42 * Math.min(1, f * 1.5), DarkShape.Soft);
+    for (let i = 0; i < 5; i++) {
+      const ph = (t * 0.22 + i / 5 + seed * 3.7) % 1;
+      const h = y + ph * 160 * k * (0.4 + 0.6 * f);
+      const s = (sz * 0.8 + ph * 34 * k) * (0.6 + 0.6 * f);
+      dark.add(x + ph * ph * 50 * k + Math.sin(seed * 20 + i * 3) * sz * 0.2, h, z + ph * 22 * k, ph * 3 + seed, s, s, SMOKE, (1 - ph) * (ph < 0.08 ? ph / 0.08 : 1) * 0.36 * Math.min(1, f * 1.5), DarkShape.Soft);
     }
   }
 
@@ -335,8 +328,8 @@ export class CityLayer implements Layer {
     const k = this.k;
     for (let i = 0; i < 5; i++) {
       const ph = (t * (steam ? 0.12 : 0.18) + i / 5 + seed * 5.1) % 1;
-      const s = sz * (steam ? 1.0 : 1.2) + ph * (steam ? 80 : 60) * k;
-      dark.add(x + ph * ph * 110 * k, y + ph * (steam ? 160 : 220) * k, z + ph * 30 * k, ph * 2 + seed, s, s, steam ? STEAM : SMOKE, (1 - ph) * Math.min(1, ph * 8) * (steam ? 0.22 : 0.28), DarkShape.Soft);
+      const s = sz * (steam ? 1.0 : 1.2) + ph * (steam ? 40 : 30) * k;
+      dark.add(x + ph * ph * 60 * k, y + ph * (steam ? 90 : 120) * k, z + ph * 16 * k, ph * 2 + seed, s, s, steam ? STEAM : SMOKE, (1 - ph) * Math.min(1, ph * 8) * (steam ? 0.22 : 0.28), DarkShape.Soft);
     }
   }
 
