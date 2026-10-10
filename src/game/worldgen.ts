@@ -376,7 +376,7 @@ function fillRefinery(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number,
     const cx = rnd(x0 + 20, x1 - 20), cy = rnd(y0 + 20, y1 - 20), d = rnd(7, 11);
     bldg(ch, 'chimney', cx - d / 2, cy - d / 2, cx + d / 2, cy + d / 2, [tier(d, d, 0, rnd(70, 120))], Style.Metal, { lit: 0 });
   }
-  if (Math.random() < 0.5) {
+  if (Math.random() < 0.15) {
     const cx = rnd(x0 + 20, x1 - 20), cy = rnd(y0 + 20, y1 - 20);
     bldg(ch, 'flare', cx - 3, cy - 3, cx + 3, cy + 3, [tier(5, 5, 0, rnd(80, 110))], Style.Metal, { lit: 0, keepLit: true });
   }

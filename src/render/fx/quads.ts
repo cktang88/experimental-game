@@ -2,7 +2,8 @@
 // One draw call per batch. Quads lie in the XZ plane (the camera looks down), rotated about Y.
 import * as THREE from 'three';
 
-export const enum Shape { Hot = 0, Soft = 1, Ring = 2, Streak = 3 }
+/** Bracket: four corner marks of a square (target brackets on hostile ground units). */
+export const enum Shape { Hot = 0, Soft = 1, Ring = 2, Streak = 3, Bracket = 4 }
 export const enum DarkShape { Soft = 0, Rect = 1, Ring = 2 }
 
 const VS = `attribute vec3 aPos;attribute vec3 aRs;attribute vec4 aCol;attribute float aShp;
@@ -16,8 +17,9 @@ void main(){vec2 p=vUv*2.0-1.0;float d=length(p);vec3 col=vCol.rgb;float a=0.0;
   if(vShp<0.5){a=pow(max(0.0,1.0-d),1.5);col=mix(col,vec3(1.0),pow(max(0.0,1.0-d*2.4),2.0));}
   else if(vShp<1.5){a=pow(max(0.0,1.0-d),2.2);}
   else if(vShp<2.5){a=smoothstep(0.62,0.86,d)*(1.0-smoothstep(0.86,1.0,d));}
-  else{float ay=abs(p.y),ax=abs(p.x);a=pow(max(0.0,1.0-ay),1.8)*(1.0-smoothstep(0.55,1.0,ax));
+  else if(vShp<3.5){float ay=abs(p.y),ax=abs(p.x);a=pow(max(0.0,1.0-ay),1.8)*(1.0-smoothstep(0.55,1.0,ax));
     col=mix(col,vec3(1.0),pow(max(0.0,1.0-ay*2.2),3.0)*(1.0-smoothstep(0.3,1.0,ax))*0.9);}
+  else{vec2 q=abs(p);float m=max(q.x,q.y);a=smoothstep(0.8,0.87,m)*(1.0-smoothstep(0.95,1.0,m))*step(0.55,min(q.x,q.y));}
   gl_FragColor=vec4(col*a*vCol.a*2.2,1.0);}`;
 const DARK_FS = `varying vec2 vUv;varying vec4 vCol;varying float vShp;
 void main(){vec2 p=vUv*2.0-1.0;float d=length(p);float a;

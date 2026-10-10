@@ -9,18 +9,22 @@
 import * as THREE from 'three';
 import type { Detail } from './kit';
 
-export interface Livery { paint: number; metal: number; lamp: string; lampK: number }
-/** Enemy military liveries (docs/ART.md): olive drab, desert, charcoal. Lamps are hostile red. */
+/**
+ * rim: the silhouette edge light (fresnel) every unit carries, so it reads as a hard-edged object over
+ * the busy city: hostile red on everything that fights (docs/ART.md "Readability"), gold on salvage.
+ */
+export interface Livery { paint: number; metal: number; lamp: string; lampK: number; rim: string; rimK: number }
+/** Enemy military liveries (docs/ART.md): olive drab, desert, charcoal. Lamps and rims are hostile red. */
 export const LIVERY = {
-  olive: { paint: 0x4f5a34, metal: 0x3d4247, lamp: '#ff5a4e', lampK: 3 },
-  desert: { paint: 0x8a7550, metal: 0x44474a, lamp: '#ff5a4e', lampK: 3 },
-  charcoal: { paint: 0x2b2f33, metal: 0x4a5058, lamp: '#ff5a4e', lampK: 3 },
+  olive: { paint: 0x4f5a34, metal: 0x3d4247, lamp: '#ff5a4e', lampK: 3, rim: '#ff5a4e', rimK: 1.25 },
+  desert: { paint: 0x8a7550, metal: 0x44474a, lamp: '#ff5a4e', lampK: 3, rim: '#ff5a4e', rimK: 1.1 },
+  charcoal: { paint: 0x2b2f33, metal: 0x4a5058, lamp: '#ff5a4e', lampK: 3, rim: '#ff5a4e', rimK: 1.3 },
   /** Elites: charcoal with oxide-red paint. */
-  elite: { paint: 0x5a2a26, metal: 0x2e3236, lamp: '#ff5a4e', lampK: 4 },
+  elite: { paint: 0x5a2a26, metal: 0x2e3236, lamp: '#ff5a4e', lampK: 4, rim: '#ff6a4e', rimK: 1.4 },
   /** Salvage: worn hazard-yellow (scrap colour) over steel; lamps glow scrap gold. */
-  salvage: { paint: 0x8a6a2a, metal: 0x4c5157, lamp: '#ffc24a', lampK: 3.5 },
+  salvage: { paint: 0x8a6a2a, metal: 0x4c5157, lamp: '#ffc24a', lampK: 3.5, rim: '#ffc24a', rimK: 1.0 },
   /** Infantry fatigues. */
-  fatigue: { paint: 0x46502f, metal: 0x2a2c2a, lamp: '#fff1d6', lampK: 3 },
+  fatigue: { paint: 0x46502f, metal: 0x2a2c2a, lamp: '#fff1d6', lampK: 3, rim: '#ff5a4e', rimK: 1.5 },
 } satisfies Record<string, Livery>;
 export type LiveryName = keyof typeof LIVERY;
 
@@ -40,9 +44,9 @@ export function liveryMaterial(name: LiveryName, detail: Detail | null, o: Liver
   if (o.map) { o.map.colorSpace = THREE.NoColorSpace; o.map.needsUpdate = true; m.map = o.map; }
   else m.vertexColors = true;
   if (o.normalMap) { m.normalMap = o.normalMap; m.normalScale.set(0.9, 0.9); }
-  const lamp = new THREE.Color(L.lamp).multiplyScalar(L.lampK);
+  const lamp = new THREE.Color(L.lamp).multiplyScalar(L.lampK), rimC = new THREE.Color(L.rim).multiplyScalar(L.rimK);
   const uniforms = {
-    uPaint: { value: new THREE.Color(L.paint) }, uMetal: { value: new THREE.Color(L.metal) }, uLamp: { value: lamp },
+    uPaint: { value: new THREE.Color(L.paint) }, uMetal: { value: new THREE.Color(L.metal) }, uLamp: { value: lamp }, uRim: { value: rimC },
     uGrunge: { value: detail?.grunge ?? blankTex() }, uDetail: { value: 1 / (o.detailScale ?? 22) }, uTime: liveryUniforms.uTime,
   };
   m.onBeforeCompile = (sh) => {
@@ -54,7 +58,7 @@ attribute vec2 aFx; varying vec2 vFx; varying vec3 vObjPos; varying vec3 vObjN;`
 vFx = aFx; vObjPos = position; vObjN = normal;`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-uniform vec3 uPaint; uniform vec3 uMetal; uniform vec3 uLamp; uniform sampler2D uGrunge; uniform float uDetail; uniform float uTime;
+uniform vec3 uPaint; uniform vec3 uMetal; uniform vec3 uLamp; uniform vec3 uRim; uniform sampler2D uGrunge; uniform float uDetail; uniform float uTime;
 varying vec2 vFx; varying vec3 vObjPos; varying vec3 vObjN;
 float tri(vec3 p, vec3 w) { return texture2D(uGrunge, p.yz).r * w.x + texture2D(uGrunge, p.xz).r * w.y + texture2D(uGrunge, p.xy).r * w.z; }`)
       .replace('#include <map_fragment>', `
@@ -81,9 +85,12 @@ float tri(vec3 p, vec3 w) { return texture2D(uGrunge, p.yz).r * w.x + texture2D(
       .replace('#include <emissivemap_fragment>', `
   totalEmissiveRadiance = uLamp * lampM * (1.0 - vFx.y);
   totalEmissiveRadiance += vec3(1.0, 0.92, 0.82) * vFx.x * 0.55;
-  // cold moonlit rim so small units read against the dark city
-  float rim = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 2.5);
-  totalEmissiveRadiance += vec3(0.32, 0.4, 0.52) * rim * 0.22 * (1.0 - vFx.y);
+  // Marking rim: a thin hostile edge light on the silhouette so every unit reads as a hard-edged
+  // target over the city (kept below the bloom threshold: an outline, not a glow).
+  float rim = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 1.6);
+  totalEmissiveRadiance += uRim * smoothstep(0.12, 0.6, rim) * 0.85 * (1.0 - vFx.y);
+  // Moonlit fill: the paint stays legible in the dark (chunky, readable silhouettes over a quiet city).
+  totalEmissiveRadiance += base * 0.32 * (1.0 - vFx.y);
   float ember = smoothstep(0.58, 0.8, gr2) * (0.55 + 0.45 * sin(uTime * 6.0 + vObjPos.x * 0.7 + vObjPos.z * 0.5));
   totalEmissiveRadiance += vec3(1.0, 0.32, 0.06) * ember * vFx.y * 1.6;`);
   };

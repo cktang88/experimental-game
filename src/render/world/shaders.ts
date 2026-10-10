@@ -119,7 +119,7 @@ const BLD_FRAG = /* glsl */ `
     vec3 wc = tone * (0.25 + 0.95 * h12(cell * 1.7 + seed * 91.0) * h12(cell.yx + seed));
     if (glass > 0.5) { wc *= vec3(0.75, 0.9, 1.1); diffuseColor.rgb *= vec3(0.8, 0.95, 1.25); }
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.015, 0.018, 0.024), inWin * 0.75);
-    totalEmissiveRadiance += wc * on * power * (1.0 - vFall);
+    totalEmissiveRadiance += wc * on * power * (1.0 - vFall) * 0.7;
     // Burning floors: random windows turn to fire, and soot climbs the wall.
     float burn = step(h12(cell + 3.7 + seed), fire * 0.9) * inWin;
     diffuseColor.rgb *= 1.0 - 0.6 * fire;

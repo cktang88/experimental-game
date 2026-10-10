@@ -293,7 +293,7 @@ export class CityLayer implements Layer {
         const fl = 0.8 + 0.2 * Math.sin(t * 11 + f.seed * 30);
         glow.add(f.x, f.y + f.s, f.z + scrollZ, 0, f.s * 1.2 * fl, f.s * 2.2 * fl, FIRE_A, 1.1, Shape.Soft);
         glow.add(f.x, f.y + f.s * 0.6, f.z + scrollZ, 0, f.s * 0.6, f.s * 1.1, FIRE_B, 1.2, Shape.Hot);
-        glow.add(f.x, 2, f.z + scrollZ, 0, f.s * 12, f.s * 12, FIRE_A, 0.12, Shape.Soft);
+        glow.add(f.x, 2, f.z + scrollZ, 0, f.s * 9, f.s * 9, FIRE_A, 0.06, Shape.Soft);
       } else this.burn(glow, dark, f.x, f.y, f.z + scrollZ, f.s * 1.5, 0.6, f.seed, t);
     }
     for (const s of this.stacks) {

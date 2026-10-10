@@ -22,6 +22,10 @@ export interface UnitSpec {
   heads: THREE.Vector3[]; muzzles: THREE.Vector3[];
   /** Rough half-length for effects (smoke, fire, wreck size). */
   size: number; revealAlt: number; tracks: number;
+  /** Draw several copies (a squad) at these unit-frame offsets, each scaled by squadScale. */
+  squad?: THREE.Vector3[]; squadScale?: number;
+  /** Half-size of the hostile marking (dark halo and target brackets), field units. */
+  mark: number;
 }
 
 /** Yaw (radians) that turns each kit model's nose to +Z. */
@@ -83,7 +87,7 @@ export function buildSpecs(scene: THREE.Scene): Partial<Record<EnemyType, UnitSp
   };
   const L = (p: THREE.Vector3, kind: LightKind, size: number, head = -1): LightDef => ({ p, kind, size, head });
   const S: Partial<Record<EnemyType, UnitSpec>> = {};
-  const base = (type: EnemyType, air: boolean, size: number): UnitSpec => ({ type, air, parts: [], lights: [], muzzles: [], size, heads: [], revealAlt: air ? 320 : 0, tracks: 0 });
+  const base = (type: EnemyType, air: boolean, size: number): UnitSpec => ({ type, air, parts: [], lights: [], muzzles: [], size, heads: [], revealAlt: air ? 320 : 0, tracks: 0, mark: size * 1.2 });
   /** An aircraft from a ship model with nav lights at the wingtips, a strobe at the tail and a beacon on top. */
   const aircraft = (type: EnemyType, model: string, liv: LiveryName, cap: number, o: NormOpts, size: number) => {
     const k = kitParts(model, liv, cap, o); if (!k) return null;
@@ -164,9 +168,12 @@ export function buildSpecs(scene: THREE.Scene): Partial<Record<EnemyType, UnitSp
     s.tracks = 6.7; S.tank = s;
   }
   {
+    // A squad reads as a cluster of three oversized figures: one soldier is a pixel from up here.
     const s = base('infantry', false, 4);
-    s.parts.push(part(pool(G.soldier(), 'fatigue', 240, { detail: 6 })));
-    s.lights.push(L(V(0, 5.85, 0.9), 'head', 2.2));
+    s.parts.push(part(pool(G.soldier(), 'fatigue', 720, { detail: 6 })));
+    s.squad = [V(-4.5, 0, -2.5), V(4.5, 0, -1.5), V(0, 0, 4)]; s.squadScale = 1.6;
+    s.lights.push(L(V(0, 5.85 * 1.6, 4 + 0.9 * 1.6), 'head', 2.6));
+    s.mark = 12;
     S.infantry = s;
   }
   {

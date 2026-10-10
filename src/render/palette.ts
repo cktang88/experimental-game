@@ -9,6 +9,9 @@ export const PAL = {
   plasma: '#4fd1e8',
   hostile: '#ff5a4e',
   hostileHot: '#ff7a5c',
+  /** Enemy fire only (bullets, missiles, shells, beams, wind-up glints): magenta-pink, white-hot centres. */
+  threat: '#ff2f8e',
+  threatHot: '#ff9ad5',
   good: '#8fe39a',
   scrap: '#e0c35c',
   white: '#fff4e0',
