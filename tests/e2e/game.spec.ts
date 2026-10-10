@@ -66,12 +66,95 @@ test('title, map and a full fight with reward and refit', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Refit ship' })).toBeVisible();
   const plateIdx = await gd<number>(page, "g.run.inv.findIndex(p => p.id === 'plate')");
   await page.click(`[data-inv="${plateIdx}"]`);
-  await page.locator('.slot.empty.target').first().click();
-  await expect(page.locator('.toast')).toContainText('mounted');
+  await page.locator('.mtile.empty.cand').first().click();
+  await expect(page.locator('.rf-toast')).toContainText('mounted');
   expect(await gd<boolean>(page, "g.run.build.sections.some(s => s.slots.some(p => p && p.id === 'plate'))")).toBe(true);
   await page.screenshot({ path: `${SHOTS}/05-refit.png`, fullPage: true });
   await page.click('#btn-done');
   await expect(page.locator('svg[aria-label="Sector 1 route map"]')).toBeVisible();
+});
+
+/** A real mouse drag: press on `from`, travel, hover `to` (checked by `mid` while held), release. */
+async function drag(page: Page, from: string, to: string | (() => Promise<string>), mid?: () => Promise<void>) {
+  const box = async (sel: string) => { const b = (await page.locator(sel).first().boundingBox())!; return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
+  const a = await box(from);
+  await page.mouse.move(a.x, a.y); await page.mouse.down();
+  await page.mouse.move(a.x + 14, a.y + 10, { steps: 3 });
+  const b = await box(typeof to === 'string' ? to : await to());
+  await page.mouse.move(b.x, b.y, { steps: 8 });
+  if (mid) await mid();
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+}
+
+test('refit board: drag to equip, swap mounts, unmount, reorder sections, keyboard, and buy from the counter', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await startRun(page);
+  await gd(page, "(g.run.inv.push({ id: 'flak', tier: 2, uid: 99001 }), g.addScrap(1500))");
+  await page.click('#btn-refit');
+  await expect(page.getByRole('heading', { name: 'Refit ship' })).toBeVisible();
+  // Every mount is called out: one socket tile and one leader line per mount.
+  const mounts = await gd<number>(page, 'g.run.build.sections.reduce((a, s) => a + s.slots.length, 0)');
+  await expect(page.locator('.mtile')).toHaveCount(mounts);
+  await expect(page.locator('.board-lines .lead')).toHaveCount(mounts);
+  await page.screenshot({ path: `${SHOTS}/15-refit-board.png` });
+
+  // Drag the flak battery from the hold onto the port battery: weapon mounts light up, the utility bay dims with its reason.
+  const flak = await gd<number>(page, "g.run.inv.findIndex(p => p.id === 'flak')");
+  await drag(page, `[data-inv="${flak}"]`, '[data-slot="1-0"]', async () => {
+    await expect(page.locator('[data-slot="1-0"]')).toHaveClass(/\bcand\b/);
+    await expect(page.locator('[data-slot="1-0"]')).toHaveClass(/\bover\b/);
+    await expect(page.locator('[data-slot="2-0"]')).toHaveClass(/\bnope\b/);
+    await expect(page.locator('[data-slot="2-0"] .mt-say')).toHaveText(/Fittings only/i);
+    await expect(page.locator('.board-lines .arc-w.hot')).toHaveCount(1);
+    await page.screenshot({ path: `${SHOTS}/16-refit-drag.png` });
+  });
+  expect(await gd<string>(page, 'g.run.build.sections[1].slots[0].id')).toBe('flak');
+  expect(await gd<boolean>(page, "g.run.inv.some(p => p.id === 'pulse')")).toBe(true);
+  await expect(page.locator('.rf-toast')).toContainText('mounted');
+
+  // Swap: the centre bomb bay onto the bow; the bow gun moves across into the battery centre.
+  await drag(page, '[data-slot="1-1"]', '[data-slot="0-0"]');
+  expect(await gd<string>(page, 'g.run.build.sections[0].slots[0].id')).toBe('bomb');
+  expect(await gd<string>(page, 'g.run.build.sections[1].slots[1].id')).toBe('pulse');
+
+  // A part dropped on the wrong kind of socket is refused and nothing moves.
+  const plate = await gd<number>(page, "g.run.inv.findIndex(p => p.id === 'plate')");
+  const before = await gd<string>(page, 'JSON.stringify(g.run.build.sections.map(s => s.slots.map(p => p && p.id)))');
+  await drag(page, `[data-inv="${plate}"]`, '[data-slot="1-2"]');
+  expect(await gd<string>(page, 'JSON.stringify(g.run.build.sections.map(s => s.slots.map(p => p && p.id)))')).toBe(before);
+  await expect(page.locator('.rf-toast')).toContainText('needs a utility bay');
+
+  // Back to the hold.
+  const inv0 = await gd<number>(page, 'g.run.inv.length');
+  await drag(page, '[data-slot="0-0"]', '.rf-hold');
+  expect(await gd<unknown>(page, 'g.run.build.sections[0].slots[0]')).toBe(null);
+  expect(await gd<number>(page, 'g.run.inv.length')).toBe(inv0 + 1);
+
+  // Keyboard: pick the plate in the hold with Enter, place it in the engine bay with Enter.
+  const plate2 = await gd<number>(page, "g.run.inv.findIndex(p => p.id === 'plate')");
+  await page.focus(`[data-inv="${plate2}"]`); await page.keyboard.press('Enter');
+  await expect(page.locator('[data-slot="2-0"]')).toHaveClass(/\bcand\b/);
+  await page.focus('[data-slot="2-0"]'); await page.keyboard.press('Enter');
+  expect(await gd<string>(page, 'g.run.build.sections[2].slots[0].id')).toBe('plate');
+
+  // Sections: drag the engine block forward of the battery.
+  await drag(page, 'li.sec[data-sec="2"] .sec-nm', 'li.sec[data-sec="1"]');
+  expect(await gd<string>(page, "g.run.build.sections.map(s => s.type).join(',')")).toBe('bridge,engine,battery');
+  expect(await page.evaluate(() => localStorage.getItem('gd.run.v3') ?? '')).toContain('"engine"');
+  await page.screenshot({ path: `${SHOTS}/17-refit-after.png` });
+  await page.click('#btn-done');
+  await expect(page.locator('svg[aria-label^="Sector"]')).toBeVisible();
+
+  // The quartermaster's counter comes along to the refit bay: drag a slip onto a lit socket to buy and mount it.
+  await gd(page, "g.forceNext('merchant')");
+  await expect(page.getByRole('heading', { name: 'Merchant' })).toBeVisible();
+  await page.getByRole('button', { name: /Refit ship/ }).click();
+  await expect(page.locator('[data-mkt]').first()).toBeVisible();
+  const scrap0 = await gd<number>(page, 'g.run.scrap');
+  await drag(page, '[data-mkt]:not(.short)', async () => { await expect(page.locator('.mtile.cand').first()).toBeVisible(); return '.mtile.cand'; });
+  expect(await gd<number>(page, 'g.run.scrap')).toBeLessThan(scrap0);
+  await expect(page.locator('.rf-toast')).toContainText('mounted');
 });
 
 test('merchant, event, drydock, derelict and elite nodes', async ({ page }) => {

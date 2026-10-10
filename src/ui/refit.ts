@@ -67,6 +67,8 @@ export function refitPanel(run: RunState, onChange: () => void, extras: RefitExt
   let pick: Src | null = null, over: Dst | null = null, dragKind: 'part' | 'sec' | null = null;
   let secDrag: number | null = null, secOver: number | null = null, secHl: number | null = null, cutArm: number | null = null;
   let hl: { si: number; i: number } | null = null, toast = '', fresh: string | null = null, focusKey: string | null = null;
+  /** Part tile under the pointer (hold or counter), for the readout. */
+  let hoverPart: Part | null = null;
   let L: Board | null = null;
 
   const root = el('div', 'refit2');
@@ -272,6 +274,8 @@ export function refitPanel(run: RunState, onChange: () => void, extras: RefitExt
       body = [head(p), el('p', null, partDesc(p)),
         isWeapon(p.id) ? el('p', 'rd-dim', `${weaponControl(p.id) === 'heavy' ? 'Heavy: aimed with the mouse.' : 'Auto: fires on its own.'} ${placementNote(p.id)}`) : el('p', 'rd-dim', 'Fits a utility bay.'),
         where ?? el('p', 'rd-dim', pick?.k === 'market' ? `Quartermaster asks ${pick.price} scrap. Drop it on a lit socket to buy and mount it.` : 'Lit sockets take it; the tag on each says what it would engage there.')];
+    } else if (hoverPart && !hl) {
+      body = [head(hoverPart), el('p', null, partDesc(hoverPart)), el('p', 'rd-dim', isWeapon(hoverPart.id) ? placementNote(hoverPart.id) : 'Fits a utility bay.')];
     } else if (hl) {
       const s = run.build.sections[hl.si], q = s?.slots[hl.i];
       body = q ? [head(q), el('p', null, partDesc(q)), el('p', 'rd-dim', `${mountName(s.type, hl.i)}. Drag to another socket to swap, or to the hold.`)]
@@ -293,6 +297,8 @@ export function refitPanel(run: RunState, onChange: () => void, extras: RefitExt
     el('span', 'pt-txt', el('b', null, partDef(p.id).name), el('span', 'pt-sub', `Mk ${TIER[p.tier]}`, rankPips(p.tier))),
     el('em', 'pt-kind', extra.price != null ? `${extra.price}` : partSlot(p.id) === 'W' ? 'W' : 'U'));
     b.addEventListener('click', () => { if (pick && sameLoc(pick, src)) pick = null; else { pick = src; over = null; } focusKey = k; render(); });
+    b.addEventListener('pointerenter', () => { if (!dragging()) { hoverPart = p; paintRead(dv(run)); } });
+    b.addEventListener('pointerleave', () => { if (!dragging() && hoverPart === p) { hoverPart = null; paintRead(dv(run)); } });
     draggable(b, () => partDrag(src));
     return b;
   };
@@ -435,7 +441,7 @@ export function refitPanel(run: RunState, onChange: () => void, extras: RefitExt
     toast = `${SECTIONS[m.type].name} welded to the stern.`; uiSound('buy'); onChange(); render();
   }
 
-  const render = () => { if (dragging()) return; paintSide(); paintBoard(); };
+  const render = () => { if (dragging()) return; hoverPart = null; paintSide(); paintBoard(); };
   // Keyboard: Escape lets go of a picked part (a drag in progress handles its own Escape).
   root.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !dragging() && (pick || cutArm != null)) { e.preventDefault(); e.stopPropagation(); pick = null; over = null; cutArm = null; toast = ''; render(); } });
   // Lay out once the board has a size, and again whenever it changes (window resize, rotating a phone).
