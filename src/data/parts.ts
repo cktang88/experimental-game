@@ -196,9 +196,10 @@ export function clampTraverse(t: Traverse, fieldAngle: number, mirrored = false)
   }
   return shipToField(best, mirrored);
 }
-/** Can a mount that engages `layers` hit a target on `layer` (enemy layers are 'air', 'ground' or 'both' for ships)? */
+/** Can a mount that engages `layers` hit a target on `layer`? Enemy layers are 'air', 'ground', or 'both' for a ghost
+ *  dreadnought: a flying ship, so air guns reach it and ground ordnance does not. */
 export const layersHit = (layers: TargetLayers, layer: string) =>
-  layers === 'both' || layer === 'both' || layers === layer;
+  layers === 'both' || layers === layer || (layer === 'both' && layers === 'air');
 /** Short HUD/refit tag for target layers. */
 export const LAYERS_TAG: Record<TargetLayers, string> = { air: 'AIR', ground: 'GND', both: 'ALL', shots: 'PD', none: '' };
 /** Where a weapon works, for part cards: what each placement lets it engage. */

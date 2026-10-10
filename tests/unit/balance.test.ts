@@ -37,9 +37,18 @@ describe('balance harness (headless combat)', () => {
       expect(r.overdrives, hull).toBeGreaterThanOrEqual(1);
     }
   });
+  it('a mouse gunner firing the heavy groups by hand does at least as well as the self-aiming batteries', () => {
+    for (const [enc, level, sector, build] of [[FIGHTS[0], 1, 1, 'starter'], [BOSS_ENCOUNTER, 6.6, 2, 'mid'], [FIGHTS[2], 7.7, 3, 'late']] as const) {
+      const auto = runFight({ enc, level, sector, build });
+      const hand = runFight({ enc, level, sector, build, bot: 'gunner' });
+      expect(hand.outcome, `${build} ${enc.id}`).toBe('win');
+      expect(hand.dps, `${build} ${enc.id}`).toBeGreaterThan(auto.dps * 0.85);
+      expect(hand.dps, `${build} ${enc.id}`).toBeLessThan(auto.dps * 1.6);
+    }
+  }, 60_000);
   it.runIf(REPORT)('prints the full table', async () => {
     const only = (process.env.ONLY || '').split(',').filter(Boolean);
-    for (const bot of ['pilot', 'idle'] as const) {
+    for (const bot of ['pilot', 'gunner', 'idle'] as const) {
       console.log(`\n=== bot: ${bot} ===`);
       for (const spec of balanceSpecs(bot, 1)) {
         if (only.length && !only.some((o) => `s${spec.sector}-${spec.enc.id}`.includes(o))) continue;

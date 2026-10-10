@@ -684,7 +684,7 @@ function updateOverdrive(dt: number) {
 export const gunnery = { manual: false, family: null as HeavyFamily | null };
 /** Manual fire numbers: the heavy-shot damage bonus (a deliberate shot replaces the broadside ripple's 1.2x), and how
  *  close to the reticle a missile lock reaches. Cones are the mount traverses (mountTraverse in data/parts.ts). */
-export const MANUAL = { dmgMul: 1.2, lockR: 170 } as const;
+export const MANUAL = { dmgMul: 1.1, lockR: 170 } as const;
 /**
  * The reticle (field units, the point under the mouse). `fire`: left mouse held (the selected group); `salvo`: right
  * mouse held (every heavy group). `group` indexes S.groups. `lock` is the missile lock (target nearest the reticle
@@ -981,7 +981,7 @@ function fireWeapon(p: Part, m: Mount, x: number, y: number, mul: number, side =
     }
     case 'artillery': {
       const P = S.P!;
-      const tg2 = nearest(P.x, P.y, (e) => (e.layer === 'ground' && !EN[e.type as EnemyType].salvage) || !!e.isBoss, ARC_RANGE.mortar)
+      const tg2 = nearest(P.x, P.y, (e) => (e.layer === 'ground' && !EN[e.type as EnemyType].salvage), ARC_RANGE.mortar)
         ?? nearest(P.x, P.y, (e) => e.layer === 'ground', ARC_RANGE.mortar);
       const tx = tg2 ? tg2.x : P.x + rnd(-260, 260), ty = tg2 ? (tg2.isBoss ? tg2.y : tg2.y + S.scroll * 0.6) : P.y - rnd(80, 320);
       shell(x, y, tx, ty, d, c, 36, 0.6); sfx('mortar', { x, layer: 'ship' }); return true;
@@ -1080,7 +1080,8 @@ function explode(x: number, y: number, r: number, d: number, layer: string, col:
   boomFx(x, y, r * 0.7, col, layer === 'ground');
   if (layer !== 'air') groundBlast(x, y, r, d);
   for (const e of S.enemies) if (!e.dead && layerOk(layer, e.layer) && Math.hypot(e.x - x, e.y - y) < r + e.r) damageTarget(e, d);
-  const B = S.boss; if (B && B.alive && shipHit(x, y, r * 0.6, B.x, B.y, B.dv, B.s, -1)) damageBoss(d);
+  // ground ordnance (bombs, mortar and broadside shells) bursts in the city far below a flying ghost dreadnought
+  const B = S.boss; if (layer !== 'ground' && B && B.alive && shipHit(x, y, r * 0.6, B.x, B.y, B.dv, B.s, -1)) damageBoss(d);
 }
 function updatePB(dt: number) {
   for (const b of S.pb) {

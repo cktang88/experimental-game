@@ -71,6 +71,7 @@ describe('mount traverse arcs', () => {
     expect(layersHit('air', 'ground')).toBe(false);
     expect(layersHit('air', 'both')).toBe(true); // a ghost dreadnought is fair game for the top deck
     expect(layersHit('ground', 'air')).toBe(false);
+    expect(layersHit('ground', 'both')).toBe(false); // bombs fall past a flying ghost
   });
   it('clamps to the nearest sector and mirrors for ghosts (bow down the screen)', () => {
     const bow = mountTraverse('bridge', 'W', 'rail');
