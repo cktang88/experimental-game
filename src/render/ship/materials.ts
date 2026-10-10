@@ -253,7 +253,7 @@ export function livery(hostile: boolean, renderer: THREE.WebGLRenderer | null): 
   const glowBasic = (hex: string, k: number, o: THREE.MeshBasicMaterialParameters = {}) => { const m = new THREE.MeshBasicMaterial({ color: hex, vertexColors: true, ...o }); m.color.multiplyScalar(k); m.toneMapped = false; return m; };
   const P = hostile
     ? { hull: '#4a3633', plate: '#3e2c2a', dark: '#1e1514', accent: '#8a2a1c', deckLine: '#7a2a22' }
-    : { hull: '#4c545d', plate: '#40474f', dark: '#22272c', accent: '#f2a541', deckLine: '#c9c4b4' };
+    : { hull: '#58616b', plate: '#4a525b', dark: '#262b31', accent: '#f2a541', deckLine: '#c9c4b4' };
   const L = hostile
     ? { window: '#ff7a5c', edge: '#ff5a4e', strobe: '#ff3a2e', deck: '#ff6a3d', engine: '#ff6a3d', engineHot: '#ffc0a0', energy: '#ff5a4e', port: '#ff3a2e', star: '#ff3a2e', navPort: '#ff3a2e', navStar: '#ff7a5c' }
     : { window: '#ffcf8a', edge: '#ffd9a0', strobe: '#f4fbff', deck: '#4fd1e8', engine: '#ffb347', engineHot: '#fff1c1', energy: '#4fd1e8', port: '#f2a541', star: '#8fe3ff', navPort: '#ff4636', navStar: '#3dff8a' };
