@@ -1,7 +1,7 @@
 // Daily strike duty roster: the registry's ranking printed on fan-fold line-printer paper (pin-feed margins, green
 // bars, a line-at-a-time print). The pilot's own row is marked with a highlighter. Used on the wreck report, the
 // port report and the daily strike briefing on the title.
-import type { DailyBoard, DailyRow, FilingResult } from '../../game/daily';
+import type { DailyBoard, DailyFiling, DailyRow, FilingResult } from '../../game/daily';
 import { HULLS, type HullId } from '../../data/hulls';
 import { el, pad, hash } from '../h';
 import { icon } from '../icons';
@@ -30,11 +30,13 @@ export function roster(o: RosterOpts) {
           el('b', null, 'Daily strike duty roster'),
           el('span', 'rs-k', `Route of ${o.date} UTC${o.note ? ` · ${o.note}` : ''}`)),
         el('div', 'rs-count', el('span', 'rs-k', 'Pilots filed'), filed)),
-      el('div', { class: 'rs-cols', 'aria-hidden': 'true' }, el('span', null, 'RK'), el('span', null, 'Callsign'), el('span', 'rs-hull', 'Hull'), el('span', null, 'Reached'), el('span', 'rs-n', 'Kills'), el('span', 'rs-n', 'Score')),
+      el('div', { class: 'rs-cols', 'aria-hidden': 'true' }, el('span', null, 'RK'), el('span', null, 'Callsign'), el('span', 'rs-hull', 'Hull'), el('span', null, 'Reached'), el('span', 'rs-n rs-kl', 'Kills'), el('span', 'rs-n', 'Score')),
       rows,
       foot,
       stampSlot));
   let tt: { skip: () => void } | null = null;
+  /** What happened to the pilot's own filing, printed ahead of the roster's end line. */
+  let note = '';
   const status = (text: string, tone: 'ok' | 'off' | '' = '') => {
     tt?.skip();
     foot.className = 'rs-foot' + (tone ? ` ${tone}` : '');
@@ -51,7 +53,7 @@ export function roster(o: RosterOpts) {
       el('span', 'rs-cs', r.callsign, you ? el('em', 'rs-you', '◄ you') : null),
       el('span', 'rs-hull', hullName(r.hull)),
       el('span', 'rs-at', reached(r)),
-      el('span', 'rs-n', fmt(r.kills)),
+      el('span', 'rs-n rs-kl', fmt(r.kills)),
       el('span', 'rs-n rs-sc', fmt(r.score)));
   };
   // a line printer: rows come out one after another; after a moment everything is simply shown
@@ -64,18 +66,23 @@ export function roster(o: RosterOpts) {
     /** Show the registry's board. `local` is this device's own best for the day, shown when the registry is offline. */
     show(b: DailyBoard, local: DailyRow | null = null) {
       node.classList.remove('printed');
-      filed.replaceChildren(flap(b.count, 3));
+      filed.replaceChildren(b.online ? flap(b.count, 3) : el('span', 'rs-nil', 'no carrier'));
       const list: (DailyRow | null)[] = b.entries.slice();
       if (b.you && !b.entries.some((e) => e.callsign === b.you!.callsign)) list.push(null, b.you);
       if (!b.online && local) list.push(local);
       if (!list.length) rows.replaceChildren(el('li', 'rs-row rs-empty', el('span', null, b.online ? 'No pilot has filed for this route yet. The first line is yours to take.' : 'Roster not received.')));
       else rows.replaceChildren(...list.map((r, i) => line(r, i, !b.online ? 'local' : '')));
       if (!b.online) status(local ? 'No carrier. Registry offline: this is your own copy, unranked. Filings are held on this device and sent when the registry answers.' : 'No carrier. The registry is offline, so the roster cannot be printed.', 'off');
-      else status(b.count > b.entries.length ? `End of roster. Top ${b.entries.length} of ${fmt(b.count)} pilots shown.` : `End of roster. ${fmt(b.count)} pilot${b.count === 1 ? '' : 's'} on file for this route.`, 'ok');
+      else status(note + (b.count > b.entries.length ? `End of roster. Top ${b.entries.length} of ${fmt(b.count)} pilots shown.` : `End of roster. ${fmt(b.count)} pilot${b.count === 1 ? '' : 's'} on file for this route.`), 'ok');
       printed();
+      // bring the pilot's own line into view on a long roster
+      requestAnimationFrame(() => { const y = rows.querySelector<HTMLElement>('.you'); if (y) rows.scrollTop = Math.max(0, y.offsetTop - rows.clientHeight / 2); });
     },
     /** Stamp the pilot's own filing result onto the sheet. */
-    filing(r: FilingResult) {
+    filing(r: FilingResult, f: DailyFiling) {
+      note = r.status === 'filed' ? `Filed ${fmt(f.score)} pts. `
+        : r.status === 'kept' ? `Filed ${fmt(f.score)} pts; your better run of the day stands. `
+        : r.status === 'rejected' ? `Filing refused: ${r.error} ` : '';
       const s = r.status === 'filed' || r.status === 'kept'
         ? stamp(r.status === 'filed' ? 'Filed' : 'On file', 'ok rs-stamp', true, `Rank ${r.rank} of ${r.count}`)
         : r.status === 'queued' ? stamp('Held', 'void rs-stamp', true, 'No carrier') : stamp('Refused', 'void rs-stamp', true, 'Not filed');

@@ -434,7 +434,7 @@ function dailyRoster(r: RunState, st: Settlement): Node | null {
   ro.status('Filing your run with the registry…');
   void (async () => {
     const res = await submitDaily(f);
-    ro.filing(res);
+    ro.filing(res, f);
     const board = await fetchDailyBoard(f.date, f.callsign);
     ro.show(board, board.online ? null : localRow(f));
   })();

@@ -797,6 +797,7 @@ ol.heat-list li.shut { opacity: .5; }
 .rs-k { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: #6a6450; }
 .rs-count { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
 .rs-count .flaps { font-size: 18px; }
+.rs-nil { font-family: var(--f-mono); font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--stamp); }
 .rs-cols, .rs-row { display: grid; grid-template-columns: var(--rs-cols); gap: 0 10px; align-items: center; padding: 0 8px; font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rs-cols { padding-top: 7px; padding-bottom: 5px; font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase; color: #6a6450; border-bottom: 1px solid rgba(43, 46, 37, .5); }
 .rs-n { text-align: right; }
@@ -827,23 +828,27 @@ ol.heat-list li.shut { opacity: .5; }
 .rs-foot .lamp { flex: none; width: 9px; height: 9px; }
 .rs-foot.off { color: var(--stamp); }
 .rs-stamp-slot .stamp { top: 14px; right: 190px; }
+.rs-stamp { -webkit-mask: linear-gradient(rgba(0, 0, 0, .78), rgba(0, 0, 0, .78)), var(--fibre); }
 .rs-stamp b { font-size: 24px; }
 .rs-brief { margin: 12px 0 2px; font-size: 13.5px; color: #a9b8c6; max-width: none; }
 .rs-days { display: flex; gap: 0; margin-top: 12px; border-bottom: 2px solid #000; }
 .rs-days .tab small { font-size: 11px; letter-spacing: .06em; color: var(--faint); }
 .daily-console { max-width: 900px; max-height: calc(100vh - 32px); overflow-y: auto; }
 .daily-console .roster { margin-top: 14px; }
+.daily-console .rs-rows { max-height: min(calc(var(--rs-row) * 12), 38vh); }
 .daily-console .foot { margin-top: 18px; }
 .daily-console .foot .switch { width: auto; min-width: 320px; }
 .report-sheet .roster { margin: 20px -6px 0; }
 @media (max-width: 700px) {
-  .roster { --rs-cols: 34px minmax(0, 1fr) 76px 52px 70px; }
+  .roster { --rs-cols: 30px minmax(0, 1fr) 64px 70px; }
+  .rs-cols, .rs-row { gap: 0 6px; padding: 0 4px; }
+  .rs-kl { display: none; }
   .rs-sheet { padding: 4px 24px 10px; }
   .rs-sheet::before, .rs-sheet::after { width: 18px; background-size: 100% 16px; }
   .rs-hull { display: none; }
   .rs-row { font-size: 12.5px; }
   .rs-title b { font-size: 18px; }
-  .rs-stamp-slot .stamp { right: 30px; top: 40px; }
+  .rs-stamp-slot .stamp { right: 22px; top: 2px; scale: .8; }
   .rs-you { display: none; }
   .daily-console .foot .switch { min-width: 0; width: 100%; }
 }
