@@ -169,7 +169,7 @@ export class ShipLayer implements Layer {
       e.toFlight(Bo.x, Bo.y, -40, v); e.glow.add(v.x, v.y, v.z, 0, Bo.halfW * 2.6, Bo.dv.len * s * 1.2, rgb('#ff3a2e'), 0.04 * pulse, Shape.Soft);
       // Hit flash: a faint pulse only. Under sustained fire it is on almost every frame, and a strong one washes the dark hull out.
       if (Bo.flash > 0) { e.toFlight(Bo.x, Bo.y, 20, v); e.glow.add(v.x, v.y, v.z, 0, Bo.halfW * 2, Bo.dv.len * s, rgb('#ffd0c0'), 0.07, Shape.Soft); }
-      if (Bo.shield > 0) { e.toFlight(Bo.x, Bo.y, 14, v); e.glow.add(v.x, v.y, v.z, 0, Bo.halfW * 2 + 50, Bo.dv.len * s + 50, rgb('#4fd1e8'), (0.3 + 0.5 * Bo.shield / Bo.shieldMax) * (Bo.shieldHitT < 0.15 ? 1.8 : 1), Shape.Ring); }
+      if (Bo.shield > 0) { e.toFlight(Bo.x, Bo.y, 14, v); e.glow.add(v.x, v.y, v.z, 0, Bo.halfW * 2 + 50, Bo.dv.len * s + 50, rgb('#ff6a52'), (0.22 + 0.4 * Bo.shield / Bo.shieldMax) * (Bo.shieldHitT < 0.15 ? 1.8 : 1), Shape.Ring); }
     } else this.clear();
   }
 
