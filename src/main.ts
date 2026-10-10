@@ -13,7 +13,7 @@ import { initAudio, sfx, audio, setMuted, music, updateAudio, setVolume } from '
 import { settings as uiSettings, onSettings } from './ui/settings';
 import { wireAudioSettings } from './ui/sound';
 import {
-  newRun, loadRun, saveRun, clearSave, maxHp, dv, mods, level, bossLevel, heal, partChoices, relicChoices, addRelic, addSection,
+  newRun, loadRun, saveRun, clearSave, maxHp, dv, mods, level, bossLevel, heal, healAmount, repairQuote, buyRepair, partChoices, relicChoices, addRelic, addSection,
   nextSectionCost, enterNextSector, deathGhost, changeBuild, runRng, type RunState,
 } from './game/run';
 import { NODE_INFO, reachable, type NodeType } from './game/map';
@@ -295,7 +295,7 @@ function merchantScreen() {
   let first = true;
   const render = () => {
     const price = (p: Part) => Math.round(partCost(p) * m());
-    const repairCost = Math.ceil(((maxHp(r) - r.hp) / 3) * m());
+    const repair = repairQuote(r, m());
     const curses = r.relics.filter((id) => RELICS[id].rarity === 'curse');
     const relPrice = rel ? Math.round(relicCost(rel) * m()) : 0;
     show(merchantView({
@@ -311,8 +311,8 @@ function merchantScreen() {
       }),
       relic: rel ? { id: rel, price: relPrice, sold: relSold, afford: r.scrap >= relPrice, buy: () => { r.scrap -= relPrice; addRelic(r, rel); relSold = true; sfx('buy'); toast = `${RELICS[rel].name} installed.`; saveRun(r); render(); } } : null,
       services: [
-        { icon: 'auto-repair', label: r.hp >= maxHp(r) ? 'Hull at full strength' : `Repair ${Math.ceil(maxHp(r) - r.hp)} hull · ${repairCost} scrap`, disabled: r.hp >= maxHp(r) || r.scrap < 1,
-          act: () => { const afford = Math.floor(r.scrap / m()) * 3, fix = Math.min(maxHp(r) - r.hp, afford); r.scrap -= Math.ceil((fix / 3) * m()); r.hp += fix; sfx('buy'); toast = `Repaired ${Math.round(fix)} hull.`; saveRun(r); render(); } },
+        { icon: 'auto-repair', label: repair.missing < 1 ? 'Hull at full strength' : `Repair ${Math.ceil(repair.missing)} hull · ${repair.cost} scrap${r.heat >= 8 ? ' (No Quarter)' : ''}`, disabled: repair.missing < 1 || r.scrap < 1,
+          act: () => { const { fix, cost } = buyRepair(r, m()); sfx('buy'); toast = `Repaired ${Math.round(fix)} hull for ${cost} scrap.`; saveRun(r); render(); } },
         ...(curses.length ? [{ icon: 'radioactive', label: `Purge ${RELICS[curses[0]].name} · 75 scrap`, disabled: r.scrap < 75,
           act: () => { r.scrap -= 75; changeBuild(r, () => r.relics.splice(r.relics.indexOf(curses[0]), 1)); toast = `${RELICS[curses[0]].name} purged.`; saveRun(r); render(); } }] : []),
         { icon: 'wrench', label: 'Refit ship', disabled: false, act: () => refitFromMerchant() },
@@ -346,7 +346,7 @@ function drydockScreen() {
   const rng = runRng(r);
   const secTypes = (Object.keys(SECTIONS) as SectionType[]).filter((k) => k !== 'bridge');
   const offer: SectionType[] = [pick(secTypes, rng)]; while (offer.length < 2) { const k = pick(secTypes, rng); if (!offer.includes(k)) offer.push(k); }
-  const healAmt = Math.round(maxHp(r) * 0.35);
+  const healAmt = Math.round(healAmount(r, 0.35));
   const done = (msg: string) => { sfx('buy'); mapToast = msg; saveRun(r); mapScreen(); };
   const upgradeList = () => {
     const parts = [...allParts(r.build), ...r.inv].filter((p) => p.tier < 5);
@@ -354,7 +354,7 @@ function drydockScreen() {
   };
   show(drydockView({
     run: r, healAmt, canRepair: r.hp < maxHp(r),
-    onRepair: () => { heal(r, 0.35); done(`Repaired ${healAmt} hull.`); },
+    onRepair: () => { const a = heal(r, 0.35); done(`Repaired ${Math.round(a)} hull${r.heat >= 8 ? ' (No Quarter)' : ''}.`); },
     onUpgrade: upgradeList,
     welds: offer.map((k) => ({ name: SECTIONS[k].name, type: k, disabled: r.build.sections.length >= 8,
       detail: `Free. +${SECTIONS[k].hp} hull, ${SECTIONS[k].slots.length} ${SECTIONS[k].slots[0] === 'W' ? 'weapon mount' : 'utility bay'}${SECTIONS[k].slots.length > 1 ? 's' : ''}.`,
@@ -395,10 +395,10 @@ function bossReward(g: Ghost) {
   };
   const next = (id: string | null) => {
     if (id) addRelic(r, id);
-    heal(r, 0.3);
+    const patched = heal(r, 0.3);
     if (r.sector >= CAMPAIGN_SECTORS && !r.won) { r.won = true; r.phase = 'victory'; saveRun(r); showVictory(); return; }
     enterNextSector(r); sectorGhosts = [];
-    mapToast = `Sector ${r.sector}. Crews patched 30% of your hull on the way in.`;
+    mapToast = patched >= 1 ? `Sector ${r.sector}. Crews patched ${Math.round(patched)} hull on the way in.` : `Sector ${r.sector}. The hull is whole; the crews rest on the way in.`;
     saveRun(r); mapScreen();
   };
   render();

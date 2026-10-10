@@ -16,7 +16,7 @@ export const HEAT: HeatDef[] = [
   { level: 5, name: 'Swarming Skies', desc: '20% more enemies in every fight.', fx: { spawn: 1.2 } },
   { level: 6, name: 'Battle-Worn', desc: 'Launch at 75% hull.', fx: { startHp: 0.75 } },
   { level: 7, name: 'Vengeful Ghosts', desc: 'Ghost dreadnoughts have 30% more hull and fire 15% faster.', fx: { bossHp: 1.3, bossFire: 1.15 } },
-  { level: 8, name: 'No Quarter', desc: 'All repairs restore 30% less.', fx: { heal: 0.7 } },
+  { level: 8, name: 'No Quarter', desc: 'Every repair restores 30% less hull: drydocks, the merchant, signals and repair kits.', fx: { heal: 0.7 } },
 ];
 export const MAX_HEAT = HEAT.length;
 

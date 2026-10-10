@@ -1,6 +1,6 @@
 // "Unknown signal" events. Each choice mutates the run and returns what happened.
 import type { RunState } from '../game/run';
-import { heal, hurt, maxHp, randomPart, runRng, addRelic, relicChoices, changeBuild, dv } from '../game/run';
+import { heal, healAmount, hurt, maxHp, randomPart, runRng, addRelic, relicChoices, changeBuild, dv } from '../game/run';
 import { partName, mkPart, allParts, WEAPONS, partCost, type Part, ghostToBuild } from './parts';
 import { RELICS } from './relics';
 import { AMBUSH, type Encounter } from './enemies';
@@ -62,7 +62,7 @@ export const EVENTS: EventDef[] = [
       return [
         best ? { label: `Cut out the ${partName(best)}`, detail: `Lose ${pct(run, 0.12)} hull to its dying defenses.`, run: () => { hurt(run, pct(run, 0.12)); run.inv.push(mkPart(best.id, best.tier)); return { text: `Its point defense fires one last time. You leave with the ${partName(best)}.` }; } }
           : { label: 'Search the wreck', detail: 'Nothing usable.', disabled: 'Picked clean', run: () => ({ text: '' }) },
-        { label: 'Pay your respects', detail: `Repair ${pct(run, 0.15)} hull.`, run: () => { heal(run, 0.15); return { text: 'Your crew holds a minute of silence and patches the hull while they are at it.' }; } },
+        { label: 'Pay your respects', detail: `Repair ${Math.round(healAmount(run, 0.15))} hull.`, run: () => { heal(run, 0.15); return { text: 'Your crew holds a minute of silence and patches the hull while they are at it.' }; } },
       ];
     },
   },
@@ -134,7 +134,7 @@ export const EVENTS: EventDef[] = [
     choices: ({ run }) => {
       const [relic] = relicChoices(run, 1, ['common']);
       return [
-        { label: 'Leave 25 scrap', detail: `Repair ${pct(run, 0.25)} hull.`, disabled: need(run, 25), run: () => { run.scrap -= 25; heal(run, 0.25); return { text: 'The buoy blinks once. Your crew swears the ship feels sturdier.' }; } },
+        { label: 'Leave 25 scrap', detail: `Repair ${Math.round(healAmount(run, 0.25))} hull.`, disabled: need(run, 25), run: () => { run.scrap -= 25; heal(run, 0.25); return { text: 'The buoy blinks once. Your crew swears the ship feels sturdier.' }; } },
         relic ? { label: 'Take a token', detail: `Gain ${RELICS[relic].name}, and the curse Leaking Core.`, run: () => { addRelic(run, relic); addRelic(run, 'leaking_core'); return { text: `${RELICS[relic].name} is yours. Your reactor starts to leak soon after.` }; } }
           : { label: 'Take a token', detail: 'Nothing left.', disabled: 'Picked clean', run: () => ({ text: '' }) },
       ];

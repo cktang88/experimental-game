@@ -76,8 +76,31 @@ export function runRng(run: RunState): Rng {
   const r = mulberry32(run.seed + 7919 * ++run.rngCalls);
   return r;
 }
-/** Repairs scale with heat (No Quarter). */
-export function heal(run: RunState, frac: number) { run.hp = Math.min(maxHp(run), run.hp + maxHp(run) * frac * heatFx(run.heat).heal); }
+/** Every repair outside combat scales with heat (No Quarter, heat 8: 0.7). Repair kits in combat use the same factor. */
+export const repairMul = (run: RunState) => heatFx(run.heat).heal;
+/** Hull a repair of `frac` of max hull would restore right now: after heat, capped by the hull actually missing. */
+export const healAmount = (run: RunState, frac: number) => Math.max(0, Math.min(maxHp(run) - run.hp, maxHp(run) * frac * repairMul(run)));
+/** Repair `frac` of max hull (less under No Quarter). Returns the hull restored. */
+export function heal(run: RunState, frac: number) { const a = healAmount(run, frac); run.hp += a; return a; }
+/**
+ * Merchant repairs are bought by the hull point: `hullPerScrap` in sector 1, dearer each sector (`sectorTax`) so a
+ * late-run refit still competes with new parts, and less again under No Quarter.
+ */
+export const REPAIR = { hullPerScrap: 3, sectorTax: 0.35 } as const;
+export const repairHullPerScrap = (run: RunState) => (REPAIR.hullPerScrap / (1 + REPAIR.sectorTax * (run.sector - 1))) * repairMul(run);
+/** What a full merchant repair costs now. */
+export function repairQuote(run: RunState, priceMul = 1) {
+  const missing = Math.max(0, maxHp(run) - run.hp);
+  return { missing, cost: Math.ceil((missing / repairHullPerScrap(run)) * priceMul) };
+}
+/** Spend scrap on as much hull as it buys, up to full. Returns the hull restored and the scrap spent. */
+export function buyRepair(run: RunState, priceMul = 1) {
+  const hps = repairHullPerScrap(run), { missing } = repairQuote(run, priceMul);
+  const fix = Math.min(missing, (run.scrap / priceMul) * hps);
+  const cost = Math.min(run.scrap, Math.ceil((fix / hps) * priceMul - 1e-9));
+  run.hp += fix; run.scrap -= cost;
+  return { fix, cost };
+}
 export function hurt(run: RunState, amount: number) { run.hp = Math.max(1, run.hp - amount); }
 /** Keep missing hull constant when the max changes (adding sections fills them). */
 export function rebuildHp(run: RunState, oldMax: number) { const missing = oldMax - run.hp; run.hp = clamp(maxHp(run) - missing, 1, maxHp(run)); }
