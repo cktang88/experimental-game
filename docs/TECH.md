@@ -196,8 +196,8 @@ building destroyed; combat (`groundBlast`) first multiplies it by `cityPay()` (b
   `roof` (snow 1 / sand 0.5), `fuel` (fireball and chain-blast size; tanks, silos, flares default 1), `spill` (ground fire it
   leaves, `Burn`). Styles add Adobe, Hangar (lit doors), Shell (pale, no windows), Hull (deck lights). Tier offsets rotate with `rot`.
 - **Lights, roads, movers**: `ch.lights` (`WLight`: colour `LC`, kind 0 lamp that blacks out, 2 always on, 3 blink, 4 pool that
-  never blacks out, 6 sequenced strobe, 7 rotating beacon, 8 lighthouse), `ch.segs` (strips at any angle: country roads, tracks,
-  breakwaters), `ch.movers` (boats with wakes, convoys and cars with headlights, barges; drawn per frame from `CITY.time` into the
+  never blacks out, 6 sequenced strobe, 7 rotating beacon, 8 lighthouse, 9 glowing line with `len` along cy (`ax` 0) or x (`ax` 1) that never blacks out), `ch.segs` (strips at any angle: country roads, tracks,
+  breakwaters), `ch.movers` (boats with wakes, convoys and cars with headlights, barges, taxiing aircraft `jet`; drawn per frame from `CITY.time` into the
   engine's glow/dark batches), `ch.zones` (rects of a known surface for queries).
 - **Destruction**: `worldBlast(x, y, r, dmg)` damages footprints (and roofs as seen), ignites, collapses, leaves a crater (spray
   instead on open water) and returns the scrap of what collapsed; it also sets `CITY.payK` to the pay of the biome it landed in, which
@@ -210,17 +210,25 @@ building destroyed; combat (`groundBlast`) first multiplies it by `cityPay()` (b
   structure): city 0.12, harbour 0.073, airbase 0.44, desert 0.2, mountains 0.18, forest 0.37. With them the economy table is
   s1 139 / s2 191 / s3 263 a fight (stock share 0.83 / 0.67 / 0.62), and `tests/unit/economy.test.ts` passes.
 - `DARK`: the blackout grid. The power dies around the dreadnought as it passes (windows, street lamps, pools of kind 1); shaders sample it.
-- **Renderer** (`city.ts`): terrain ground, flats (pads, roads, strips), buildings in three geometry batches, props, lights,
+- **Renderer** (`city.ts`; materials are Lambert with `cheapLights`): terrain ground, flats (pads, roads, strips), buildings in three geometry batches, props, lights,
   traffic (masked to the night city through the terrain's biome weight), craters, up to four searchlight beams: about 10 draw calls,
   refilled only when a row enters or leaves; per frame only damaged buildings and a few dozen glow/dark quads (vessels, convoys,
   flares, lighthouse sweeps, ground-fire smoke). No per-frame allocation.
 - **FLIR**: every world shader reads `uFlir` (`flirUniform`, src/render/flir.ts) and blends to a heat value: terrain, water, snow
   and sand cool (about 0.07-0.12), lit windows +0.12, lamps and pinpoints down to 18%, traffic 55%, burning buildings and ground
   fires hot (0.6-1.2).
-- **Performance** (SwiftShader, 1600 x 900 at 0.6 scale): the world tick averages 0.05-0.14 ms (worst 1-7 ms when a row is
-  generated); a frame costs about 190 ms of world rendering in the mountains against about 690 ms for the night city's 3000
-  windowed blocks (the ground shader itself about 100 ms there). Structures on screen: city ~2900, harbour ~1700, desert ~200,
-  airbase ~180, mountains ~160, forest ~120.
+- **Performance** (SwiftShader, 1600 x 900 at 0.6 scale). Measure the world with a synchronous scene render (`renderer.render`
+  plus a 1-pixel `readPixels`, best of 8, world on minus world off, sim frozen): the frame interval on this shared sandbox swings
+  by half between runs. The world tick averages 0.05-0.14 ms (worst 1-7 ms when a row is generated).
+  - Night city: about 990 ms before the polish pass (median of four runs, 942-1040) and about 650 ms after (561-857), about -35%.
+    What it took: world materials are Lambert instead of Standard (rough matte surfaces, cheaper BRDF); `cheapLights()` gives every
+    lit world material a point-light loop that skips lights that are off or out of range (the seven FX point lights sit at zero
+    intensity most frames, yet every world fragment paid for all of them: about 370 ms in the city); the full-block sidewalk pads are
+    gone (the city ground is their colour), one hash per window instead of four, urban ground skips the fine detail noise, narrower
+    road glows, boxes without bottom faces.
+  - Mountains about 130-190 ms, airbase about 190-280 ms; the polished harbour costs more than before (about 375-405 ms against
+    217-281) for its floodlight washes and denser yards, still well under the city.
+  Structures on screen: city ~2900, harbour ~1700, desert ~200, airbase ~180, mountains ~160, forest ~120.
 - Debug: `window.__city` = `{ CITY, DARK, TERR, FIRE, BIO, worldBlast, setBiome(a, b, edgeCy), setPieceIn(name), surfaceAt,
   isWater, isRunway, terrainAt }`; set piece names: stadium, tvtower, lighthouse, oilterminal, drydock, bigtransport, shelters,
   radar, launchsite, gasplant, citadel, dam, fort, mill, lookout. In dev, `window.__cityLayer`.

@@ -54,6 +54,15 @@ const LIGHT_COL: THREE.Color[] = [];
 interface Anchor { x: number; z: number; y: number; phase: number; b?: Bldg }
 interface Spot { x: number; y: number; z: number; s: number; seed: number; b?: Bldg }
 
+/** A unit box standing on y = 0 without its bottom face (never seen from above): a sixth fewer triangles. */
+function openBox() {
+  const g = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
+  const idx = Array.from(g.index!.array as ArrayLike<number>);
+  g.setIndex(idx.slice(0, 18).concat(idx.slice(24)));
+  g.clearGroups();
+  return g;
+}
+
 /** An instanced flat quad batch with custom per-instance float attributes. */
 function quadBatch(max: number, names: string[], mat: THREE.Material) {
   const g = new THREE.InstancedBufferGeometry();
@@ -133,12 +142,12 @@ export class CityLayer implements Layer {
     const dome = new THREE.SphereGeometry(0.5, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 2, 1);
     dome.computeVertexNormals();
     this.bld = [
-      new BldBatch(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), mat, MAX_BLD),
+      new BldBatch(openBox(), mat, MAX_BLD),
       new BldBatch(new THREE.CylinderGeometry(0.5, 0.5, 1, 12).translate(0, 0.5, 0), mat, MAX_RND),
       new BldBatch(dome, mat, MAX_RND),
     ];
 
-    this.props = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), cheapLights(new THREE.MeshLambertMaterial(), 'props'), MAX_PROP);
+    this.props = new THREE.InstancedMesh(openBox(), cheapLights(new THREE.MeshLambertMaterial(), 'props'), MAX_PROP);
     this.props.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PROP * 3), 3);
     Object.assign(this.props, { count: 0, frustumCulled: false, receiveShadow: true });
 
@@ -278,7 +287,7 @@ export class CityLayer implements Layer {
         // Pinpoints are authored at their real size; from this altitude they need a couple of pixels to read, and they
         // stay just under the bloom threshold (a crisp point, not a glowing ball: only fires bloom).
         if (L.k === 9) { this.light(X(L.x), R(L.h), Z(L.cy), R(L.s), LIGHT_COL[L.c] ?? white, L.a, 9, 0, R(L.len ?? 10), L.ax ?? 0); continue; }
-        const pool = L.k === 1 || L.k === 4, sz = L.k === 4 ? L.s * 2.3 : pool ? L.s : Math.max(2.8, L.s * 2.6);
+        const pool = L.k === 1 || L.k === 4, sz = L.k === 4 ? L.s * 1.9 : pool ? L.s : Math.max(2.8, L.s * 2.6);
         const i = this.light(X(L.x), R(L.h), Z(L.cy), R(sz), LIGHT_COL[L.c] ?? white, pool ? L.a * (L.k === 4 ? 0.6 : 1.3) : Math.min(0.4, 0.12 + L.a * 0.45), L.k, L.p);
         if (L.b && i >= 0) this.bLights.push({ i, b: L.b });
         if (L.k === 8) this.sweeps.push({ x: X(L.x), y: R(L.h), z: Z(L.cy), s: R(L.s), seed: L.p, b: L.b });

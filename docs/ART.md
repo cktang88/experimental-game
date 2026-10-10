@@ -59,7 +59,7 @@ The screen must read at a glance, like a top-down arcade shooter: a calm backdro
 | White Range | blue-white snow, blue shadows, black pines | warm cabin windows against cold snow | steel blue |
 | Deepwood | green-black canopy, moonlit crowns | sodium village lamps; wildfire orange | green-black |
 
-Rules for the world: shade relief comes from the moon (upper left), baked per terrain cell; lit faces are a cold emissive tint, never white. Pinpoints are authored at real size and drawn at least about 3 field units so they read. In the FLIR view terrain, water, snow and sand go cool grey, windows and lamps drop to 15-20%, fires, flares and burning oil stay white-hot.
+Rules for the world: shade relief comes from the moon (upper left), baked per terrain cell; lit faces are a cold emissive tint, never white. Pinpoints are authored at real size and drawn at least about 3 field units so they read, but stay just under the bloom threshold: a crisp point, never a glowing ball. Floodlights are a broad, soft wash on the ground (a lit patch of concrete, not a disc). Long lines of lights (runway and taxiway edges, quay edges, loading docks, spillways) also carry a faint glowing line so they read as lines from this altitude. Each biome needs a clear value structure: in the harbour black water, pale quays and yards, a darker district; at the airbase near-black grass, dark runway with pale shoulders, a pale floodlit apron. In the FLIR view terrain, water, snow and sand go cool grey, windows and lamps drop to 15-20%, fires, flares and burning oil stay white-hot.
 
 Rules:
 - Background glows never compete with gameplay: chromatic aberration pulses only on big blasts, and city lights stay below the bloom threshold except fires.
