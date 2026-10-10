@@ -106,6 +106,18 @@ heat.scrap * dv.scrapMult`. Scrap pickups home to the hull on their own after ~0
 counts pickups landing within 0.5 s of each other (rising pitch for audio). City agent: `worldBlast()` should return about 1-4 scrap per
 building destroyed; combat applies the scaling and carnage, counts it as a structure and feeds Overdrive.
 
+### City (`src/game/worldgen.ts`, rendering in `src/render/world/`)
+- The city is generated in rows (`CITY.chunks`) in a fixed city space: field y = `cy + S.scrollY`. `S.decor` holds every live
+  building (`type: 'bldg'`, dead ones stay as rubble) and crater (`type: 'crater'`), with field `x, y` kept in sync with the scroll.
+- Buildings: `hp / maxHp` (about 2-10 bomb hits by size, towers up to 240), `value` 1-4 scrap, `fire` 0..1, `collapseT`, `dead`.
+  `worldBlast(x, y, r, dmg)` damages footprints (and roofs as seen, via `CITY.project`), ignites, collapses, leaves a crater and
+  returns the scrap of what collapsed. Refinery tanks, silos and flares chain-react: their follow-up blasts go through combat's
+  `groundBlast` so they pay like any other. Combat emits `structure` (audio plays `collapse`).
+- `DARK`: the blackout grid. The city's power dies around the dreadnought as it passes; shaders sample it.
+- Renderer: global instanced batches (blocks, flats, props, lights, traffic, craters) refilled only when a row enters or leaves.
+  Window grids, burning floors, collapse and rubble are in the building shader (`src/render/world/shaders.ts`). Debug: `window.__city`
+  (`CITY`, `DARK`, `worldBlast`) and, in dev, `window.__cityLayer`.
+
 ### Hitstop and slow-mo
 - `S.stop = { left, since, total }`: while `left > 0` the simulation is frozen; the renderer keeps drawing (shake keeps decaying).
   Ordinary kills use the dead-air formula capped at 60 ms with a 240 ms cooldown; elite kill 120 ms, boss death 350 ms, heavy player hit 100 ms always land.

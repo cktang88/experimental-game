@@ -23,7 +23,7 @@ const CLOUD = rgb('#3c4250'), SEARCH = rgb('#cfe2ff');
 /** Ground surfaces (stylized: near-black with a hint of the zone). */
 const SURF: Record<Surface, string> = {
   walk: '#1c1f24', plaza: '#24262b', grass: '#141c15', park: '#111a12', lot: '#17191c', gravel: '#1f1f1f', yard: '#1b1c1c',
-  dock: '#1d1e20', rail: '#16130f', ash: '#1f1b1a', snow: '#4a525c', dirt: '#211c16', bund: '#1a1918',
+  dock: '#1d1e20', rail: '#16130f', ash: '#1f1b1a', snow: '#2a3038', dirt: '#211c16', bund: '#1a1918',
 };
 const STYLE_TINT: number[][] = [
   // [hue, sat, light] ranges per Style: dark blocks with a little colour of the material.
