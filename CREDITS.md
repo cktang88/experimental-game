@@ -24,6 +24,7 @@
 - **three.js** (MIT) as before. The 3D simplex noise in `src/render/fx/atlas.ts` is Ashima Arts / Stefan Gustavson's public webgl-noise (MIT).
 
 ## Effects
+- Dreadnought micro-detail is procedural, original work: the plate-seam surface detail is generated in the hull shader (`src/render/ship/materials.ts`), greebles, gun clusters and deck stencils are built in `src/render/ship/` (stencil lettering is drawn at runtime with the self-hosted Saira Stencil One font). No extra texture files are used beyond the Modular Sci-Fi MegaKit trim sheets.
 - All particle, fire, smoke, scorch, beam and lightning visuals are procedural (GPU-baked puff atlas and shaders in `src/render/fx/`), original work. The explosion recipe, fire ramp, bloom threshold, trauma shake and slow-time grade follow *Tinwar* and *Dead Air* by the same author.
 
 ## Audio

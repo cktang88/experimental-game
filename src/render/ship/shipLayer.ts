@@ -16,11 +16,13 @@ import { buildShip, disposeShip, DECK, type ShipModel } from './hull';
 import { lightUniforms } from './lights';
 import type { Gun, Turret } from './turrets';
 import type { V3 } from './mesh';
-import { clampYaw } from './arcs';
+import { clampYaw, type Traverse } from './arcs';
 
 /** Flight-plane altitude of the ship origin: keeps the deck just under the bullet/muzzle layer. */
 const P_ALT = -10;
 const v = new THREE.Vector3(), w = new THREE.Vector3(), d = new THREE.Vector3();
+/** Is a field offset (dx, dy) from the mount inside its traverse (a little slack at the edges)? */
+const inArc = (tv: Traverse, dx: number, dy: number) => tv.half >= Math.PI || Math.abs(angDiff(Math.atan2(-dx, -dy), tv.center)) <= tv.half + 0.15;
 
 interface Rig {
   model: ShipModel; sig: string;
@@ -220,8 +222,7 @@ export class ShipLayer implements Layer {
     return m.body.localToWorld(out);
   }
   private target(tr: Turret, enemies: FrameCtx['S']['enemies'], eb: Ent[], boss: Ent | null, x: number, y: number): Ent | null {
-    const tv = tr.trav, limited = tv.half < Math.PI;
-    const inArc = (ex: number, ey: number) => !limited || Math.abs(angDiff(Math.atan2(-(ex - x), -(ey - y)), tv.center)) <= tv.half + 0.15;
+    const tv = tr.trav;
     let best: Ent | null = null, bd = tr.layer === 'none' ? 260 * 260 : 760 * 760;
     if (tr.layer === 'none') {
       for (const b of eb) { if (b.dead || b.kind === 'beam' || b.kind === 'strike') continue; const dd = (b.x - x) ** 2 + (b.y - y) ** 2; if (dd < bd) { bd = dd; best = b; } }
@@ -230,9 +231,9 @@ export class ShipLayer implements Layer {
     for (const en of enemies) {
       if (en.dead) continue;
       if (tr.layer === 'air' ? en.layer === 'ground' : tr.layer === 'ground' ? en.layer !== 'ground' : false) continue;
-      const dd = (en.x - x) ** 2 + (en.y - y) ** 2; if (dd < bd && inArc(en.x, en.y)) { bd = dd; best = en; }
+      const dd = (en.x - x) ** 2 + (en.y - y) ** 2; if (dd < bd && inArc(tv, en.x - x, en.y - y)) { bd = dd; best = en; }
     }
-    if (boss && inArc(boss.x, boss.y)) { const dd = (boss.x - x) ** 2 + (boss.y - y) ** 2 * 0.5; if (dd < bd || (!best && tr.layer === 'ground')) best = boss; }
+    if (boss && inArc(tv, boss.x - x, boss.y - y)) { const dd = (boss.x - x) ** 2 + (boss.y - y) ** 2 * 0.5; if (dd < bd || (!best && tr.layer === 'ground')) best = boss; }
     return best;
   }
   /** Recoil ripples, bay doors, the gun uniforms; spinning radars. */
