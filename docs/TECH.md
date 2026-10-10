@@ -28,7 +28,7 @@ Each workstream owns its files. Edit outside your area only at the integration p
 | Workstream | Owns | Integration points |
 | --- | --- | --- |
 | Ship | `src/render/ship/**` | `ShipLayer` API used by `main.ts` |
-| City and world | `src/render/world/**`, `src/game/worldgen.ts` | `worldBlast()` called by combat; `S.decor` / `S.clouds` shapes |
+| City and world | `src/render/world/**`, `src/game/worldgen.ts`, `biomegen.ts`, `terrain.ts`, `biomes.ts` | `worldBlast()` and `cityPay()` called by combat; `biomeFor()` in `startCombat`; terrain queries for spawns; `S.decor` / `S.clouds` shapes |
 | Units | `src/render/units/**` | Reads `S.enemies` (types in `src/data/enemies.ts`) |
 | VFX and post | `src/render/fx/**`, `src/game/vfx.ts`, post section of `src/render/engine.ts` | Spawner functions called by combat (`boomFx`, `spark`, `muzzle`, ...) |
 | Audio | `src/audio/**` (move `src/game/audio.ts` there), `public/assets/audio/**` | `sfx(name)` calls; a `music.setScene()` call from `main.ts` |
@@ -168,24 +168,77 @@ heat.scrap * dv.scrapMult` (see "Scrap economy" below). Scrap magnet (`MAGNET` i
 counts pickups landing within 0.5 s of each other (rising pitch for audio). City agent: `worldBlast()` should return about 1-4 scrap per
 building destroyed; combat (`groundBlast`) first multiplies it by `cityPay()` (below), then pays `STRUCTURE_SCRAP` (0.4) of it with the usual scaling, adds `2 + scrap` carnage, counts it as a structure and feeds Overdrive.
 
-### City (`src/game/worldgen.ts`, rendering in `src/render/world/`)
-- The city is generated in rows (`CITY.chunks`) in a fixed city space: field y = `cy + S.scrollY`. `S.decor` holds every live
-  building (`type: 'bldg'`, dead ones stay as rubble) and crater (`type: 'crater'`), with field `x, y` kept in sync with the scroll.
-- Scale: the fillers work in design units (blocks 100-230, `FLOOR` 4.4 per storey) and `genRow` packs whole block rows into a chunk
-  at least `CHUNK_MIN` (120) field units tall, then `shrinkRow` maps it into field units by `CITY_K` (0.25) about the field's centre
-  line (`STOREY` is a storey in field units). Hit points and `value` come from the design size, so a building takes as many hits as
-  before, but every blast now covers many more of them: combat multiplies `worldBlast()`'s return by `cityPay()` (`CITY_PAY` per
-  theme, tuned so `tests/unit/economy.test.ts` matches the pre-rescale table within a few percent). From this altitude trees, lamps,
-  fires, container stacks and searchlights are thinned to a sample; lots, terraces and tank farms are coarser than a real city's to
-  keep the instance count sane (about 3-9k buildings live).
-- Buildings: `hp / maxHp` (about 2-10 bomb hits by size, towers up to 240), `value` 1-4 scrap, `fire` 0..1, `collapseT`, `dead`.
-  `worldBlast(x, y, r, dmg)` damages footprints (and roofs as seen, via `CITY.project`), ignites, collapses, leaves a crater and
-  returns the scrap of what collapsed. Refinery tanks, silos and flares chain-react: their follow-up blasts go through combat's
-  `groundBlast` so they pay like any other. Combat emits `structure` (audio plays `collapse`).
-- `DARK`: the blackout grid (128 × 128 cells of 20 field units). The city's power dies around the dreadnought as it passes; shaders sample it.
-- Renderer: global instanced batches (blocks, flats, props, lights, traffic, craters) refilled only when a row enters or leaves.
-  Window grids, burning floors, collapse and rubble are in the building shader (`src/render/world/shaders.ts`). Debug: `window.__city`
-  (`CITY`, `DARK`, `worldBlast`) and, in dev, `window.__cityLayer`.
+### World and biomes (`src/game/worldgen.ts`, `biomegen.ts`, `terrain.ts`, `biomes.ts`; rendering in `src/render/world/`)
+- **Biomes** (`biomes.ts`): `Biome` City 0, Port 1, Airfield 2, Desert 3, Snow 4, Forest 5; `BIOMES[b]` = `{ name, kind, pay }`;
+  `RING` is the journey order. `biomeFor(sector, floor, seed)` returns `{ a, b }` (b = -1 when the fight stays in one biome).
+  `startCombat` takes optional `floor` and `seed` (main.ts passes the node's floor, 10 for the boss, and `run.seed`) and sets
+  `S.theme = a`, `S.biomeB = b`; without a seed (the balance harness) the ring starts at the city. The banner reads
+  "Sector N · <biome>". `THEMES` (palette.ts) and `GRADES` (post.ts) have one entry per biome.
+- **Rows**: the world is generated in rows (`CITY.chunks`) in a fixed city space: field y = `cy + S.scrollY`. `S.decor` holds every
+  live structure (`type: 'bldg'`, dead ones stay as rubble) and crater, with field `x, y` kept in sync with the scroll. A row that
+  holds night city is whole block rows (design units, shrunk by `CITY_K` 0.25, see `shrinkRow`); any other row is a 120-unit band.
+  Each biome's generator (`GEN[b]` in biomegen.ts) fills the same band in field units and masks every object with
+  `inBiome(b, x, cy)`, so two biomes share a band along a ragged, dithered edge; city rows are clipped the same way (`maskCity`).
+- **Biome edge**: `BIO.edge` (city y, -760 by default: the edge reaches the ship about 20 s in), wandering ±250 across the field;
+  `weightB(x, cy)` is 0..1 across a 220-unit band. When the ship's point crosses it `S.theme` and `CITY.theme` become the second
+  biome (grade, `cityPay`) and the banner flashes the new name. Debug: `__city.setBiome(a, b, edgeCy)` reseeds immediately.
+- **Terrain** (`terrain.ts`): analytic fields per biome, deterministic per fight (`CITY.seed`): height (shading only, the ground is
+  flat), water, canopy cover, blended across the edge (`sampleCy`). Paths are analytic too (`coastX`, `riverX`, `valleyX`,
+  `wadiX`, `highwayX`, `RUNWAY_X`), so generators, the baked grid and queries agree. Dams register in `DAMS` and fill their
+  reservoir upstream. Noise is value noise with rotated octaves (no lattice creases).
+- **Baked grid** `TERR`: a 600 x 512 RGBA8 ring of 4-unit cells (moon shade, water, cover, biome-B weight) baked a few rows per
+  frame ahead of the generated rows (`bakeTerrain`, a rolling three-row window for the slope; the whole screen at seed time),
+  uploaded when it changes. The ground is a patched `MeshStandardMaterial` (`terrainMaterial`): moon, explosion lights and the ship's
+  shadow still land on it.
+- **Structures**: `fb(ch, kind, x, cy, w, h, hgt, style, opts, tiers?)` places one in field units with hit points and `value` from
+  its design size. Kinds add cranes, ships, hangars, planes, domes, igloos, rockets, gantries, walls, dams, bridges, cabins,
+  lighthouses, pumps, masts, stands; `bGeo(kind)` picks the batch (box, cylinder, dome). New fields: `tint` (colour override),
+  `roof` (snow 1 / sand 0.5), `fuel` (fireball and chain-blast size; tanks, silos, flares default 1), `spill` (ground fire it
+  leaves, `Burn`). Styles add Adobe, Hangar (lit doors), Shell (pale, no windows), Hull (deck lights). Tier offsets rotate with `rot`.
+- **Lights, roads, movers**: `ch.lights` (`WLight`: colour `LC`, kind 0 lamp that blacks out, 2 always on, 3 blink, 4 pool that
+  never blacks out, 6 sequenced strobe, 7 rotating beacon, 8 lighthouse), `ch.segs` (strips at any angle: country roads, tracks,
+  breakwaters), `ch.movers` (boats with wakes, convoys and cars with headlights, barges; drawn per frame from `CITY.time` into the
+  engine's glow/dark batches), `ch.zones` (rects of a known surface for queries).
+- **Destruction**: `worldBlast(x, y, r, dmg)` damages footprints (and roofs as seen), ignites, collapses, leaves a crater (spray
+  instead on open water) and returns the scrap of what collapsed; it also sets `CITY.payK` to the pay of the biome it landed in, which
+  `cityPay()` returns (combat multiplies by it). Fuel chain-reacts through combat's `groundBlast` so follow-ups pay like any other
+  blast. The ground burns through the **event grid** `FIRE` (same layout as `DARK`: 128 x 128 cells of 20 units, RG float: start
+  time, `Burn` kind): canopy hits start a wildfire that spreads downwind (`spreadFire`, every 0.25 s, capped at 420 cells, burning
+  cells set structures alight), scrub fires stay small, spills burn in place (oil 26 s), frozen lakes crack (`Burn.Ice`: black water
+  and steam). The ground shader draws flames, char and holes; the layer adds smoke columns for a sample of cells.
+- **Pay**: `BIOMES[b].pay` is tuned so a random blast pays about what it does in the night city (sparser biomes pay more per
+  structure): city 0.12, harbour 0.073, airbase 0.44, desert 0.2, mountains 0.18, forest 0.37. With them the economy table is
+  s1 139 / s2 191 / s3 263 a fight (stock share 0.83 / 0.67 / 0.62), and `tests/unit/economy.test.ts` passes.
+- `DARK`: the blackout grid. The power dies around the dreadnought as it passes (windows, street lamps, pools of kind 1); shaders sample it.
+- **Renderer** (`city.ts`): terrain ground, flats (pads, roads, strips), buildings in three geometry batches, props, lights,
+  traffic (masked to the night city through the terrain's biome weight), craters, up to four searchlight beams: about 10 draw calls,
+  refilled only when a row enters or leaves; per frame only damaged buildings and a few dozen glow/dark quads (vessels, convoys,
+  flares, lighthouse sweeps, ground-fire smoke). No per-frame allocation.
+- **FLIR**: every world shader reads `uFlir` (`flirUniform`, src/render/flir.ts) and blends to a heat value: terrain, water, snow
+  and sand cool (about 0.07-0.12), lit windows +0.12, lamps and pinpoints down to 18%, traffic 55%, burning buildings and ground
+  fires hot (0.6-1.2).
+- **Performance** (SwiftShader, 1600 x 900 at 0.6 scale): the world tick averages 0.05-0.14 ms (worst 1-7 ms when a row is
+  generated); a frame costs about 190 ms of world rendering in the mountains against about 690 ms for the night city's 3000
+  windowed blocks (the ground shader itself about 100 ms there). Structures on screen: city ~2900, harbour ~1700, desert ~200,
+  airbase ~180, mountains ~160, forest ~120.
+- Debug: `window.__city` = `{ CITY, DARK, TERR, FIRE, BIO, worldBlast, setBiome(a, b, edgeCy), setPieceIn(name), surfaceAt,
+  isWater, isRunway, terrainAt }`; set piece names: stadium, tvtower, lighthouse, oilterminal, drydock, bigtransport, shelters,
+  radar, launchsite, gasplant, citadel, dam, fort, mill, lookout. In dev, `window.__cityLayer`.
+
+### Terrain queries (for naval and ground spawns; `src/game/worldgen.ts`)
+All take field coordinates as on screen now and answer for the generated band (field y about -380 to 990; beyond it the analytic
+fields still answer for the ground). None allocates except `terrainAt` without `out` and `findSurface`.
+
+| Call | Answers |
+| --- | --- |
+| `biomeAt(x, y)` | The `Biome` at that point (the edge wanders across the field). |
+| `isWater(x, y)` / `isLand(x, y)` | Open water (harbour, rivers, lakes that are not frozen) where naval units can sail / anything else. |
+| `isIce(x, y)` | A frozen lake: walkable, cracks under fire. |
+| `isRunway(x, y)` | On a runway or taxiway: aircraft can roll along it. |
+| `isRoad(x, y)` | Road, runway, apron or quay: wheeled convoys prefer these. |
+| `surfaceAt(x, y)` | `SurfaceKind`: water, ice, sand, snow, rock, forest, grass, urban, road, runway, apron, dock. |
+| `terrainAt(x, y, out?)` | `{ biome, surface, h, water, cover }`. |
+| `findSurface(kind or predicate, x0, y0, x1, y1, tries)` | A random point of that surface in a box (default: the top of the screen, where spawns enter) or null, e.g. `findSurface('water')` for a gunboat, `findSurface('runway')` for a jet's take-off roll. |
 
 ### Hitstop and slow-mo
 - `S.stop = { left, since, total }`: while `left > 0` the simulation is frozen; the renderer keeps drawing (shake keeps decaying).

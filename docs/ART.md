@@ -32,7 +32,7 @@ Rules:
 - Hostile red is never used for decoration. If it is red, it is an enemy (or a warning about one).
 - Threat magenta is never used for anything but enemy fire. If it is pink and glowing, it can hit you.
 - Emissive colors exceed 1.0 only for things that should bloom (muzzles, engines, explosions, beams, window clusters). Matte surfaces never bloom.
-- Each sector has one theme (`THEMES`) that changes ground tones, fog and window color, but never the meaning of the palette.
+- Each biome (`THEMES`, indexed by `S.theme`, see `src/game/biomes.ts`) changes ground tones, fog, window colour and the post grade, but never the meaning of the palette.
 
 ## Readability (the visual hierarchy)
 
@@ -46,7 +46,20 @@ The screen must read at a glance, like a top-down arcade shooter: a calm backdro
 | Tactical symbology | The fire-control computer's picture, drawn by the HUD at a fixed screen size in the **hostile red** family (salvage in scrap gold, never magenta): a thin **tracker box** of corner ticks round each unit's real footprint (the unit itself stays visible inside) and a NATO-style symbol above it: hostile ground = diamond, hostile air = the diamond's upper half, salvage = square, with a class glyph (armour oval, infantry cross, AA dome, SAM dome + missile, flak keep, rotary bow tie, fixed-wing sweep, UAV V, bomber double sweep, carrier deck). Big contacts carry a designator (SAM, FLAK, BOMBER), elites a double box. Clusters of one class merge into one box with a count (no confetti). Threat priority: units that can reach the hull at full strength, others at 60%, units under our hull ghosted; a unit winding up a shot turns pale and a ring closes on it. White lock box on the reticle's target; health tick when damaged. | `src/render/units/symbology.ts`, called from `src/render/hud.ts` |
 | Enemy units | **True scale.** Dark, matte military paint with a moonlit fill and a thin hostile red rim; what makes them pop is light: small crisp **heat cores** (warm white with a breath of red, never magenta) on engine decks, rotor heads and crews, barrels that glow after firing, red lamps and nav lights, headlight beams on the street, dust plumes behind armour, contrails, smoke from damaged engines, wrecks that stay hot. Ground units sit on a dark halo; aircraft cast a true-size **drop shadow** on the city far below (offset down-right, away from the moon), which sells their altitude. | `src/render/units/livery.ts`, `unitLayer.ts` (`draw`, `lights`) |
 | FLIR view (Shift / T) | White-hot thermal grade: the city goes cool grey and its windows and lamps nearly out, every machine glows by its body heat (engines and lower hulls hottest), people are bright specks, fires and fresh wrecks burn white. Scanlines, grain, crop marks, a fire-control readout and a 4x zoom inset on the target. The symbology stays on top. | `src/render/flir.ts`, grade in `src/render/fx/post.ts`, `symbology.ts` (`flirOverlay`) |
-| The city | The quietest layer: near-black blocks, windows at 70% of their old glow, dim road glows instead of individual lamps, a sample of trees and fires, few refinery flares, faint searchlights. Nothing in the city is magenta, and nothing in it is as bright as a bullet. | `src/render/world/*`, `src/game/worldgen.ts` |
+| The world (every biome) | The quietest layer: near-black ground and blocks, windows at 70% of their old glow, dim road glows, pinpoint lights small and crisp (a hot core and a faint halo, never a blob), floodlight pools faint. Moonlit faces of dunes, ridges and canopy stay well below the bloom threshold; only fires, flares and burning oil bloom. Nothing in the world is magenta and nothing red is decoration: runway end bars are amber, port-side nav lights amber, threshold bars teal. Nothing in it is as bright as a bullet. | `src/render/world/*`, `src/game/worldgen.ts`, `biomegen.ts`, `terrain.ts` |
+
+### Biome palettes (`GROUND` in `src/render/world/city.ts`, `THEMES` in `palette.ts`, grades in `post.ts`)
+
+| Biome | Ground | Accent light | Grade |
+| --- | --- | --- | --- |
+| Sodium City | asphalt near-black | sodium windows, teal and warm-white neon strip | cold shadows, sodium highlights |
+| Iron Harbour | black water, cool grey quays | silver moon glitter, sodium masts, muted container colours | sea-cold |
+| Kestrel Airbase | dark olive grass, lighter runway asphalt | white runway and approach lights, blue taxi edges, teal centre lines | neutral night |
+| Glass Desert | warm sand, pale moonlit dune faces | orange flares, warm compound windows | warm dust |
+| White Range | blue-white snow, blue shadows, black pines | warm cabin windows against cold snow | steel blue |
+| Deepwood | green-black canopy, moonlit crowns | sodium village lamps; wildfire orange | green-black |
+
+Rules for the world: shade relief comes from the moon (upper left), baked per terrain cell; lit faces are a cold emissive tint, never white. Pinpoints are authored at real size and drawn at least about 3 field units so they read. In the FLIR view terrain, water, snow and sand go cool grey, windows and lamps drop to 15-20%, fires, flares and burning oil stay white-hot.
 
 Rules:
 - Background glows never compete with gameplay: chromatic aberration pulses only on big blasts, and city lights stay below the bloom threshold except fires.
