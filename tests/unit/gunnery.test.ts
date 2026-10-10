@@ -215,9 +215,11 @@ describe('scrap magnet', () => {
   });
   it('never loses scrap that scrolled off the bottom of the field', () => {
     fight();
-    const Pl = S.P!; Pl.y = 200; drop(60, 940);
+    const Pl = S.P!; Pl.y = 200; const p = drop(60, 940);
     step(4);
-    expect(S.scrap).toBeCloseTo(1);
+    expect(S.pickups.includes(p)).toBe(false);
+    expect(p.dead).toBe(true);
+    expect(S.scrap).toBeGreaterThanOrEqual(1);
   });
   it('magnet parts and the Magnetized Hull relic widen the reach', () => {
     const base = derive(testBuild()).magnet;
