@@ -225,10 +225,10 @@ export function buildSpecs(scene: THREE.Scene): Partial<Record<EnemyType, UnitSp
     }
   }
   {
-    const k = kitParts('K_HangarRoundGlass', 'charcoal', 16, { span: 32, ground: true });
+    const k = kitParts('K_HangarRoundGlass', 'concrete', 16, { span: 32, ground: true });
     const s = base('bunker', false, 24);
     if (k) for (const p of k.parts) s.parts.push(part(p.pool));
-    s.parts.push(part(pool(G.bunkerRing(), 'desert', 16, { detail: 14 })));
+    s.parts.push(part(pool(G.bunkerRing(), 'concrete', 16, { detail: 14 })));
     s.lights.push(L(V(0, (k?.n.size.y ?? 10) + 0.6, 0), 'beacon', 8));
     for (const a of [0.8, 2.9, 5]) s.lights.push(L(V(Math.sin(a) * 9, (k?.n.size.y ?? 10) * 0.8, Math.cos(a) * 9), 'heat', 6));
     S.bunker = s;

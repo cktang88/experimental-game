@@ -18,7 +18,7 @@
 import { S, aim, hullDist, type Enemy } from '../../game/combat';
 import { EN, type EnemyType } from '../../data/enemies';
 import { fieldToScreen, screenScale } from '../view';
-import { visualHalf, TRUE_M } from './scale';
+import { visualHalf, TRUE_M, altShift } from './scale';
 import { FLIR } from '../flir';
 
 const W = 1600, H = 900;
@@ -36,7 +36,7 @@ const TAG: Record<EnemyType, string> = {
 const COL = { hostile: '#ff5a4e', hot: '#ffd6cc', dark: 'rgba(6,8,11,0.78)', scrap: '#e0c35c', lock: '#f2f6fa', flir: '#e8eef2' };
 const MONO = '"Share Tech Mono", ui-monospace, monospace';
 /** Merge radius for clusters (screen units). A contact whose real half-footprint is wider than BIG gets a designator. */
-const GROUP_R = 24, BIG = 10;
+const GROUP_R = 30, BIG = 10;
 
 const MAX = 200;
 const cx = new Float32Array(MAX), cy = new Float32Array(MAX), cr = new Float32Array(MAX), ca = new Float32Array(MAX), ctele = new Float32Array(MAX), chp = new Float32Array(MAX);
@@ -98,6 +98,7 @@ const mix = (hot: number) => (hot > 0.05 ? COL.hot : COL.hostile);
 
 /* ---------------- gather ---------------- */
 let forgetNow = 0;
+const AS = { x: 0, y: 0 };
 function forget(m: Mem, e: Enemy) {
   if (m.seen === frameNo) return;
   if (e.hp <= 0 && m.x > 0 && m.x < W && m.y > 0 && m.y < H) { const i = splHead++ % SPL; sx[i] = m.x; sy[i] = m.y; st0[i] = forgetNow; sair[i] = m.air ? 1 : 0; }
@@ -109,7 +110,8 @@ function gather(now: number): number {
   for (const e of S.enemies as Enemy[]) {
     if (e.dead || e.hp <= 0 || n >= MAX) continue;
     const d = EN[e.type]; if (!d) continue;
-    const p = fieldToScreen(e.x, e.y), px = p.x, py = p.y;
+    const alt = (e as { visAlt?: number }).visAlt ?? 0;
+    const p = alt > 1 ? fieldToScreen(altShift(e.x, e.y, alt, AS).x, AS.y) : fieldToScreen(e.x, e.y), px = p.x, py = p.y;
     if (px < -12 || px > W + 12 || py < -12 || py > H + 12) continue;
     let m = mem.get(e);
     if (!m) { m = memFree.pop() ?? { born: 0, x: 0, y: 0, cls: Cls.Armour, air: false, seen: 0 }; m.born = now; mem.set(e, m); }
@@ -226,7 +228,7 @@ function flirOverlay(c: CanvasRenderingContext2D, n: number, now: number) {
   c.save();
   c.globalAlpha = k; c.strokeStyle = COL.flir; c.lineWidth = 1.5; c.lineCap = 'butt';
   // camera crop marks and a boresight
-  c.beginPath(); corners(c, W / 2, H / 2 + 20, W / 2 - 300, H / 2 - 130, 26); c.stroke();
+  c.beginPath(); corners(c, W / 2, H / 2 + 10, W / 2 - 300, H / 2 - 150, 26); c.stroke();
   c.font = `11px ${MONO}`; c.fillStyle = COL.flir; c.textBaseline = 'alphabetic'; c.textAlign = 'left';
   const P = S.P!;
   const lx = 300, ly = 112;
@@ -245,6 +247,9 @@ function flirOverlay(c: CanvasRenderingContext2D, n: number, now: number) {
   if (best >= 0) {
     const e = cen[best]!, d = EN[e.type];
     c.fillText(`TGT ${TAG[e.type]}  ${Math.round(TRUE_M[e.type] * (e.type === 'infantry' ? 4.5 : 1))} M  ${d.layer === 'air' ? 'AIR' : 'GND'}`, W - 300, ly + 14);
+    // the sensor's track box on the target, then the zoomed picture
+    const r = Math.max(cr[best] + 5, 9);
+    c.globalAlpha = k; c.strokeStyle = COL.flir; c.lineWidth = 1.2; c.beginPath(); c.rect(cx[best] - r, cy[best] - r, 2 * r, 2 * r); c.stroke();
     inset(c, cx[best], cy[best], k);
   }
   c.restore();
@@ -253,7 +258,7 @@ function flirOverlay(c: CanvasRenderingContext2D, n: number, now: number) {
 function inset(c: CanvasRenderingContext2D, x: number, y: number, k: number) {
   if (glCanvas === undefined) glCanvas = document.getElementById('gl') as HTMLCanvasElement | null;
   if (!glCanvas || !glCanvas.width) return;
-  const Z = 4, iw = 176, ih = 120, ox = W - 300 - iw, oy = 140;
+  const Z = 4, iw = 176, ih = 120, ox = W - 300 - iw, oy = H - 300;
   const sw = iw / Z, sh = ih / Z, kx = glCanvas.width / W, ky = glCanvas.height / H;
   c.globalAlpha = k;
   c.fillStyle = '#05070a'; c.fillRect(ox - 2, oy - 2, iw + 4, ih + 4);
@@ -265,6 +270,4 @@ function inset(c: CanvasRenderingContext2D, x: number, y: number, k: number) {
   c.moveTo(mx, my - 22); c.lineTo(mx, my - 8); c.moveTo(mx, my + 8); c.lineTo(mx, my + 22);
   c.stroke();
   c.font = `10px ${MONO}`; c.textAlign = 'left'; c.fillStyle = COL.flir; c.fillText(`x${Z}`, ox + 5, oy + ih - 6);
-  // a leader from the inset to the target
-  c.globalAlpha = k * 0.35; c.beginPath(); c.moveTo(ox + iw / 2, oy + ih + 2); c.lineTo(x, y); c.stroke();
 }

@@ -24,6 +24,8 @@ export const LIVERY = {
   elite: { paint: 0x5a2a26, metal: 0x2e3236, lamp: '#ff5a4e', lampK: 4, rim: '#ff6a4e', rimK: 1.4 },
   /** Salvage: worn hazard-yellow (scrap colour) over steel; lamps glow scrap gold. */
   salvage: { paint: 0x8a6a2a, metal: 0x4c5157, lamp: '#ffc24a', lampK: 3.5, rim: '#ffc24a', rimK: 1.0 },
+  /** Poured concrete (flak towers): pale enough to read as a mass against the night city. */
+  concrete: { paint: 0x8d8b84, metal: 0x5d6064, lamp: '#ff5a4e', lampK: 3, rim: '#ff5a4e', rimK: 1.1 },
   /** Infantry fatigues. */
   fatigue: { paint: 0x46502f, metal: 0x2a2c2a, lamp: '#fff1d6', lampK: 3, rim: '#ff5a4e', rimK: 0.55 },
 } satisfies Record<string, Livery>;

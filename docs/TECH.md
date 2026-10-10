@@ -13,7 +13,14 @@
 - Flight-plane objects use `engine.toFlight(x, y, alt)`. Ground objects use `engine.toGround(x, y)` and must be scaled by `engine.groundScale`.
 - Ship hulls are `SECTIONS` design units × `SHIP_SCALE` (3.1; it was 2.6 before the scale pass). `derive()` already returns scaled rects and mounts.
 - The city is authored in its own design units and shrunk by `CITY_K` (0.25) into field units (`src/game/worldgen.ts`, see "City").
-  Enemy units are not: they are drawn at their gameplay size times a display scale (`DISP_AIR` 1.25, `DISP_GROUND` 1.4 in `src/render/units/unitLayer.ts`).
+- **True scale: one world unit is one metre.** A finished hull is 330-370 field units (a 330 m carrier); aircraft fly on the flight plane,
+  so a 19 m interceptor is 19 field units; a ground object of m metres covers m / groundScale (~1.65) field units, so a 10 m tank is ~6.
+  Enemy models are drawn at `TRUE_M[type]` metres (`src/render/units/scale.ts`; `UnitSpec.scale` is computed from each model's extent).
+  Gameplay radii (`EN[type].r`) are unchanged and decoupled from the drawing: they were already generous, and now act as the marker radius.
+- **Field <-> screen** (`src/render/view.ts`): the camera tilt makes the field a trapezoid on screen (field (800, 450) is drawn at screen
+  y 421; the top corners are ~110 units in). `engine.fitCamera` sets a homography: `fieldToScreen(x, y)` for anything the HUD draws over the
+  world (symbology, the reticle, lock brackets, rail lines, reach rings) and `screenToField(x, y)` for the mouse (`aim` is the field point
+  under the cursor). Because `toGround` puts ground objects under the flight-plane pixel, one homography serves both layers.
 
 ## Module ownership (parallel work)
 Each workstream owns its files. Edit outside your area only at the integration points listed, and keep those edits small.
@@ -120,9 +127,9 @@ Where a gun is mounted decides where it can point and what it can hit:
   detonating there), mortar shells and bombs onto the ground under it (fall time grows with distance). Heavy shots kick the camera
   (`kick`, `addTrauma`), set `fireLog` (turret recoil) and `aim.shotAt` (reticle punch). `manualAimFor(uid)` is the renderer hook that
   trains a heavy turret on the reticle or lock.
-- Input (main.ts): mouse moves the reticle; left button fires the selected group, right button salvoes; `1`-`9` select, `Q` / `E` and the
-  wheel cycle (`uiSwitch`, or `uiError` when there is no such group); the system cursor hides over the field. Touch: drag steers, every
-  gun aims itself. Space stays Overdrive.
+- Input (main.ts): mouse moves the reticle (through `screenToField`); left button fires the selected group, right button salvoes; `1`-`9`
+  select, `Q` / `E` and the wheel cycle (`uiSwitch`, or `uiError` when there is no such group); the system cursor hides over the field.
+  Touch: drag steers, every gun aims itself. Space stays Overdrive. Hold Shift (or T to latch) for the FLIR thermal view.
 - HUD (`src/render/hud.ts`): bottom-left weapon panel with a numbered slot per heavy group (keycap, icon, AIR/GND/ALL tag, a reload pip
   per mount, dimmed when it cannot bear, READY / n/m BEAR / NO BEARING) and an AUTO lamp bank; the reticle (brackets, reload ring per
   mount, group tag, a slash and OUT OF ARC / OUT OF REACH / AIR ONLY when nothing bears, a dashed impact ring for ground ordnance and
@@ -293,6 +300,31 @@ tests/unit/balance.test.ts --disable-console-intercept` prints the table (`ONLY=
 ### Debug hooks (`window.__gd`)
 `run`, `profile`, `S`, `debug.timeScale`, `god()`, `winNow()` (kills boss/elite outright), `killPlayer()`, `overdrive()` (charge and fire),
 `travelTo(type)`, `forceNext(type)`, `addScrap(n)`, `aim`, `gunnery`, `selectGroup(i)`.
+
+## Units, symbology and FLIR (`src/render/units/`, `src/render/flir.ts`)
+- **True-scale models** (`specs.ts`, `scale.ts`): `buildSpecs` authors each unit at any size, then sets `spec.scale` so its largest
+  horizontal extent (slots, rotors, revetments included) is `TRUE_M[type]` metres. Multi-model units use `spec.squad` slots
+  (`{x, z, yaw, s}`): an infantry entity is a fire team of four soldiers, an AA battery two gun pits, a SAM battery three launchers;
+  `PartDef.once` parts (the revetment) are drawn once. Heads in slotted units keep yaw 0.
+- **Ground lift**: true-scale ground units stand inside city blocks, so their livery material (`liveryMaterial(..., { ground: true })`)
+  slides each vertex along the eye ray by `GROUND_LIFT` (110) world units of depth: same pixels, but the depth test sees them above the
+  rooftops and still far below the flight plane (the ship covers them). Their light quads are lifted the same way (`UnitLayer.gq`).
+- **Light is what you see at true scale** (`unitLayer.ts`): every light has a floor in screen units (`LIGHT_MIN`) so a lamp stays a point;
+  `heat` lights are thermal cores (engine deck, rotor heads, crew) in warm white; barrels stay hot after firing (`Vis.barrel`); units below
+  55% hull smoke from their first heat core (fire below 25%); wrecks stay hot for 22 s. Headlight beams, dust plumes, contrails, rotor
+  discs and drop shadows are sized in metres. Effects use `fxs(v)` (half-size in metres with a floor).
+- **Tactical symbology** (`symbology.ts`, drawn by `drawHud` under the panels in one canvas pass, preallocated arrays): per contact a tracker
+  box (corner ticks round the unit's real footprint, never covering the unit) and a NATO-style symbol above it (ground diamond, air tent,
+  salvage square; glyphs for armour, infantry, AA, SAM, flak tower, rotary, fixed wing, UAV, bomber, carrier, crate, pod, wreck). Contacts
+  larger than `BIG` get a designator (SAM, FLAK, BOMBER...), elites a double box. Out of weapon range = 60% alpha, under our hull = 30%.
+  `tele` wind-up turns the contact pale and closes a ring on it. `aim.hover` / `aim.lock` = white lock box. Damaged = a health tick.
+  Same-class contacts within `GROUP_R` (24 screen units, single link) merge into one box with a count. Kills leave a short opening-box
+  splash. Aircraft markers follow their visual altitude (`visAlt`, `altShift`).
+- **FLIR** (`flir.ts`): `FLIR.on` (main.ts: Shift held or T latched, combat only), eased `FLIR.k` / `flirUniform`. The post grade remaps
+  luminance to white-hot greyscale with scanlines and heavier grain; the livery shader swaps unit emissive for body heat (hotter low hull,
+  lamps, burning wrecks); city windows, neon and lamps drop to ~15-20% (`uFlir` in `src/render/world/shaders.ts`), traffic to 55%; fires
+  keep their light. The HUD adds crop marks, a readout and a 4x zoom inset on the target (copied from the WebGL canvas in the same frame).
+  Costs: one uniform and a branch in the grade; nothing extra on the low tier.
 
 ## Ship rendering (`src/render/ship/`)
 - `hull.ts` builds a hull at the reference scale (`SHIP_SCALE` 2.6) and scales a `body` group by `SHIP_SCALE / 2.6`, so every detail keeps its proportion if the ship scale changes. Layer-facing points (`nozzles`, `vents`, `dmgPts`) are in root space; turret pivots are in body space (`model.k`).

@@ -11,7 +11,7 @@
 // become burning, charred wrecks that scroll away with the ground. Nothing pops in or out.
 import * as THREE from 'three';
 import type { Engine, FrameCtx, Layer } from '../engine';
-import { FIELD_W, FIELD_H } from '../engine';
+import { FIELD_W, FIELD_H, FLIGHT } from '../engine';
 import type { Enemy } from '../../game/combat';
 import type { EnemyType } from '../../data/enemies';
 import { boomFx } from '../../game/vfx';
@@ -171,6 +171,7 @@ export class UnitLayer implements Layer {
     for (const v of this.dying) this.draw(v, e);
     for (const p of this.pools) p.end();
     const k = e.groundScale; SCALE_STATE.k = k;
+    SCALE_STATE.camFx = e.camPos.x + FIELD_W / 2; SCALE_STATE.camFy = e.camPos.z + FIELD_H / 2; SCALE_STATE.camH = e.camPos.y - FLIGHT;
     this.parts.update(dt, S.scroll * k, S.scroll);
     this.parts.draw(e);
   }
@@ -204,6 +205,7 @@ export class UnitLayer implements Layer {
       v.alt = Math.abs(Math.sin(v.age * 9 + v.seed)) * 0.6;
     }
     v.sc = v.born ? Math.min(1, ease(v.age / 0.35) * 1.08) : 1;
+    (en as { visAlt?: number }).visAlt = air ? v.alt : 0; // the HUD symbology follows a descending aircraft
     if (v.born && v.age < 0.35) v.flash = Math.max(v.flash, 1 - v.age / 0.35);
     // firing: cooldown reset or a burst shot means a muzzle event
     const fired = (en.cd ?? 0) > v.lastCd + 0.4 || (en.burst ?? 0) < v.lastBurst;

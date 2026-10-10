@@ -27,8 +27,15 @@ export const TRUE_M: Record<EnemyType, number> = {
   crawler: 180,   // siege crawler: a land battleship
 };
 
-/** Ground scale published by the unit layer (field units per ground metre is 1 / k). */
-export const SCALE_STATE = { k: 1.65 };
+/** Published by the unit layer: ground scale k (field units per ground metre is 1 / k), and the camera's field
+ *  position and height over the flight plane (to place a marker on an aircraft that is climbing or descending). */
+export const SCALE_STATE = { k: 1.65, camFx: 800, camFy: 1092, camH: 1838 };
+/** Field point that projects to the same pixel as an aircraft at (x, y) flying alt above the flight plane. */
+export function altShift(x: number, y: number, alt: number, out: { x: number; y: number }) {
+  const S = SCALE_STATE, t = S.camH / Math.max(1, S.camH - alt);
+  out.x = S.camFx + (x - S.camFx) * t; out.y = S.camFy + (y - S.camFy) * t;
+  return out;
+}
 
 /** Visual half-extent of a unit on screen, field units. */
 export function visualHalf(type: EnemyType, air: boolean) {
