@@ -37,14 +37,21 @@ interface Vis {
 }
 
 // Scratch objects (no per-frame allocation).
-const U = new THREE.Matrix4(), P = new THREE.Matrix4(), T1 = new THREE.Matrix4(), R1 = new THREE.Matrix4(), S1 = new THREE.Matrix4(), H = new THREE.Matrix4();
+const U = new THREE.Matrix4(), SQ = new THREE.Matrix4(), SQ2 = new THREE.Matrix4(), P = new THREE.Matrix4(), T1 = new THREE.Matrix4(), R1 = new THREE.Matrix4(), S1 = new THREE.Matrix4(), H = new THREE.Matrix4();
 const q = new THREE.Quaternion(), eu = new THREE.Euler(0, 0, 0, 'YXZ'), vpos = new THREE.Vector3(), vsc = new THREE.Vector3();
 const va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3(), vfwd = new THREE.Vector3();
 const C = {
   port: rgb('#ff2a1f'), stbd: rgb('#33ff77'), strobe: rgb('#ffffff'), beacon: rgb('#ff3b2e'), engine: rgb('#ffb070'), engineHot: rgb('#ff6a3d'),
   head: rgb('#fff1d6'), cone: rgb('#ffe2b0'), scrap: rgb('#ffc24a'), deck: rgb('#ffcf8a'), fire: rgb('#ff7a2d'), fireHot: rgb('#ffd27a'),
-  muzzle: rgb('#ffcf7a'), contrail: rgb('#b9c6d4'), shadow: rgb('#000000'),
+  muzzle: rgb('#ffcf7a'), contrail: rgb('#b9c6d4'), shadow: rgb('#000000'), mark: rgb('#ff5a4e'), markScrap: rgb('#ffc24a'),
 };
+/**
+ * Display scale over the gameplay size: enemies are drawn chunky (Blackhawk Striker readable) while the city
+ * below is shrunk to sell the dreadnought's size. Hit radii are unchanged (src/data/enemies.ts).
+ */
+const DISP_AIR = 1.25, DISP_GROUND = 1.4;
+/** Air units' drop shadows land this far (field units) down-right of them: the moon is up-left. */
+const SHADOW_DX = 34, SHADOW_DY = 44;
 const ease = (t: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
 const wrap = (a: number) => { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; };
 const slew = (a: number, b: number, rate: number) => { const d = wrap(b - a); return a + Math.max(-rate, Math.min(rate, d)); };
@@ -304,7 +311,7 @@ export class UnitLayer implements Layer {
   }
   /** Unit root matrix into U. */
   private rootMatrix(v: Vis) {
-    const air = v.spec.air, s = (air ? 1 : this.engine.groundScale) * v.sc;
+    const air = v.spec.air, s = (air ? DISP_AIR : this.engine.groundScale * DISP_GROUND) * v.sc;
     this.position(v, vpos);
     q.setFromEuler(eu.set(v.pitch, v.yaw, v.roll, 'YXZ'));
     return U.compose(vpos, q, vsc.set(s, s, s));
@@ -352,12 +359,22 @@ export class UnitLayer implements Layer {
 
   /* ------------------------------------------------------------ drawing */
   private draw(v: Vis, e: Engine) {
-    const spec = v.spec, air = spec.air, k = air ? 1 : e.groundScale, alive = v.state === St.Alive;
+    const spec = v.spec, air = spec.air, k = air ? DISP_AIR : e.groundScale * DISP_GROUND, alive = v.state === St.Alive;
     this.rootMatrix(v);
     const wreckAir = air && v.state === St.Wreck;
     for (const p of spec.parts) {
       const isRotor = p.anim === 'rotor' || p.anim === 'rotorV';
       if (isRotor && wreckAir) continue; // blades are gone
+      if (spec.squad) {
+        // A squad: the same part at each figure's offset, scaled up so it reads from altitude.
+        const sq = spec.squadScale ?? 1, m = this.partMatrix(v, p);
+        for (let i = 0; i < spec.squad.length; i++) {
+          const o = spec.squad[i];
+          SQ.makeTranslation(o.x, o.y, o.z).multiply(SQ2.makeScale(sq, sq, sq));
+          p.pool.push(SQ2.multiplyMatrices(m, SQ), v.flash, v.burn);
+        }
+        continue;
+      }
       p.pool.push(this.partMatrix(v, p), v.flash, isRotor ? 0 : v.burn);
     }
     const t = this.time + v.seed, s = k * v.sc;
@@ -418,8 +435,24 @@ export class UnitLayer implements Layer {
         e.glow.add(vb.x, vb.y + 1, vb.z, Math.random() * TAU, z, z, C.muzzle, 1.2, Shape.Hot);
       }
     }
-    // ----- ground contact shade for ground units (soft occlusion under the hull)
-    if (!air && v.type !== 'infantry') { vb.set(0, 0, 0).applyMatrix4(U); e.dark.add(vb.x, 0.3, vb.z, fwdYaw, spec.size * 2.6 * s, spec.size * 2.1 * s, C.shadow, 0.45, DarkShape.Soft); }
+    // ----- hostile marking (docs/ART.md "Readability"): every unit is cut out of the city by a dark halo;
+    // ground units also carry thin target brackets; aircraft cast a drop shadow on the city far below.
+    this.position(v, vpos);
+    const mk = spec.mark * s, fade = v.sc;
+    if (!air) {
+      const salvage = v.type === 'cache' || v.type === 'wreck';
+      e.dark.add(vpos.x, 1.2 * k, vpos.z, fwdYaw, mk * 2.8, mk * 2.8, C.shadow, 0.78 * fade, DarkShape.Soft);
+      const pulse = 0.85 + 0.15 * Math.sin(t * 3);
+      // Infantry come in clumps of squads: overlapping brackets turn to confetti, so they get the halo only.
+      if (v.type !== 'infantry') e.glow.add(vpos.x, 1.6 * k, vpos.z, 0, mk * 2.0, mk * 2.0, salvage ? C.markScrap : C.mark, (salvage ? 0.6 : 0.75) * pulse * fade, Shape.Bracket);
+    } else {
+      e.dark.add(vpos.x, vpos.y - 8, vpos.z, 0, mk * 2.6, mk * 2.6, C.shadow, 0.55 * fade, DarkShape.Soft);
+      const sh = 1 - v.alt / 900;
+      if (sh > 0) {
+        e.toGround(v.x + SHADOW_DX, v.y + SHADOW_DY, vb);
+        e.dark.add(vb.x, 1.6, vb.z, Math.atan2(Math.cos(fwdYaw), Math.sin(fwdYaw)), spec.size * 2.3 * k * 0.55, spec.size * 1.7 * k * 0.55, C.shadow, 0.5 * sh * fade, DarkShape.Soft);
+      }
+    }
   }
 
   private contrail(v: Vis, e: Engine) {

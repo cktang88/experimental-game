@@ -9,6 +9,7 @@ import * as vfx from '../../game/vfx';
 import { V, railFx, addFx, broadsideFx, pulseCA, addTrauma, type Fx } from '../../game/vfx';
 import { OVERDRIVES } from '../../data/hulls';
 import { rgb } from './quads';
+import { PAL } from '../palette';
 import { FxBatch, FxShape } from './fxBatch';
 import { Ribbons, RibbonStyle } from './ribbons';
 import { DistShape } from './distort';
@@ -20,7 +21,11 @@ import type { Ent, Beam } from '../../game/combat';
 const AIR = 30;
 const TAU = Math.PI * 2;
 const v = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3();
-const WHITE = rgb('#ffffff'), HOSTILE = rgb('#ff4a3a'), HOSTILE_HOT = rgb('#ff7a4a'), EMBER = rgb('#ff8a3d');
+// Enemy fire is the THREAT family (docs/ART.md "Readability"): hot magenta-pink with white-hot centres and
+// dark rims. Nothing else on screen uses it, so "pink = it can hit you" reads at a glance against the amber
+// city, the red-marked enemy units, our cyan fire and gold scrap.
+const WHITE = rgb('#ffffff'), HOSTILE = rgb(PAL.threat), HOSTILE_HOT = rgb(PAL.threatHot), EMBER = rgb('#ff8a3d');
+const MISSILE_BODY = rgb('#ffe9f6'), MISSILE_SHADE = rgb('#1a0610');
 const SPARK_HOT = rgb('#fff1c8'), SPARK_MID = rgb('#ffc35a'), SPARK_COOL = rgb('#ff6a3d');
 const N_LIGHTS = 6;
 /** Extra bloom requested this frame (the Lance), eased into the post chain's bloom intensity. */
@@ -500,7 +505,7 @@ export class FxLayer implements Layer {
     A.add(v.x, v.y, v.z, 0, W * 5, W * 5, c, 0.6, FxShape.Soft, 0.45);
   }
 
-  /* ---------------- enemy fire: hostile red, dark rims, always readable ---------------- */
+  /* ---------------- enemy fire: threat magenta, dark rims, always readable ---------------- */
   private enemyShot(bl: Ent, t: number) {
     const e = this.e, H = this.hostile, D = e.post.distort;
     if (bl.kind === 'strike') {
@@ -527,7 +532,7 @@ export class FxLayer implements Layer {
         H.add(v.x, v.y, v.z, 0, 24 + 80 * q, 24 + 80 * q, HOSTILE, 1.5 + 2 * q, FxShape.Hot, 0.9);
         H.add(v.x, v.y, v.z, t * 4, 140 * (1 - q) + 30, 140 * (1 - q) + 30, HOSTILE, 1.4, FxShape.Ring, q, 0.05);
       } else {
-        if (!this.seen.has(bl)) { this.seen.add(bl); railFx(bl.x, bl.y, x2, y2, '#ff6a5a', true); }
+        if (!this.seen.has(bl)) { this.seen.add(bl); railFx(bl.x, bl.y, x2, y2, PAL.threat, true); }
         const q = clamp(1 - (bl.t - bl.warn) / bl.dur, 0, 1);
         this.streak(H, bl.x, bl.y, x2, y2, AIR, bl.w * 4.2, HOSTILE, 1.3, 0.55 * q, FxShape.Beam);
         this.streak(H, bl.x, bl.y, x2, y2, AIR + 1, bl.w * 1.4, HOSTILE_HOT, 2.6, q, FxShape.Beam);
@@ -542,10 +547,15 @@ export class FxLayer implements Layer {
       let id = this.ribbonOf.get(bl);
       if (id === undefined) { id = this.ribbons.open(RibbonStyle.Hostile, bl.x, bl.y); this.ribbonOf.set(bl, id); }
       if (id >= 0) this.ribbons.feed(id, bl.x, bl.y);
-      e.toFlight(bl.x - ux * 8, bl.y - uy * 8, AIR + 2, a);
-      H.add(a.x, a.y, a.z, Math.atan2(uy, ux), 24, 10, HOSTILE_HOT, 2.6, FxShape.Bolt, 0.9);
+      // Missiles: a long pale dart (not a round) with a magenta exhaust and a blinking seeker ring.
+      const ang = Math.atan2(uy, ux);
+      e.toFlight(bl.x - ux * 14, bl.y - uy * 14, AIR + 1, a);
+      H.add(a.x, a.y, a.z, ang, 30, 9, HOSTILE, 2.4, FxShape.Bolt, 0.95);
+      e.toFlight(bl.x - ux * 3, bl.y - uy * 3, AIR + 2, a);
+      H.add(a.x, a.y, a.z, ang, 18, 5, MISSILE_SHADE, 1, FxShape.Dark, 0.9);
+      H.add(a.x, a.y, a.z, ang, 16, 3.6, MISSILE_BODY, 2.2, FxShape.Bolt, 1);
       e.toFlight(bl.x, bl.y, AIR + 3, v);
-      H.add(v.x, v.y, v.z, 0, 20, 20, HOSTILE, 2.2, FxShape.Hostile, 1, Math.sin(t * 30) > 0 ? 1 : 0);
+      H.add(v.x, v.y, v.z, t * 3, 26, 26, HOSTILE, 1.6, FxShape.Ring, Math.sin(t * 30) > 0 ? 0.9 : 0.35, 0.12);
       return;
     }
     e.toFlight(bl.x, bl.y, AIR + 3, v);
@@ -557,9 +567,9 @@ export class FxLayer implements Layer {
       H.add(v.x, v.y, v.z, t, R, R, HOSTILE, 1.4, FxShape.Ring, 0.35 + 0.4 * pulse, 0.06);
       return;
     }
-    // Bullets: dark-rimmed red cores with a short motion smear.
+    // Bullets: dark-rimmed magenta cores with white centres and a short motion smear (no wide haze).
     const s = bl.r * 5.2;
-    H.add(v.x, v.y, v.z, 0, s * 2.6, s * 2.6, HOSTILE, 0.7, FxShape.Soft, 0.7);
+    H.add(v.x, v.y, v.z, 0, s * 2, s * 2, HOSTILE, 0.45, FxShape.Soft, 0.6);
     if (sp > 20) this.streak(H, bl.x, bl.y, bl.x - ux * bl.r * 7, bl.y - uy * bl.r * 7, AIR + 2, bl.r * 2.4, HOSTILE, 1.8, 0.65);
     H.add(v.x, v.y, v.z, 0, s, s, HOSTILE, 2.8, FxShape.Hostile, 1);
   }

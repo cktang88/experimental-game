@@ -40,7 +40,7 @@ void main(){
     matter = style == 1 ? vec3(0.13, 0.12, 0.12) : vec3(0.42, 0.43, 0.46) * (0.65 + 0.5 * n);
     // Hot exhaust just behind the motor.
     float hot = smoothstep(0.12, 0.0, age) * pow(max(0.0, 1.0 - side), 1.5);
-    vec3 hc = style == 1 ? vec3(1.0, 0.25, 0.08) : vec3(1.0, 0.62, 0.25);
+    vec3 hc = style == 1 ? vec3(1.0, 0.16, 0.55) : vec3(1.0, 0.62, 0.25);
     emit = hc * hot * 4.0;
     alpha *= 1.0 - hot;
   }

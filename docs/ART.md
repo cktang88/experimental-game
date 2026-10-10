@@ -7,11 +7,11 @@ Every entity, effect and panel must look like it belongs in that sentence. If a 
 ## Scale and camera
 
 - The camera looks down at the **flight plane** with a slight forward tilt (`src/render/engine.ts`). The **city is far below**: `groundScale` is about 1.6, so ground objects are drawn larger in world space to read at their gameplay size, and perspective makes them sit visibly deeper.
-- **The dreadnought is a building.** The starter hull is about 150 field units long on a 1600×900 field, and a full hull is about 400. It needs detail at three distances:
+- **The dreadnought is an aircraft carrier (~330 m) over a city seen from very high up.** `SHIP_SCALE` is 3.1: the starter hull is about 180 field units long on a 1600×900 field (a fifth of the screen height), a full hull far more. The city is shrunk by `CITY_K` (0.25, `src/game/worldgen.ts`): a block is 25-55 field units, so the hull covers four to six blocks, buildings are tiny lit rectangles (window grids fade to their average glow, no facade detail), and street lamps become faint lines of light. The hull needs detail at three distances:
   - **Silhouette:** stepped superstructure, bridge tower, broadside sponsons, engine block.
   - **Panels:** plate seams, hatches, vents, trims and stripes from the sci-fi trim sheets.
   - **Life:** hundreds of tiny running lights, window strips, deck floodlights, blinking beacons and steam vents. *Thousands of crew* should be implied by thousands of lit portholes.
-- **Enemies are small and brave.** Tanks are a few pixels of chassis plus a headlight cone. Aircraft carry navigation lights (red port, green starboard, white strobe).
+- **Enemies are small, brave and always legible.** They are not to scale with the city: like the units in a top-down helicopter shooter they are drawn chunky (1.25× their hit size in the air, 1.4× on the ground; an infantry squad is three oversized figures), so a tank is a tank at a glance even though a city block is smaller than it. Aircraft carry navigation lights (red port, green starboard, white strobe).
 
 ## Palette (`src/render/palette.ts`, mirrored in `src/styles.css`)
 
@@ -22,14 +22,33 @@ Every entity, effect and panel must look like it belongs in that sentence. If a 
 | `hazard #f2a541` | Friendly accent: stripes, UI, our ordnance tracers |
 | `sodium #ffb347` | City light: street lamps, windows, fires |
 | `plasma #4fd1e8` | Friendly energy: shields, rail and arc weapons, our engines' core |
-| `hostile #ff5a4e` | Everything that wants you dead: enemy fire, enemy lights, warnings |
+| `hostile #ff5a4e` | Enemy units and warnings: unit rims, target brackets, enemy lamps, alert banners |
+| `threat #ff2f8e` / `threatHot #ff9ad5` | Enemy fire only: bullets, missiles, shells, beams, wind-up glints and lane markers |
 | `good #8fe39a` | Repair only |
 | `scrap #e0c35c` | Salvage only |
 
 Rules:
-- Hostile red is never used for decoration. If it is red and glowing, it can hurt you.
+- Hostile red is never used for decoration. If it is red, it is an enemy (or a warning about one).
+- Threat magenta is never used for anything but enemy fire. If it is pink and glowing, it can hit you.
 - Emissive colors exceed 1.0 only for things that should bloom (muzzles, engines, explosions, beams, window clusters). Matte surfaces never bloom.
 - Each sector has one theme (`THEMES`) that changes ground tones, fog and window color, but never the meaning of the palette.
+
+## Readability (the visual hierarchy)
+
+The screen must read at a glance, like a top-down arcade shooter: a calm backdrop, chunky targets, unmistakable fire. From loudest to quietest:
+
+| Layer | Treatment | Where |
+| --- | --- | --- |
+| Enemy fire | **Threat magenta** family, drawn on top of everything with dark rims. Bullets: round magenta cores with white-hot centres and a short smear, no wide haze. Missiles: long pale darts with a magenta exhaust ribbon and a blinking seeker ring. Flak orbs and mines: larger pulsing rounds with a ring. Ground-to-air shells: a dashed reticle on the target plus the climbing shell. Beams: magenta warning line, then a white-cored beam. Wind-ups: a magenta star glint and a closing ring. | `src/render/fx/fxLayer.ts` (`enemyShot`, `glints`), `PAL.threat` |
+| Player fire | Plasma cyan and white (bolts, rails, arcs, the Lance); our shells and bombs are hazard amber. | `fxLayer.ts` |
+| Scrap | Gold diamonds and gold-rimmed salvage, gold brackets on caches and wrecks. | `fxLayer.ts`, unit liveries |
+| Enemy units | Dark, matte military paint with a moonlit fill so the shape stays legible, a thin **hostile red silhouette rim** (fresnel, below the bloom threshold: an outline, not a glow), red lamps and nav lights. Ground units sit on a dark halo that cuts them out of the city and carry thin red **target brackets** (infantry, which come in clumps of squads, get the halo only). Aircraft get a dark halo on the flight plane and a **drop shadow** on the city far below (offset down-right, away from the moon), which sells their altitude. | `src/render/units/livery.ts`, `unitLayer.ts` (`draw`), `Shape.Bracket` in `src/render/fx/quads.ts` |
+| The city | The quietest layer: near-black blocks, windows at 70% of their old glow, dim road glows instead of individual lamps, a sample of trees and fires, few refinery flares, faint searchlights. Nothing in the city is magenta, and nothing in it is as bright as a bullet. | `src/render/world/*`, `src/game/worldgen.ts` |
+
+Rules:
+- Background glows never compete with gameplay: chromatic aberration pulses only on big blasts, and city lights stay below the bloom threshold except fires.
+- A new enemy type needs a distinct silhouette at its display size, a livery with a rim, and (on the ground) a `mark` size for its halo and brackets (`UnitSpec.mark` in `src/render/units/specs.ts`).
+- A new enemy projectile uses the threat family and a shape no other projectile uses.
 
 ## Materials
 

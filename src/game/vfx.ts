@@ -196,7 +196,7 @@ export function boomFx(x: number, y: number, r: number, col: string, ground = fa
     if (r >= 14) addFx({ type: 'emit', emit: 'burn', x, y, life: rnd(2, 3.5) * m, max: 3.5 * m, size: r * 0.55, ground: true });
   }
   addTrauma(Math.min(0.45, (r / 70) ** 1.4));
-  if (r >= 30) pulseCA(Math.min(1, r / 70));
+  if (r >= 44) pulseCA(Math.min(0.6, r / 120)); // big blasts only: a constant split muddies the read
   if (big && !ground) V.flashA = Math.max(V.flashA, Math.min(0.14, r / 300));
 }
 
@@ -255,7 +255,7 @@ export function broadsideFx(x: number, y: number, side: number, n: number, len: 
   addFx({ type: 'shock', x: x + side * 70, y, life: 0.45, max: 0.45, size: span * 1.2, str: 0.8 });
   kick(-side * (4 + 2 * Math.min(5, n)), 0);
   addTrauma(Math.min(0.4, 0.12 + 0.05 * n));
-  pulseCA(Math.min(0.45, 0.15 + 0.06 * n));
+  pulseCA(Math.min(0.25, 0.08 + 0.03 * n));
 }
 
 /** Impact sparks (a projectile hitting something) with a small flash. */

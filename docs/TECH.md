@@ -11,7 +11,9 @@
 ## Coordinates (read `src/render/engine.ts` header)
 - Gameplay is 2D on a 1600×900 field (`src/game/field.ts`), with y pointing down the screen.
 - Flight-plane objects use `engine.toFlight(x, y, alt)`. Ground objects use `engine.toGround(x, y)` and must be scaled by `engine.groundScale`.
-- Ship hulls are `SECTIONS` design units × `SHIP_SCALE` (2.6). `derive()` already returns scaled rects and mounts.
+- Ship hulls are `SECTIONS` design units × `SHIP_SCALE` (3.1; it was 2.6 before the scale pass). `derive()` already returns scaled rects and mounts.
+- The city is authored in its own design units and shrunk by `CITY_K` (0.25) into field units (`src/game/worldgen.ts`, see "City").
+  Enemy units are not: they are drawn at their gameplay size times a display scale (`DISP_AIR` 1.25, `DISP_GROUND` 1.4 in `src/render/units/unitLayer.ts`).
 
 ## Module ownership (parallel work)
 Each workstream owns its files. Edit outside your area only at the integration points listed, and keep those edits small.
@@ -157,16 +159,23 @@ Kinds (`OVERDRIVES` in `src/data/hulls.ts`):
 8 + 35% of value per second. `mult = 1 + value / 80`, capped at 3. Every scrap drop is `base * SCRAP_SCALE (0.31) * scrapSectorMul(sector) * carnage.mult *
 heat.scrap * dv.scrapMult` (see "Scrap economy" below). Scrap magnet (`MAGNET` in parts.ts): scrap within `dv.magnet` (240 + 80 per Salvage Magnet tier + relic `magnetAdd`, e.g. Magnetized Hull +90) of the hull's edge is pulled in with an acceleration that grows as it nears and the longer it is held (`p.pull`), sideways drift is bled off so it curls into the hull, speed capped at 1500, and fast scrap throws a gold streak; anything within `MAGNET.collect` (26) of the hull is taken at once. All scrap also homes on its own after ~0.9 s (sooner with magnets) and is never lost off the bottom of the field (repair kits only come inside the reach); `S.pickStreak = { n, t }`
 counts pickups landing within 0.5 s of each other (rising pitch for audio). City agent: `worldBlast()` should return about 1-4 scrap per
-building destroyed; combat (`groundBlast`) pays `STRUCTURE_SCRAP` (0.4) of it with the usual scaling, adds `2 + scrap` carnage, counts it as a structure and feeds Overdrive.
+building destroyed; combat (`groundBlast`) first multiplies it by `cityPay()` (below), then pays `STRUCTURE_SCRAP` (0.4) of it with the usual scaling, adds `2 + scrap` carnage, counts it as a structure and feeds Overdrive.
 
 ### City (`src/game/worldgen.ts`, rendering in `src/render/world/`)
 - The city is generated in rows (`CITY.chunks`) in a fixed city space: field y = `cy + S.scrollY`. `S.decor` holds every live
   building (`type: 'bldg'`, dead ones stay as rubble) and crater (`type: 'crater'`), with field `x, y` kept in sync with the scroll.
+- Scale: the fillers work in design units (blocks 100-230, `FLOOR` 4.4 per storey) and `genRow` packs whole block rows into a chunk
+  at least `CHUNK_MIN` (120) field units tall, then `shrinkRow` maps it into field units by `CITY_K` (0.25) about the field's centre
+  line (`STOREY` is a storey in field units). Hit points and `value` come from the design size, so a building takes as many hits as
+  before, but every blast now covers many more of them: combat multiplies `worldBlast()`'s return by `cityPay()` (`CITY_PAY` per
+  theme, tuned so `tests/unit/economy.test.ts` matches the pre-rescale table within a few percent). From this altitude trees, lamps,
+  fires, container stacks and searchlights are thinned to a sample; lots, terraces and tank farms are coarser than a real city's to
+  keep the instance count sane (about 3-9k buildings live).
 - Buildings: `hp / maxHp` (about 2-10 bomb hits by size, towers up to 240), `value` 1-4 scrap, `fire` 0..1, `collapseT`, `dead`.
   `worldBlast(x, y, r, dmg)` damages footprints (and roofs as seen, via `CITY.project`), ignites, collapses, leaves a crater and
   returns the scrap of what collapsed. Refinery tanks, silos and flares chain-react: their follow-up blasts go through combat's
   `groundBlast` so they pay like any other. Combat emits `structure` (audio plays `collapse`).
-- `DARK`: the blackout grid. The city's power dies around the dreadnought as it passes; shaders sample it.
+- `DARK`: the blackout grid (128 × 128 cells of 20 field units). The city's power dies around the dreadnought as it passes; shaders sample it.
 - Renderer: global instanced batches (blocks, flats, props, lights, traffic, craters) refilled only when a row enters or leaves.
   Window grids, burning floors, collapse and rubble are in the building shader (`src/render/world/shaders.ts`). Debug: `window.__city`
   (`CITY`, `DARK`, `worldBlast`) and, in dev, `window.__cityLayer`.
@@ -186,6 +195,8 @@ A ghost flies its recorded build (`ghostToBuild`), mirrored: its bow points down
 (ox, oy) sits at field (x + ox·s, y − oy·s). Every `BossGun` keeps its mount's `arc` and `side`:
 - non-broadside guns fire on their own cooldowns (`BOSS_CD`), aimed with `clampTraverse(gun.trav, ..., true)`: the bridge gun inside its
   forward cone (straight down the screen), top-deck turrets all round;
+- every ghost round is scaled by `bossHitEase()` = 2.6 / SHIP_SCALE (×0.85 more from sector 3): the scale pass made our hull a
+  bigger target. Scripted pilot hull lost per boss: s1 32% / s2 60% / s3 70%;
 - ventral (bombs: mines; mortars: telegraphed strikes) and omni (arc coil rings, point defense) as before;
 - broadside lanes lock inside the flank sector (±`TRAVERSE.broadside` about the beam), and a flank engages when the player is inside it;
 - broadside guns fire **volleys** per flank (`B.volley[0]` port / screen left, `[1]` starboard): a flank whose arc holds the
@@ -296,4 +307,5 @@ Particles live in field coordinates plus a height `h` (ground particles: field u
 - Feel: `addTrauma(0..1)` (shake = 16 units × trauma^1.5, three-sine noise, small roll, decays in real time so hitstop keeps shaking), `kick(dx, dy)` (recoil shove, springs back in ~120 ms), `pulseCA(0..1)` (chromatic split), `setTimeGrade(0..1)` (slow-time desaturation that keeps hot light). Writing `V.shake` still works: it is converted to trauma (sqrt(shake / 22)) every tick.
 - The FX layer reads `S.events` (broadside, overdrive, overdriveReady, carnageTier, playerHit, eliteKill, bossDown), `S.overdrive` (lance pillar, burning trail, spear, strike wing, aegis), enemy `tele` glints and `S.slowFx` (letterbox, vignette and desaturation in post).
 - Post (`src/render/fx/post.ts`, `engine.post`): RenderPass (half float) → N8AO (high tier) → distortion + chromatic aberration → bloom (threshold on 0.5·(luma + max RGB)) → ACES → per-sector grade, slow-time, vignette, grain, letterbox → SMAA. `engine.setQuality('high' | 'low')` switches tiers at runtime (saved to `localStorage gd.quality`; `?quality=` overrides). Software GL renders at 0.6 resolution (`?scale=` overrides).
-- Draw calls: ground FX batch, ribbon trails, air FX batch, hostile batch (enemy fire, always on top with dark rims), one distortion batch. Debug hook: `window.__gdfx`.
+- Draw calls: ground FX batch, ribbon trails, air FX batch, hostile batch (enemy fire in the threat magenta family, always on top with dark rims; see docs/ART.md "Readability"), one distortion batch. Debug hook: `window.__gdfx`.
+- Chromatic aberration pulses only on blasts of radius 44+ (up to 0.6) and gently on broadsides, so the frame stays clean in a long fight.
