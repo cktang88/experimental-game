@@ -283,6 +283,13 @@ tests/unit/balance.test.ts --disable-console-intercept` prints the table (`ONLY=
 `run`, `profile`, `S`, `debug.timeScale`, `god()`, `winNow()` (kills boss/elite outright), `killPlayer()`, `overdrive()` (charge and fire),
 `travelTo(type)`, `forceNext(type)`, `addScrap(n)`, `aim`, `gunnery`, `selectGroup(i)`.
 
+## Ship rendering (`src/render/ship/`)
+- `hull.ts` builds a hull at the reference scale (`SHIP_SCALE` 2.6) and scales a `body` group by `SHIP_SCALE / 2.6`, so every detail keeps its proportion if the ship scale changes. Layer-facing points (`nozzles`, `vents`, `dmgPts`) are in root space; turret pivots are in body space (`model.k`).
+- Three detail scales, all merged per material: superstructure (bridge stack, citadels), medium equipment (vents, tanks, deck houses), and the dense greeble layer in `greebles.ts` (recursively split machinery fields, masts, dishes, PDC blisters, heat sinks, hangar mouths, belt pipes, stencils). Seeded per hull section, so a build always looks the same and ghosts match their builds. Plate seams are procedural in the hull shader (`materials.ts`, fwidth-faded).
+- Weapon mounts (`turrets.ts`) are clusters of small guns dressed by their traverse (`arcs.ts`, on `Mount.trav`): raised dorsal barbettes, a bow casemate, flank sponsons, ventral bays. All guns of a ship are one mesh per material, animated in the vertex shader from `uGunA` (pivot, yaw) and `uGunB` (recoil, door slide, gun scale). Yaw is clamped with `clampTraverse` (ghosts mirrored); `manualAimFor` overrides the target for heavy groups.
+- Lights are one `THREE.Points` per ship (`lights.ts`): portholes, deck lamps, nav lights (red port, green starboard, white strobes). `uDmg` knocks out steady lights as the hull fails.
+- Dev viewer: `/tools/ship.html?build=starter|big|max|<json>&zoom=&tilt=&orbit=&lx=&ly=&ghost=1&px=&py=&hp=`; `window.__shipInfo()` reports draw calls and triangles.
+
 ## VFX API (`src/game/vfx.ts`, rendering in `src/render/fx/`)
 Particles live in field coordinates plus a height `h` (ground particles: field units above the city; flight particles: world units above or below the flight plane). They are pooled; `V.cap` (set by the quality tier) bounds the live count.
 - Spawners: `boomFx(x, y, r, col, ground)` (fireball, smoke, sparks, embers, debris; ground adds scorch, dust ring, smoke column, lingering fire; flak colour `#ffd27a` gives a flak burst, `#9ff3ff` an energy discharge), `flakFx`, `energyBurst`, `broadsideFx(x, y, side, n, len)`, `railFx(x1, y1, x2, y2, col, hostile)`, `spark(x, y, col, n)` (seeker colour `#ff9f5a` becomes a small warhead blast), `muzzle(x, y, col, size)` (also drives the hull muzzle light), `addFx(spec)` for single particles.
