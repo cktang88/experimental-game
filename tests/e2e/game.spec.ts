@@ -316,6 +316,7 @@ test('daily strike duty roster: briefing, filing on death, own row marked, offli
   await page.click('#btn-daily');
   await expect(page.getByTestId('roster-status')).toContainText('No carrier', { timeout: 15_000 });
   await expect(roster.locator('.rs-row.you.local')).toContainText(me);
+  await page.waitForTimeout(1500); // let the title's boot reveal finish behind the modal
   await page.screenshot({ path: `${SHOTS}/22-daily-offline.png` });
   await page.click('#btn-daily-close');
   await expect(roster).toHaveCount(0);
