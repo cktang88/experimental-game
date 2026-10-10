@@ -133,12 +133,14 @@ function fieldOf(b: Biome, x: number, cy: number, o: TerrainSample): TerrainSamp
     }
     case Biome.Desert: {
       const w = fbm(x * 0.0025, cy * 0.0025, 3);
-      // Dune ridges run diagonally across the field, warped into crescents: soft graded slopes with a crisp crest.
-      const ph = (x * 0.8 + cy * 0.5) * 0.0062 + w * 4 + 1.2 * fbm(x * 0.005 + 3, cy * 0.005, 2);
+      // Dune swells run diagonally across the field, warped into crescents: a long soft windward rise and a rounded lee,
+      // no knife-edge crest (a crest reads as a hard line from this altitude).
+      const ph = (x * 0.8 + cy * 0.55) * 0.0042 + w * 3.2 + 0.8 * fbm(x * 0.004 + 3, cy * 0.004, 2);
       const s = ph - Math.floor(ph);
-      const dune = s < 0.65 ? Math.sin((s / 0.65) * Math.PI * 0.5) : Math.cos(((s - 0.65) / 0.35) * Math.PI * 0.5);
-      const amp = 26 * smooth(0.2, 0.65, fbm(x * 0.0028 + 5, cy * 0.0028, 2));
-      let h = dune * dune * amp + 6 * fbm(x * 0.008, cy * 0.008, 3);
+      const a2 = s < 0.62 ? s / 0.62 : 1 - (s - 0.62) / 0.38;
+      const dune = a2 * a2 * (3 - 2 * a2);
+      const amp = 30 * smooth(0.15, 0.7, fbm(x * 0.0024 + 5, cy * 0.0024, 2));
+      let h = dune * amp + 8 * fbm(x * 0.006, cy * 0.006, 3);
       // Mesas: flat-topped plateaus with hard escarpments.
       const m = fbm(x * 0.0018 + 40, cy * 0.0018, 4);
       const mesa = smooth(0.63, 0.655, m);
@@ -213,7 +215,7 @@ export const TERR = { cell: 4, nx: 600, ny: 512, x0: -400, data: new Uint8Array(
 /** Moon direction (field x, up, city y): high in the upper left, like the engine's key light. */
 const LX = -0.52, LY = 0.72, LZ = -0.46;
 /** Shading gain per biome: how hard slopes catch the moon. */
-const SHADE_G: Record<number, number> = { [Biome.City]: 1.2, [Biome.Port]: 1.6, [Biome.Airfield]: 1.6, [Biome.Desert]: 1.6, [Biome.Snow]: 1.5, [Biome.Forest]: 2.4 };
+const SHADE_G: Record<number, number> = { [Biome.City]: 1.2, [Biome.Port]: 1.6, [Biome.Airfield]: 1.6, [Biome.Desert]: 1.25, [Biome.Snow]: 1.5, [Biome.Forest]: 2.4 };
 const ts: TerrainSample = { h: 0, water: 0, cover: 0 };
 
 /**

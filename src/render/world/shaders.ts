@@ -56,6 +56,24 @@ export const U = {
   uFlir: flirUniform,
 };
 
+/**
+ * three's light loop with an early out: the FX point lights (explosions, muzzle) sit at zero intensity most of the
+ * time and reach a few hundred units when lit, yet every world fragment paid for all of them. Lights that are off or
+ * out of range are skipped (a uniform branch, so it is cheap even on software GL).
+ */
+const LIGHTS_BEGIN_CHEAP = THREE.ShaderChunk.lights_fragment_begin
+  .replace('\t\tpointLight = pointLights[ i ];\n', '\t\tpointLight = pointLights[ i ];\n\t\tif ( pointLight.color.r + pointLight.color.g + pointLight.color.b > 0.0 && length( pointLight.position - geometryPosition ) < pointLight.distance ) {\n')
+  .replace(/(\t\tRE_Direct\( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight \);\n)(\s*\}\n\s*#pragma unroll_loop_end)/, '$1\t\t}\n$2');
+if (!/cheap|pointLight\.color\.r \+/.test(LIGHTS_BEGIN_CHEAP) || (LIGHTS_BEGIN_CHEAP.match(/\{/g)?.length ?? 0) !== (LIGHTS_BEGIN_CHEAP.match(/\}/g)?.length ?? 0)) console.warn('world: cheap light loop patch did not apply cleanly');
+/** Give a lit material the cheap light loop (keeps any onBeforeCompile it already has). */
+export function cheapLights<M extends THREE.Material>(m: M, key: string): M {
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, r) => { prev.call(m, sh, r); sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_begin>', LIGHTS_BEGIN_CHEAP); };
+  const pk = m.customProgramCacheKey.bind(m);
+  m.customProgramCacheKey = () => pk() + '|cheap-lights|' + key;
+  return m;
+}
+
 export const GLSL_COMMON = /* glsl */ `
 uniform float uTime; uniform sampler2D uDark; uniform vec4 uDarkMap; uniform float uFlir;
 float h12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -153,9 +171,11 @@ const BLD_FRAG = /* glsl */ `
     on = mix(litF * ww * wh * 0.9, on, aa); inWin = mix(ww * wh, inWin, aa);
     float power = keep > 0.5 ? 1.0 : powerAt(vCity, h);
     // Mostly the sector's window colour, some warm-white and dim-blue (screens) rooms for variety.
-    float hc = h12(cell * 0.37 + seed * 13.0);
+    // One hash per window drives its state, tone and brightness (from this altitude a window is under a pixel, so the
+    // correlation never shows, and software GL saves three hashes per fragment).
+    float hc = fract(h * 37.17);
     vec3 tone = hc < 0.62 ? uWinCol : hc < 0.86 ? vec3(1.0, 0.78, 0.52) : vec3(0.45, 0.6, 0.9);
-    vec3 wc = tone * (0.25 + 0.95 * h12(cell * 1.7 + seed * 91.0) * h12(cell.yx + seed));
+    vec3 wc = tone * (0.25 + 0.95 * fract(h * 91.3) * fract(h * 13.7));
     if (glass > 0.5) { wc *= vec3(0.75, 0.9, 1.1); diffuseColor.rgb *= vec3(0.8, 0.95, 1.25); }
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.015, 0.018, 0.024), inWin * 0.75);
     totalEmissiveRadiance += wc * on * power * (1.0 - vFall) * 0.7;
@@ -171,7 +191,7 @@ const BLD_FRAG = /* glsl */ `
       totalEmissiveRadiance += vec3(1.0, 0.8, 0.55) * dl * 0.8 * power * (1.0 - vFall);
     }
     // Burning floors: random windows turn to fire, and soot climbs the wall.
-    float burn = step(h12(cell + 3.7 + seed), fire * 0.9) * inWin;
+    float burn = fire > 0.0 ? step(fract(h * 5.31 + 0.37), fire * 0.9) * inWin : 0.0;
     diffuseColor.rgb *= 1.0 - 0.6 * fire;
     totalEmissiveRadiance += vec3(1.0, 0.38, 0.08) * burn * fire * flick * 2.2 * (1.0 - vFall * 0.7);
     // Neon trim along the top storey (Neon Sprawl).
@@ -196,8 +216,9 @@ const BLD_FRAG = /* glsl */ `
 `;
 
 /** Patch a standard material into the city building material. */
-export function buildingMaterial(): THREE.MeshStandardMaterial {
-  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0.0 });
+export function buildingMaterial(): THREE.MeshLambertMaterial {
+  // Lambert, not Standard: the blocks are rough and matte, and the cheaper BRDF matters on software GL.
+  const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader
@@ -207,8 +228,8 @@ export function buildingMaterial(): THREE.MeshStandardMaterial {
       .replace('#include <common>', '#include <common>\n' + GLSL_COMMON + BLD_FRAG_HEAD)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + BLD_FRAG);
   };
-  m.customProgramCacheKey = () => 'city-bld-v2';
-  return m;
+  m.customProgramCacheKey = () => 'city-bld-v3';
+  return cheapLights(m, 'bld');
 }
 
 /* ---------------- lights: lamps, pools, beacons ---------------- */
@@ -216,7 +237,7 @@ export function buildingMaterial(): THREE.MeshStandardMaterial {
 // Kinds: 0 street lamp core (goes dark in a blackout), 1 lamp pool on the ground, 2 always-on light,
 // 3 blinking roof beacon, 4 pool that never blacks out, 5 road glow (aK.z = length along z, aK.w = 1 when the road
 // runs along x), 6 sequenced strobe (approach lights: phase aK.y 0..1 along the run), 7 rotating beacon
-// (white / teal), 8 lighthouse (steady, a bright flash every few seconds).
+// (white / teal), 8 lighthouse (steady, a bright flash every few seconds), 9 glowing line like 5 that never blacks out.
 const LIGHT_VS = /* glsl */ `
 attribute vec4 aL; attribute vec4 aC; attribute vec4 aK;
 varying vec2 vUv; varying vec4 vC; varying float vKind; varying vec3 vP;
@@ -227,9 +248,9 @@ void main(){
   vec3 lc = aC.rgb;
   if (aK.x > 5.5 && aK.x < 6.5) { float f = fract(uTime * 1.6 - aK.y * 0.9); blink = f < 0.07 ? 1.0 : 0.0; }
   if (aK.x > 6.5 && aK.x < 7.5) { float f = fract(uTime * 0.45 + aK.y); float g = fract(f * 2.0); blink = smoothstep(0.0, 0.08, g) * (1.0 - smoothstep(0.12, 0.24, g)); lc = f < 0.5 ? aC.rgb : vec3(0.35, 1.6, 1.1); }
-  if (aK.x > 7.5) blink = 0.55 + 1.6 * smoothstep(0.9, 1.0, fract(uTime * 0.2 + aK.y));
+  if (aK.x > 7.5 && aK.x < 8.5) blink = 0.55 + 1.6 * smoothstep(0.9, 1.0, fract(uTime * 0.2 + aK.y));
   vC = vec4(lc * (1.0 - 0.82 * uFlir), aC.a * pw * blink);
-  bool road = aK.x > 4.5 && aK.x < 5.5;
+  bool road = (aK.x > 4.5 && aK.x < 5.5) || aK.x > 8.5;
   vec2 sz = road ? (aK.w > 0.5 ? vec2(aK.z, aL.w) : vec2(aL.w, aK.z)) : vec2(aL.w);
   vUv = road && aK.w > 0.5 ? uv.yx : uv;
   vec3 p = aL.xyz + vec3(position.x * sz.x, 0.0, position.z * sz.y);
@@ -242,8 +263,11 @@ varying vec2 vUv; varying vec4 vC; varying float vKind; varying vec3 vP;
 void main(){
   float d = length(vUv * 2.0 - 1.0);
   float a; vec3 col = vC.rgb;
-  if ((vKind > 0.5 && vKind < 1.5) || (vKind > 3.5 && vKind < 4.5)) a = pow(max(0.0, 1.0 - d), 1.6);
+  if (vKind > 0.5 && vKind < 1.5) a = pow(max(0.0, 1.0 - d), 1.6);
+  // Floodlight pools: a broad, soft wash with no visible rim (a lit patch of ground, not a disc).
+  else if (vKind > 3.5 && vKind < 4.5) a = pow(max(0.0, 1.0 - d), 2.6) * (0.75 + 0.25 * (1.0 - d));
   else if (vKind > 4.5 && vKind < 5.5) { vec2 q = abs(vUv * 2.0 - 1.0); a = pow(max(0.0, 1.0 - q.x), 1.4) * (1.0 - smoothstep(0.9, 1.0, q.y)) * powerAt(vP, 0.0); }
+  else if (vKind > 8.5) { vec2 q = abs(vUv * 2.0 - 1.0); a = pow(max(0.0, 1.0 - q.x), 2.2) * (1.0 - smoothstep(0.92, 1.0, q.y)); }
   else {
     // Pinpoint: a crisp hot core and a faint halo.
     float core = 1.0 - smoothstep(0.12, 0.34, d);
@@ -334,7 +358,7 @@ export function beamMaterial() {
 }
 
 /* ---------------- terrain (the ground of every biome) ---------------- */
-// A patched MeshStandardMaterial (moon, explosion lights and the ship's shadow still land on it). The terrain grid
+// A patched MeshLambertMaterial (moon, explosion lights and the ship's shadow still land on it). The terrain grid
 // gives moonlight shade, water, canopy and the biome blend; detail is procedural; the fire grid adds wildfire fronts,
 // burning oil and broken ice. Fire timings mirror terrain.ts BURN_T (forest 16 s, oil 26 s, ice 10 s, scrub 7 s).
 const TER_VERT_HEAD = /* glsl */ `varying vec3 vWP;`;
@@ -353,7 +377,9 @@ const TER_FRAG = /* glsl */ `
   float sh = t.r, wat = t.g, cov = t.b, wb = t.a;
   vec3 P0 = mix(uPA[0], uPB[0], wb), P1 = mix(uPA[1], uPB[1], wb), P2 = mix(uPA[2], uPB[2], wb);
   vec3 P3 = mix(uPA[3], uPB[3], wb), P4 = mix(uPA[4], uPB[4], wb), P5 = mix(uPA[5], uPB[5], wb);
-  float n1 = vnoise(fp * 0.045), n2 = vnoise(fp * 0.31 + 7.0), n3 = vnoise(fp * 1.1 + 3.0);
+  // Urban ground (the night city) skips the fine detail noise: it is nearly all under streets and blocks.
+  bool fine = P5.y > 0.5 || cov > 0.12 || wat > 0.3;
+  float n1 = vnoise(fp * 0.045), n2 = fine ? vnoise(fp * 0.31 + 7.0) : 0.5, n3 = fine ? vnoise(fp * 1.1 + 3.0) : 0.5;
   float lit = smoothstep(0.5, 0.92, sh), shd = smoothstep(0.5, 0.08, sh);
   vec3 alb = P0 * (0.72 + 0.4 * n1 + 0.14 * n2) * (1.0 - shd * P5.z);
   vec3 em = P1 * lit * (0.7 + 0.3 * n2);
@@ -421,8 +447,8 @@ const TER_FRAG = /* glsl */ `
   }
 }
 `;
-export function terrainMaterial(): THREE.MeshStandardMaterial {
-  const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0 });
+export function terrainMaterial(): THREE.MeshLambertMaterial {
+  const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader
@@ -432,6 +458,6 @@ export function terrainMaterial(): THREE.MeshStandardMaterial {
       .replace('#include <common>', '#include <common>\n' + GLSL_COMMON + TER_FRAG_HEAD)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + TER_FRAG);
   };
-  m.customProgramCacheKey = () => 'city-terrain-v1';
-  return m;
+  m.customProgramCacheKey = () => 'city-terrain-v2';
+  return cheapLights(m, 'terrain');
 }

@@ -124,9 +124,14 @@ export interface Prop { k: PropKind; x: number; cy: number; w: number; d: number
 export interface Water { x0: number; y0: number; x1: number; y1: number }
 /**
  * A point light on the ground. c: colour (LC), k: kind (0 lamp that blacks out, 2 always on, 3 blink,
- * 6 sequenced strobe running along p 0..1, 7 rotating beacon alternating white / teal), p: phase.
+ * 6 sequenced strobe running along p 0..1, 7 rotating beacon alternating white / teal, 8 lighthouse, 9 glowing line that
+ * never blacks out: runway edges, quay edges, spillways), p: phase.
  */
-export interface WLight { x: number; cy: number; h: number; s: number; c: number; a: number; k: number; p: number; b?: Bldg }
+export interface WLight {
+  x: number; cy: number; h: number; s: number; c: number; a: number; k: number; p: number; b?: Bldg;
+  /** Kind 9 (glowing line): length along cy (ax 0) or x (ax 1); s is its width. */
+  len?: number; ax?: 0 | 1;
+}
 /** Light colours (renderer palette): sodium, white, amber, taxi blue, teal-green, warm window, cold flood, fire orange. */
 export const enum LC { Sodium = 0, White = 1, Amber = 2, Blue = 3, Teal = 4, Warm = 5, Flood = 6, Fire = 7 }
 /**
@@ -136,7 +141,7 @@ export const enum LC { Sodium = 0, White = 1, Amber = 2, Blue = 3, Teal = 4, War
  * from (x, cy) at CITY.time t0 (path movers keep x's offset from the path).
  */
 export interface Mover {
-  k: 'ship' | 'tug' | 'boat' | 'convoy' | 'car' | 'barge';
+  k: 'ship' | 'tug' | 'boat' | 'convoy' | 'car' | 'barge' | 'jet';
   x: number; cy: number; t0: number; v: number; path: number; a: number;
   /** Hull length (field units) or vehicles in a convoy. */
   len: number; n: number; seed: number;

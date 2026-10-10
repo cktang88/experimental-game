@@ -116,19 +116,6 @@ function church(ch: Chunk, x: number, cy: number, roof: number) {
   fb(ch, 'mid', x, cy, 5, 9, 3.2, Style.Brick, { lit: 0.3, roof }, [tier(5, 9, 0, 3.2), tier(2.4, 2.4, 0, 9, 0, -5)]);
   L(ch, x, cy - 5, 9.4, 0.7, LC.Warm, 0.6, 2);
 }
-/** A dam across a valley or river: concrete arc, crest lights, powerhouse. Reservoir water is in the terrain. */
-function dam(ch: Chunk, b: Biome, cx: number, cy: number, half: number) {
-  const n = 7;
-  for (let i = 0; i < n; i++) {
-    const u = (i + 0.5) / n * 2 - 1, x = cx + u * half, y = cy - (1 - u * u) * half * 0.18;
-    fb(ch, 'dam', x, y, (half * 2) / n + 1, 5, 7, Style.Concrete, { lit: 0, tint: '#3a3d42', rot: -u * 0.35 });
-    L(ch, x, y - 2, 7.5, 0.8, LC.Sodium, 0.6, 0);
-  }
-  fb(ch, 'warehouse', cx, cy + 12, 20, 8, 4, Style.Industrial, { lit: 0.5 });
-  flood(ch, cx - 8, cy + 18, 6, 14, LC.Flood, 0.8);
-  flood(ch, cx + 8, cy + 18, 6, 14, LC.Flood, 0.8);
-  void b;
-}
 
 /* ---------------- set pieces ---------------- */
 let forced: string | null = null;
@@ -168,11 +155,11 @@ export function genCity(ch: Chunk, c0: number, c1: number) {
   CITY.sinceSet++;
   const sp = setPieceDue(Biome.City, c0, c1);
   if (!sp) return;
-  const cx = rnd(W * 0.25, W * 0.75), cy = (c0 + c1) / 2;
+  const cx = rnd(SAFE_X0 + 80, SAFE_X1 - 80), cy = (c0 + c1) / 2;
   if (!inBiome(Biome.City, cx, cy)) return;
   if (sp === 'stadium') {
     // A floodlit bowl: from up here a bright green rectangle in the dark grid.
-    const w = 96, h = 70;
+    const w = 120, h = 88;
     clearArea(ch, cx - w / 2 - 6, cy - h / 2 - 6, cx + w / 2 + 6, cy + h / 2 + 6);
     pad(ch, cx - w / 2 - 6, cy - h / 2 - 6, cx + w / 2 + 6, cy + h / 2 + 6, 'plaza');
     pad(ch, cx - w * 0.32, cy - h * 0.3, cx + w * 0.32, cy + h * 0.3, 'pitch');
@@ -181,9 +168,11 @@ export function genCity(ch: Chunk, c0: number, c1: number) {
     fb(ch, 'stand', cx, cy + h / 2 - 4, w, 8, 5.5, Style.Concrete, o);
     fb(ch, 'stand', cx - w / 2 + 4, cy, 8, h - 16, 5.5, Style.Concrete, o);
     fb(ch, 'stand', cx + w / 2 - 4, cy, 8, h - 16, 5.5, Style.Concrete, o);
-    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      fb(ch, 'mast', cx + sx * (w / 2 - 1), cy + sy * (h / 2 - 1), 1.6, 1.6, 18, Style.Metal, { lit: 0 });
-      L(ch, cx + sx * (w / 2 - 1), cy + sy * (h / 2 - 1), 18.4, 1.6, LC.Flood, 1, 2);
+    // A ring of floodlight masts round the bowl: the stadium's signature from orbit.
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2, mx = cx + Math.cos(a) * (w / 2 + 2), my = cy + Math.sin(a) * (h / 2 + 2);
+      fb(ch, 'mast', mx, my, 1.6, 1.6, 18, Style.Metal, { lit: 0 });
+      L(ch, mx, my, 18.4, 1.5, LC.Flood, 1, 2);
     }
     L(ch, cx, cy, 0.5, w * 0.8, LC.Flood, 0.02, 4);
     claim(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2);
@@ -199,21 +188,36 @@ export function genCity(ch: Chunk, c0: number, c1: number) {
 
 /* ======================================================================================================== */
 /* HARBOUR: dark water on the left, straight quays with gantry cranes and container stacks, a natural shore    */
-/* with a fishing village, ships alongside and underway with wakes, a lighthouse on the breakwater.            */
+/* with shipyards, refineries, marinas and fishing villages, ships alongside, at anchor and under way with      */
+/* wakes, a lighthouse on the breakwater. Port lights run on their own generators (kind 2 / 4): they stay on    */
+/* when the city grid fails, so the waterfront keeps its sodium glow under the ship.                           */
 /* ======================================================================================================== */
+/** Where a set piece may sit so it scrolls through the view clear of the side HUD panels. */
+const SAFE_X0 = 320, SAFE_X1 = 1280;
+const safeX = (x: number) => Math.max(SAFE_X0, Math.min(SAFE_X1, x));
+/** A glowing line (runway edge, quay edge, spillway): kind 9 strip along cy (ax 0) or x (ax 1); never blacks out. */
+const LINE = (ch: Chunk, x: number, cy: number, len: number, w: number, c: number, a: number, ax: 0 | 1 = 0) => { ch.lights.push({ x, cy, h: 0.5, s: w, c, a, k: 9, p: 0, len, ax }); };
+/** A yard floodlight that keeps burning in a blackout: a hot head and a broad pool. */
+function yardLight(ch: Chunk, x: number, cy: number, h: number, pool: number, c = LC.Sodium, a = 1) {
+  L(ch, x, cy, h, 0.8, c, 0.5 * a, 2);
+  L(ch, x, cy, 0.6, pool, c, 0.11 * a, 4);
+}
 export function genPort(ch: Chunk, c0: number, c1: number) {
   const B = Biome.Port;
   CITY.sinceSet++;
   const mid = (c0 + c1) / 2, q = quayK(mid);
+  // The set piece first, so it claims its ground before the yards fill in around it.
   const sp = setPieceDue(B, c0, c1);
+  if (sp) portSetPiece(ch, sp, mid);
   // Coast road behind the waterfront.
-  pathRoad(ch, B, (cy) => coastX(cy) + (quayK(cy) > 0.5 ? 345 : 60), c0, c1, 5, 'road');
+  pathRoad(ch, B, (cy) => coastX(cy) + (quayK(cy) > 0.5 ? 345 : 70), c0, c1, 5, 'road');
   if (q > 0.5) {
     const cx = coastX(mid);
-    // Quay apron and cranes.
+    // Quay apron: pale concrete with a sodium edge line, gantry cranes along the berth.
     if (ok(B, cx + 30, mid)) {
       pad(ch, cx - 1, c0, cx + 66, c1, 'dock'); zone(ch, cx - 1, c0, cx + 66, c1, 'dock');
-      for (let y = Math.ceil(c0 / 12) * 12; y < c1; y += 12) L(ch, cx + 1, y, 1, 0.8, LC.Sodium, 0.5, 0);
+      LINE(ch, cx + 0.5, mid, c1 - c0, 1.6, LC.Sodium, 0.16);
+      for (let y = Math.ceil(c0 / 14) * 14; y < c1; y += 14) L(ch, cx + 1, y, 1, 0.7, LC.Sodium, 0.5, 2);
       for (let y = c0 + rnd(4, 16); y < c1 - 6; y += rnd(26, 36)) {
         if (!ok(B, cx + 6, y)) continue;
         // Ship-to-shore gantry: a portal over the quay rails and a long boom out over the berth.
@@ -222,116 +226,190 @@ export function genPort(ch: Chunk, c0: number, c1: number) {
         ]);
         L(ch, cx - 39, y, 16.8, 0.9, LC.Amber, 0.8, 3, Math.random(), cr);
         L(ch, cx + 8, y, 16.8, 0.8, LC.White, 0.7, 2, 0, cr);
-        L(ch, cx - 8, y, 0.6, 16, LC.Flood, 0.06, 4);
+        // The boom's work lights pour onto the ship and the quay below.
+        L(ch, cx - 14, y, 0.6, 22, LC.Flood, 0.09, 4);
       }
       // Ship alongside.
-      if (Math.random() < 0.7 && free(cx - 14, mid)) ship(ch, cx - 14, mid + rnd(-20, 20), rnd(110, 150), 18, pick(['box', 'box', 'bulk']));
+      if (Math.random() < 0.8 && free(cx - 14, mid, 10)) ship(ch, cx - 14, mid + rnd(-20, 20), rnd(110, 150), 18, pick(['box', 'box', 'bulk']));
     }
-    // Container yard: coloured stacks in long blocks, floodlit.
+    // Container yard: coloured stacks in long blocks on pale concrete, under tall sodium masts.
     const yx0 = cx + 72, yx1 = cx + 255;
+    if (inBiome(B, yx0 + 90, mid)) {
+      pad(ch, yx0 - 4, c0, yx1 + 4, c1, 'concrete'); zone(ch, yx0 - 4, c0, yx1 + 4, c1, 'dock');
+      for (let y = Math.ceil(c0 / 50) * 50 + 10; y < c1; y += 50) for (const x of [yx0 + 45, yx0 + 135]) if (free(x, y)) yardLight(ch, x, y, 16, 46, LC.Sodium, 1);
+    }
     for (let y = c0 + 4; y < c1 - 4; y += 8.5) {
       for (let x = yx0; x < yx1; x += 25) {
-        if (Math.random() < 0.18 || !ok(B, x + 11, y)) continue;
+        if (Math.random() < 0.18 || !ok(B, x + 11, y, 3)) continue;
         fb(ch, 'low', x + 11, y + 2.6, 22, 5.2, 1.4 * (1 + Math.floor(Math.random() * 3.4)), Style.Shell, { tint: pick(CONTAINER_TINTS), lit: 0 });
       }
     }
-    if (inBiome(B, yx0 + 90, mid)) {
-      pad(ch, yx0 - 4, c0, yx1 + 4, c1, 'concrete'); zone(ch, yx0 - 4, c0, yx1 + 4, c1, 'dock');
-      for (let y = c0 + 20; y < c1; y += 60) for (const x of [yx0 + 60, yx0 + 140]) flood(ch, x, y, 14, 26, LC.Sodium, 0.9);
-    }
+    // Straddle carriers working the lanes.
+    if (Math.random() < 0.6) mover(ch, { k: 'car', x: yx0 + 20 + Math.floor(Math.random() * 7) * 25, cy: mid, v: pick([-1, 1]) * rnd(5, 9), path: 0, a: Math.PI / 2, len: 0, n: 1 });
     // Sheds and a rail siding, then the harbour district.
-    for (let y = c0 + 4; y < c1 - 10; y += rnd(30, 44)) if (ok(B, cx + 290, y + 12)) fb(ch, 'warehouse', cx + 290, y + 12, 44, rnd(18, 26), 4, Style.Industrial, { lit: 0.12 });
+    for (let y = c0 + 4; y < c1 - 10; y += rnd(30, 44)) if (ok(B, cx + 290, y + 12)) fb(ch, 'warehouse', cx + 290, y + 12, 44, rnd(18, 26), 4, Style.Industrial, { lit: 0.25 });
     if (inBiome(B, cx + 322, mid)) { seg(ch, cx + 322, c1, cx + 322, c0, 2.4, 'rail'); for (let y = c0 + 8; y < c1 - 8; y += 9) if (Math.random() < 0.6) ch.props.push({ k: 'railcar', x: cx + 322, cy: y, w: 1.4, d: 8, h: 1.1, rot: 0, v: Math.random() }); }
-    district(ch, B, cx + 360, X1, c0, c1);
-  } else {
-    // Natural shore: scrub, a fishing village with a jetty and boats, houses up the slope.
-    if (Math.random() < 0.45) {
-      const y = rnd(c0 + 20, c1 - 20), sx = coastX(y);
-      if (ok(B, sx + 30, y)) {
-        cluster(ch, B, sx + 40, y, 14, 34, Style.House, 0, undefined, LC.Sodium);
-        seg(ch, sx + 4, y, sx - 40, y + 6, 2.4, 'dock');
-        for (let i = 0; i < 3; i++) fb(ch, 'ship', sx - 14 - i * 9, y + 10 + rnd(-2, 2), 2.4, 7, 1.2, Style.Hull, { tint: '#2a2f33', lit: 0 });
-        L(ch, sx - 40, y + 6, 2, 0.8, LC.White, 0.6, 3);
+    // Logistics belt: big distribution sheds with lit loading docks, truck parks under sodium masts.
+    const lx0 = cx + 350;
+    if (inBiome(B, lx0 + 120, mid)) {
+      pad(ch, lx0, c0, lx0 + 250, c1, 'lot');
+      for (let y = c0 + 6; y < c1 - 20; y += 44) for (const x of [lx0 + 40, lx0 + 150]) {
+        if (!ok(B, x, y + 18, 8)) continue;
+        fb(ch, 'warehouse', x, y + 18, 70, 28, 5, Style.Industrial, { lit: 0.35, keepLit: true });
+        LINE(ch, x, y + 33, 64, 1.6, LC.Sodium, 0.14, 1);
+        for (let k = 0; k < 6; k++) ch.props.push({ k: 'railcar', x: x - 28 + k * 11, cy: y + 40, w: 2.2, d: 7, h: 1.6, rot: 0, v: Math.random() });
       }
+      for (let y = Math.ceil(c0 / 60) * 60; y < c1; y += 60) yardLight(ch, lx0 + 100, y, 14, 50, LC.Sodium, 0.85);
     }
+    district(ch, B, cx + 610, X1, c0, c1);
+  } else {
+    // Natural shore: something worth looking at on every stretch.
+    const sx = coastX(mid), f = Math.floor((mid / 130) * 7.31 + BIO_SEEDISH()) % 4;
+    if (f === 0) shipyard(ch, B, sx, mid, c0, c1);
+    else if (f === 1) shoreRefinery(ch, B, sx, mid);
+    else if (f === 2) marina(ch, B, sx, mid);
+    else fishingVillage(ch, B, sx, mid);
     for (let i = 0; i < 6; i++) {
-      const y = rnd(c0, c1), x = coastX(y) + rnd(90, 600);
-      if (ok(B, x, y, 3)) fb(ch, 'house', x, y, rnd(4, 7), rnd(3, 5), rnd(1.2, 3), Style.House, { lit: rnd(0.2, 0.6), rot: rnd(-0.4, 0.4) });
+      const y = rnd(c0, c1), x = coastX(y) + rnd(150, 300);
+      if (ok(B, x, y, 3)) fb(ch, 'house', x, y, rnd(4, 7), rnd(3, 5), rnd(1.2, 3), Style.House, { lit: rnd(0.3, 0.7), rot: rnd(-0.4, 0.4) });
     }
-    district(ch, B, coastX(mid) + 300, X1, c0, c1);
+    district(ch, B, sx + 320, X1, c0, c1);
   }
-  // On the water: channel buoys, anchored ships, traffic with wakes.
+  // On the water: channel buoys, ships at anchor, traffic with wakes.
   for (let y = c0 + rnd(0, 40); y < c1; y += 80) {
     const x = coastX(y) - 95;
     if (inBiome(B, x, y)) { L(ch, x, y, 1, 0.8, LC.Teal, 0.6, 3, Math.random()); L(ch, x - 70, y + 20, 1, 0.8, LC.White, 0.5, 3, Math.random()); }
   }
-  if (Math.random() < 0.3) { const y = rnd(c0, c1), x = coastX(y) - rnd(170, 360); if (ok(B, x, y, 30) && T(x, y).water > 0.9) ship(ch, x, y, rnd(110, 170), 18, pick(['bulk', 'tanker', 'box'])); }
-  if (Math.random() < 0.55) { const y = rnd(c0, c1), x = coastX(y) - rnd(60, 160); if (inBiome(B, x, y)) mover(ch, { k: Math.random() < 0.6 ? 'tug' : 'boat', x, cy: y, v: rnd(9, 18), path: 0, a: pick([-Math.PI / 2, Math.PI / 2]) + rnd(-0.4, 0.4), len: rnd(5, 9), n: 1 }); }
-  if (Math.random() < 0.3) { const y = rnd(c0, c1), x = coastX(y) - rnd(220, 380); if (inBiome(B, x, y)) mover(ch, { k: 'ship', x, cy: y, v: rnd(7, 11), path: 0, a: -Math.PI / 2 + rnd(-0.15, 0.15), len: rnd(90, 130), n: 1 }); }
-
-  if (!sp) return;
-  const cy = mid, cx = coastX(cy);
+  if (Math.random() < 0.55) { const y = rnd(c0, c1), x = coastX(y) - rnd(170, 330); if (ok(B, x, y, 30) && T(x, y).water > 0.9) ship(ch, x, y, rnd(110, 170), 18, pick(['bulk', 'tanker', 'box'])); }
+  if (Math.random() < 0.7) { const y = rnd(c0, c1), x = coastX(y) - rnd(60, 160); if (inBiome(B, x, y)) mover(ch, { k: Math.random() < 0.6 ? 'tug' : 'boat', x, cy: y, v: rnd(9, 18), path: 0, a: pick([-Math.PI / 2, Math.PI / 2]) + rnd(-0.4, 0.4), len: rnd(5, 9), n: 1 }); }
+  if (Math.random() < 0.4) { const y = rnd(c0, c1), x = coastX(y) - rnd(220, 380); if (inBiome(B, x, y)) mover(ch, { k: 'ship', x, cy: y, v: rnd(7, 11), path: 0, a: -Math.PI / 2 + rnd(-0.15, 0.15), len: rnd(90, 130), n: 1 }); }
+}
+/** A cheap per-fight offset so shore features don't repeat in the same order every fight. */
+const BIO_SEEDISH = () => (CITY.seed % 97) / 13;
+/** Shipyard: slipways running down into the water with hulls on the ways, tower cranes, welding sparks. */
+function shipyard(ch: Chunk, b: Biome, sx: number, mid: number, c0: number, c1: number) {
+  if (!ok(b, sx + 60, mid, 20)) return;
+  pad(ch, sx - 2, c0 + 4, sx + 150, c1 - 4, 'concrete'); zone(ch, sx - 2, c0 + 4, sx + 150, c1 - 4, 'dock');
+  for (let i = 0; i < 3; i++) {
+    const y = c0 + 20 + i * ((c1 - c0 - 40) / 2.2);
+    seg(ch, sx + 110, y, sx - 30, y, 16, 'pad');
+    fb(ch, 'ship', sx + 36, y, 82, 11, 3.5, Style.Hull, { tint: '#3a4048', lit: 0.2, keepLit: true, rot: 0 }, [tier(82, 11, 0, 3.5)]);
+    for (let k = 0; k < 3; k++) L(ch, sx + 10 + k * 26, y + rnd(-3, 3), 4, 0.9, LC.Flood, 0.9, 3, Math.random());
+    const tc = fb(ch, 'mast', sx + 60, y - 13, 2, 2, 22, Style.Metal, { lit: 0 }, [tier(2, 2, 0, 22), tier(30, 1.4, 22, 1.2, -6, 0)]);
+    L(ch, sx + 60, y - 13, 22.6, 0.9, LC.Amber, 0.8, 3, Math.random(), tc);
+  }
+  yardLight(ch, sx + 130, mid - 30, 14, 50, LC.Sodium, 1);
+  yardLight(ch, sx + 130, mid + 30, 14, 50, LC.Sodium, 1);
+  claim(sx - 40, c0, sx + 150, c1);
+}
+/** Coastal refinery: tank farm, columns and a flare burning over the water. */
+function shoreRefinery(ch: Chunk, b: Biome, sx: number, mid: number) {
+  if (!ok(b, sx + 90, mid, 30)) return;
+  tankFarm(ch, b, sx + 80, mid - 20, 130, 80);
+  pad(ch, sx + 150, mid - 40, sx + 230, mid + 40, 'pad');
+  for (let i = 0; i < 6; i++) fb(ch, 'silo', sx + 160 + (i % 3) * 22, mid - 26 + Math.floor(i / 3) * 40, 4, 4, rnd(12, 20), Style.Metal, { lit: 0, tint: '#4a4a48' });
+  fb(ch, 'flare', sx + 210, mid + 30, 1.8, 1.8, 18, Style.Metal, { lit: 0, keepLit: true, spill: Burn.Oil, tint: '#3b3631' });
+  seg(ch, sx + 30, mid + 40, sx - 70, mid + 40, 3, 'dock');
+  for (let i = 0; i < 8; i++) L(ch, sx + rnd(20, 230), mid + rnd(-50, 50), 6, 0.9, LC.Sodium, 0.6, 2);
+  yardLight(ch, sx + 190, mid, 12, 40, LC.Sodium, 0.9);
+  claim(sx - 70, mid - 70, sx + 235, mid + 60);
+}
+/** Marina: a curving breakwater with lamps, pontoons and small boats in rows. */
+function marina(ch: Chunk, b: Biome, sx: number, mid: number) {
+  if (!inBiome(b, sx - 40, mid)) return;
+  seg(ch, sx, mid - 50, sx - 70, mid - 20, 5, 'concrete');
+  seg(ch, sx - 70, mid - 20, sx - 80, mid + 40, 5, 'concrete');
+  L(ch, sx - 80, mid + 40, 4, 1, LC.Teal, 0.8, 3, 0.3);
+  for (let i = 0; i < 6; i++) L(ch, sx - 10 - i * 12, mid - 46 + i * 5, 1, 0.6, LC.Sodium, 0.45, 2);
+  for (let r = 0; r < 3; r++) {
+    const py = mid - 10 + r * 16;
+    seg(ch, sx, py, sx - 55, py, 1.6, 'dock');
+    for (let k = 0; k < 6; k++) fb(ch, 'ship', sx - 8 - k * 8, py + (k % 2 ? 3 : -3), 2, 5, 1, Style.Shell, { tint: '#8a8f96', lit: 0 });
+  }
+  cluster(ch, b, sx + 40, mid, 12, 30, Style.House, 0, undefined, LC.Sodium);
+  claim(sx - 90, mid - 60, sx + 10, mid + 50);
+}
+function fishingVillage(ch: Chunk, b: Biome, sx: number, mid: number) {
+  if (!ok(b, sx + 30, mid)) return;
+  cluster(ch, b, sx + 40, mid, 18, 40, Style.House, 0, undefined, LC.Sodium);
+  seg(ch, sx + 4, mid, sx - 50, mid + 6, 2.4, 'dock');
+  for (let i = 0; i < 5; i++) fb(ch, 'ship', sx - 14 - i * 9, mid + 10 + rnd(-2, 2), 2.4, 7, 1.2, Style.Hull, { tint: '#3a4048', lit: 0.3, keepLit: true });
+  L(ch, sx - 50, mid + 6, 2, 0.9, LC.White, 0.7, 3);
+  for (let i = 0; i < 4; i++) mover(ch, { k: 'boat', x: sx - rnd(30, 120), cy: mid + rnd(-40, 40), v: rnd(4, 8), path: 0, a: Math.PI + rnd(-0.6, 0.6), len: 4, n: 1 });
+  yardLight(ch, sx + 10, mid + 4, 6, 24, LC.Sodium, 0.8);
+}
+function portSetPiece(ch: Chunk, sp: string, cy: number) {
+  const B = Biome.Port, cx = coastX(cy);
   if (sp === 'lighthouse') {
-    // Breakwater curving out into the water, a lighthouse sweeping its beam at the end.
-    const ex = cx - rnd(140, 200), ey = cy - rnd(50, 90);
-    seg(ch, cx + 2, cy + 10, (cx + ex) / 2, cy - 10, 6, 'concrete');
-    seg(ch, (cx + ex) / 2, cy - 10, ex, ey, 6, 'concrete');
-    for (let i = 1; i < 6; i++) L(ch, cx + (ex - cx) * (i / 6), cy + 10 + (ey - cy - 10) * (i / 6), 1, 0.6, LC.Sodium, 0.35, 0);
-    const lh = fb(ch, 'lighthouse', ex, ey, 4, 4, 13, Style.Shell, { tint: '#8a8f96', lit: 0, keepLit: true });
-    L(ch, ex, ey, 13.6, 1.8, LC.White, 1, 8, 0, lh);
-    claim(ex - 10, ey - 10, cx + 10, cy + 20);
+    // A long breakwater curving out into the water, a tall lighthouse sweeping its beam over the sea.
+    const ex = safeX(cx - 110), ey = cy - 70;
+    seg(ch, cx + 2, cy + 60, cx - 40, cy, 8, 'concrete');
+    seg(ch, cx - 40, cy, ex, ey, 8, 'concrete');
+    for (let i = 1; i < 9; i++) { const t = i / 9; L(ch, cx + 2 + (ex - cx - 2) * t, cy + 60 + (ey - cy - 60) * t, 1.5, 0.6, LC.Sodium, 0.45, 2); }
+    pad(ch, ex - 7, ey - 7, ex + 7, ey + 7, 'concrete');
+    const lh = fb(ch, 'lighthouse', ex, ey, 5, 5, 22, Style.Shell, { tint: '#b0b4ba', lit: 0, keepLit: true }, [tier(5, 5, 0, 20), tier(3.6, 3.6, 20, 2.4)]);
+    L(ch, ex, ey, 22.6, 2.2, LC.White, 1, 8, 0, lh);
+    fb(ch, 'house', ex + 6, ey + 6, 5, 4, 2, Style.House, { lit: 0.6 });
+    claim(ex - 14, ey - 14, cx + 10, cy + 66);
   } else if (sp === 'oilterminal') {
-    // A tanker at a T-jetty, the tank farm behind the quay. Everything here burns.
+    // A tanker at a T-jetty, a big tank farm behind the quay. Everything here burns.
     const jx = cx - 150;
-    seg(ch, cx, cy + 4, jx, cy + 4, 3, 'dock'); seg(ch, jx, cy - 70, jx, cy + 70, 5, 'dock');
-    for (let i = 0; i < 6; i++) L(ch, jx, cy - 60 + i * 24, 2.5, 0.8, LC.Sodium, 0.55, 0);
-    ship(ch, jx - 13, cy, 150, 20, 'tanker');
-    tankFarm(ch, B, cx + 120, cy, 210, 110);
-    claim(jx - 30, cy - 80, cx + 230, cy + 80);
+    seg(ch, cx, cy + 4, jx, cy + 4, 3, 'dock'); seg(ch, jx, cy - 80, jx, cy + 80, 6, 'dock');
+    for (let i = 0; i < 7; i++) L(ch, jx, cy - 72 + i * 24, 2.5, 0.8, LC.Sodium, 0.6, 2);
+    LINE(ch, jx, cy, 160, 1.6, LC.Sodium, 0.12);
+    ship(ch, jx - 14, cy, 170, 22, 'tanker');
+    const fx0 = safeX(cx + 160);
+    tankFarm(ch, B, fx0, cy, 260, 160);
+    fb(ch, 'flare', fx0 + 140, cy - 70, 1.8, 1.8, 20, Style.Metal, { lit: 0, keepLit: true, spill: Burn.Oil, tint: '#3b3631' });
+    for (const [dx, dy] of [[-110, -70], [110, -70], [-110, 70], [110, 70]]) yardLight(ch, fx0 + dx, cy + dy, 12, 50, LC.Sodium, 0.9);
+    claim(jx - 40, cy - 90, fx0 + 150, cy + 90);
   } else {
-    // Drydock: a ship in a dark basin under two portal cranes, welding light spilling everywhere.
-    const bx = cx + 150;
-    pad(ch, bx - 20, cy - 80, bx + 20, cy + 80, 'basin');
-    ship(ch, bx, cy, 130, 17, 'box', false);
-    for (const y of [cy - 30, cy + 35]) {
-      const cr = fb(ch, 'gantry', bx, y, 50, 5, 18, Style.Metal, { tint: '#4a3a24', lit: 0 }, [tier(3, 4, 0, 17, -23, 0), tier(3, 4, 0, 17, 23, 0), tier(50, 4, 17, 2.5)]);
-      L(ch, bx, y, 19.8, 1.2, LC.Amber, 0.8, 3, Math.random(), cr);
+    // Drydock: a ship in a black basin cut into the quay under two portal cranes, welding light spilling out.
+    const bx = safeX(cx + 120);
+    seg(ch, bx, cy - 115, bx, cy + 115, 60, 'basin');
+    seg(ch, bx - 34, cy - 115, bx - 34, cy + 115, 8, 'concrete'); seg(ch, bx + 34, cy - 115, bx + 34, cy + 115, 8, 'concrete');
+    ship(ch, bx, cy, 170, 24, 'box', false);
+    for (const y of [cy - 50, cy + 50]) {
+      const cr = fb(ch, 'gantry', bx, y, 76, 6, 24, Style.Shell, { tint: '#7a5a2a', lit: 0 }, [tier(3, 5, 0, 23, -36, 0), tier(3, 5, 0, 23, 36, 0), tier(76, 4, 23, 3)]);
+      L(ch, bx, y, 26.6, 1.2, LC.Amber, 0.85, 3, Math.random(), cr);
+      LINE(ch, bx, y, 70, 2.4, LC.Flood, 0.1, 1);
     }
-    for (let i = 0; i < 8; i++) L(ch, bx + rnd(-8, 8), cy + rnd(-60, 60), 4, 0.9, LC.Flood, 0.9, 3, Math.random());
-    flood(ch, bx - 26, cy - 60, 12, 30); flood(ch, bx + 26, cy + 60, 12, 30);
-    claim(bx - 30, cy - 90, bx + 30, cy + 90);
+    for (let i = 0; i < 14; i++) L(ch, bx + rnd(-10, 10), cy + rnd(-80, 80), 4, 0.9, LC.Flood, 0.95, 3, Math.random());
+    for (const [dx, dy] of [[-40, -100], [40, -30], [-40, 30], [40, 100]]) yardLight(ch, bx + dx, cy + dy, 14, 44, LC.Flood, 0.8);
+    claim(bx - 42, cy - 120, bx + 42, cy + 120);
   }
 }
 /** Harbour district: blocks of mid-rises and sheds with streets, out to x1. */
 function district(ch: Chunk, b: Biome, x0: number, x1: number, c0: number, c1: number) {
   for (let y = c0; y < c1; y += 34) {
     seg(ch, x0, y, x1, y, 3.6, 'road'); zone(ch, x0, y - 2, x1, y + 2, 'road');
+    LINE(ch, (x0 + x1) / 2, y, x1 - x0, 2.6, LC.Sodium, 0.08, 1);
     for (let x = x0 + 4; x < x1 - 10; x += rnd(30, 42)) {
       if (!ok(b, x + 14, y + 17, 4)) continue;
       const n = 1 + Math.floor(Math.random() * 3);
       for (let i = 0; i < n; i++) {
         const w = rnd(8, 14), h = rnd(8, 12), bx = x + 4 + i * (26 / n) + w / 2, by = y + 4 + rnd(0, 26 - h) + h / 2;
-        fb(ch, Math.random() < 0.3 ? 'warehouse' : 'mid', bx, by, w, h, rnd(1.5, 6.5), pick([Style.Brick, Style.Concrete, Style.Panel, Style.Industrial]), { lit: rnd(0.15, 0.6) });
+        fb(ch, Math.random() < 0.3 ? 'warehouse' : 'mid', bx, by, w, h, rnd(1.5, 6.5), pick([Style.Brick, Style.Concrete, Style.Panel, Style.Industrial]), { lit: rnd(0.25, 0.7) });
       }
     }
   }
-  for (let i = 0; i < 4; i++) { const x = rnd(x0, x1), y = rnd(c0, c1); if (inBiome(b, x, y)) L(ch, x, y, 2, 0.9, LC.Sodium, 0.5, 0); }
+  for (let i = 0; i < 6; i++) { const x = rnd(x0, x1), y = rnd(c0, c1); if (inBiome(b, x, y)) L(ch, x, y, 2, 0.9, LC.Sodium, 0.5, 2); }
 }
 /** Round tanks in bunds: chain reactions. */
 function tankFarm(ch: Chunk, b: Biome, cx: number, cy: number, w: number, h: number) {
   pad(ch, cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2, 'bund');
-  const s = rnd(14, 19);
+  const s = rnd(16, 22);
   for (let x = cx - w / 2 + s * 0.7; x < cx + w / 2 - s * 0.5; x += s + 4) for (let y = cy - h / 2 + s * 0.7; y < cy + h / 2 - s * 0.5; y += s + 4) {
     if (Math.random() < 0.12 || !inBiome(b, x, y)) continue;
     const d = s * rnd(0.8, 1);
-    fb(ch, 'tank', x, y, d, d, d * rnd(0.35, 0.5), Style.Metal, { tint: '#5a5e62', lit: 0, spill: Burn.Oil });
+    fb(ch, 'tank', x, y, d, d, d * rnd(0.35, 0.5), Style.Metal, { tint: '#6a6e72', lit: 0, spill: Burn.Oil });
   }
-  for (let i = 0; i < 4; i++) L(ch, cx + rnd(-w, w) * 0.45, cy + rnd(-h, h) * 0.45, 8, 0.9, LC.Sodium, 0.55, 0);
+  for (let i = 0; i < 5; i++) L(ch, cx + rnd(-w, w) * 0.45, cy + rnd(-h, h) * 0.45, 8, 0.9, LC.Sodium, 0.6, 2);
 }
 
 /* ======================================================================================================== */
-/* AIRBASE: runways along the flight path with approach strobes, taxiway edge lights, hangars, revetments,    */
-/* parked aircraft, radomes, fuel farm and ammunition igloos.                                                 */
+/* AIRBASE: runways along the flight path with approach strobes and glowing edge lines, blue taxiway edges,  */
+/* floodlit aprons with parked and taxiing aircraft, hangars, revetments, radomes, fuel farm and igloos.      */
 /* ======================================================================================================== */
 interface Runway { top: number; bot: number; x: number }
 const AIR = { runways: [] as Runway[], gen: -1 };
@@ -349,109 +427,134 @@ export function genAirfield(ch: Chunk, c0: number, c1: number) {
   const B = Biome.Airfield;
   CITY.sinceSet++;
   const sp = setPieceDue(B, c0, c1);
+  if (sp) airSetPiece(ch, sp, (c0 + c1) / 2);
   for (const r of runwaysFor(c0)) {
     const y0 = Math.max(c0, r.top), y1 = Math.min(c1, r.bot);
     const rx = r.x, hw = 13;
     // The approach lights hang below the threshold (the near end): crossbars and the running rabbit.
     const a0 = Math.max(c0, r.bot), a1 = Math.min(c1, r.bot + 320);
     if (a1 > a0 && inBiome(B, rx, (a0 + a1) / 2)) {
+      LINE(ch, rx, (a0 + a1) / 2, a1 - a0, 1.4, LC.White, 0.06);
       for (let y = Math.ceil((a0 - r.bot) / 16) * 16 + r.bot; y < a1; y += 16) {
         const d = y - r.bot;
         if (d < 4) continue;
         const bar = d % 64 < 1 ? 9 : 4;
-        for (let i = -2; i <= 2; i++) L(ch, rx + i * bar * 0.5, y, 0.6, 0.6, LC.White, 0.45, 2);
-        L(ch, rx, y, 0.8, 1.5, LC.White, 1, 6, 1 - d / 320);
+        for (let i = -2; i <= 2; i++) L(ch, rx + i * bar * 0.5, y, 0.6, 0.6, LC.White, 0.5, 2);
+        L(ch, rx, y, 0.8, 1.6, LC.White, 1, 6, 1 - d / 320);
       }
     }
     if (y1 <= y0 || !inBiome(B, rx, (y0 + y1) / 2)) continue;
+    const ym = (y0 + y1) / 2, yl = y1 - y0;
     pad(ch, rx - hw, y0, rx + hw, y1, 'runway'); zone(ch, rx - hw, y0, rx + hw, y1, 'runway');
+    // Shoulders: a pale strip either side so the runway reads as a hard-edged band against the grass.
+    pad(ch, rx - hw - 3, y0, rx - hw, y1, 'concrete'); pad(ch, rx + hw, y0, rx + hw + 3, y1, 'concrete');
     // Markings: centre dashes, threshold piano keys, touchdown bars.
     for (let y = Math.ceil(y0 / 18) * 18; y < y1; y += 18) pad(ch, rx - 0.4, y, rx + 0.4, y + 8, 'mark');
     for (const [end, dir] of [[r.bot, -1], [r.top, 1]] as const) {
       if (end < y0 - 1 || end > y1 + 1) continue;
       for (let i = -4; i <= 4; i++) if (i !== 0) pad(ch, rx + i * 2.6 - 0.7, end + dir * 2 - (dir < 0 ? 10 : 0), rx + i * 2.6 + 0.7, end + dir * 2 + (dir > 0 ? 10 : 0), 'mark');
-      for (let i = -6; i <= 6; i++) L(ch, rx + i * 2, end, 0.6, 0.8, dir < 0 ? LC.Teal : LC.Amber, 0.75, 2);
+      for (let i = -6; i <= 6; i++) L(ch, rx + i * 2, end, 0.6, 0.8, dir < 0 ? LC.Teal : LC.Amber, 0.8, 2);
+      LINE(ch, rx, end, 26, 1.6, dir < 0 ? LC.Teal : LC.Amber, 0.25, 1);
       for (const s of [-1, 1]) pad(ch, rx + s * 6 - 1.2, end + dir * 40 - (dir < 0 ? 10 : 0), rx + s * 6 + 1.2, end + dir * 40 + (dir > 0 ? 10 : 0), 'mark');
     }
-    for (let y = Math.ceil(y0 / 12) * 12; y < y1; y += 12) { L(ch, rx - hw - 0.4, y, 0.5, 0.7, LC.White, 0.5, 2); L(ch, rx + hw + 0.4, y, 0.5, 0.7, LC.White, 0.5, 2); }
+    // Edge and centre lights: pinpoints plus a faint glowing line, so the runway reads as two rails of light.
+    LINE(ch, rx - hw - 0.5, ym, yl, 1.5, LC.White, 0.1); LINE(ch, rx + hw + 0.5, ym, yl, 1.5, LC.White, 0.1);
+    LINE(ch, rx, ym, yl, 1, LC.White, 0.04);
+    for (let y = Math.ceil(y0 / 12) * 12; y < y1; y += 12) { L(ch, rx - hw - 0.4, y, 0.5, 0.7, LC.White, 0.55, 2); L(ch, rx + hw + 0.4, y, 0.5, 0.7, LC.White, 0.55, 2); }
     for (let y = Math.ceil(y0 / 9) * 9; y < y1; y += 9) L(ch, rx, y, 0.4, 0.5, LC.White, 0.3, 2);
     // Parallel taxiway with blue edges and green centre, rapid exits every few hundred units.
     const tx = rx + 62;
     pad(ch, tx - 6, y0, tx + 6, y1, 'taxi'); zone(ch, tx - 6, y0, tx + 6, y1, 'runway');
+    LINE(ch, tx - 6.4, ym, yl, 1.3, LC.Blue, 0.12); LINE(ch, tx + 6.4, ym, yl, 1.3, LC.Blue, 0.12); LINE(ch, tx, ym, yl, 0.9, LC.Teal, 0.07);
     for (let y = Math.ceil(y0 / 10) * 10; y < y1; y += 10) { L(ch, tx - 6.4, y, 0.4, 0.55, LC.Blue, 0.5, 2); L(ch, tx + 6.4, y, 0.4, 0.55, LC.Blue, 0.5, 2); }
     for (let y = Math.ceil(y0 / 7) * 7; y < y1; y += 7) L(ch, tx, y, 0.3, 0.4, LC.Teal, 0.3, 2);
     for (let y = Math.ceil((y0 - r.top) / 280) * 280 + r.top + 60; y < y1; y += 280) {
       pad(ch, rx + hw, y - 5, tx - 6, y + 5, 'taxi');
-      for (let x = rx + hw + 3; x < tx - 6; x += 6) { L(ch, x, y - 5.4, 0.4, 0.5, LC.Blue, 0.45, 2); L(ch, x, y + 5.4, 0.4, 0.5, LC.Blue, 0.45, 2); }
+      LINE(ch, (rx + hw + tx - 6) / 2, y - 5.4, tx - 6 - rx - hw, 1.2, LC.Blue, 0.12, 1); LINE(ch, (rx + hw + tx - 6) / 2, y + 5.4, tx - 6 - rx - hw, 1.2, LC.Blue, 0.12, 1);
     }
-    // Apron, parked aircraft, hangars.
+    // Aircraft taxiing out to the runway, beacons flashing.
+    if (Math.random() < 0.45) mover(ch, { k: 'jet', x: tx, cy: ym, v: pick([-1, 1]) * rnd(5, 9), path: 0, a: Math.PI / 2, len: rnd(16, 24), n: 1 });
+    // Apron: pale floodlit concrete, parked aircraft in rows, service trucks.
     const ax0 = tx + 8, ax1 = tx + 150;
     pad(ch, ax0, y0, ax1, y1, 'apron'); zone(ch, ax0, y0, ax1, y1, 'apron');
     for (let y = y0 + 14; y < y1 - 14; y += 34) {
       if (!ok(B, ax0 + 40, y)) continue;
-      if (Math.random() < 0.65) plane(ch, ax0 + 26, y, rnd(20, 26), rnd(22, 28), 0, pick(['#4b525a', '#545b63', '#40464d']));
-      if (Math.random() < 0.5) for (let k = 0; k < 2; k++) plane(ch, ax0 + 70 + k * 20, y + rnd(-3, 3), 10, 8, 0, '#3e444b');
+      if (Math.random() < 0.7) plane(ch, ax0 + 26, y, rnd(20, 26), rnd(22, 28), 0, pick(['#6b727a', '#757c84', '#5f666e']));
+      if (Math.random() < 0.55) for (let k = 0; k < 2; k++) plane(ch, ax0 + 70 + k * 20, y + rnd(-3, 3), 10, 8, 0, '#5a6168');
     }
-    for (let y = Math.ceil(y0 / 70) * 70; y < y1; y += 70) flood(ch, ax1 - 4, y, 12, 32, LC.Flood, 0.8);
+    for (let y = Math.ceil(y0 / 60) * 60; y < y1; y += 60) if (free(ax1 - 4, y)) yardLight(ch, ax1 - 4, y, 14, 52, LC.Flood, 0.9);
+    if (Math.random() < 0.6) mover(ch, { k: 'car', x: ax0 + 52, cy: ym, v: pick([-1, 1]) * rnd(6, 10), path: 0, a: Math.PI / 2, len: 0, n: 1 });
     for (let y = y0 + rnd(0, 20); y < y1 - 30; y += rnd(46, 60)) {
-      if (!ok(B, ax1 + 30, y + 20)) continue;
-      const hg = fb(ch, 'hangar', ax1 + 30, y + 20, 46, 40, 7.5, Style.Hangar, { lit: rnd(0.3, 0.9), tint: '#4a5056' });
-      if (Math.random() < 0.4) L(ch, ax1 + 6, y + 20, 0.5, 16, LC.Flood, 0.08, 1, 0, hg);
+      if (!ok(B, ax1 + 30, y + 20, 10)) continue;
+      const hg = fb(ch, 'hangar', ax1 + 30, y + 20, 46, 40, 7.5, Style.Hangar, { lit: rnd(0.4, 0.9), tint: '#5a6066' });
+      if (Math.random() < 0.6) L(ch, ax1 + 4, y + 20, 0.5, 20, LC.Flood, 0.1, 4, 0, hg);
     }
     // Operations: barracks and offices behind the hangars, a road.
     pathRoad(ch, B, () => ax1 + 70, y0, y1, 4, 'road');
-    for (let y = y0 + 8; y < y1 - 8; y += rnd(16, 24)) if (ok(B, ax1 + 92, y)) fb(ch, 'mid', ax1 + 92 + rnd(-6, 6), y, rnd(16, 26), rnd(6, 9), rnd(1.5, 3.5), pick([Style.Concrete, Style.Panel]), { lit: rnd(0.3, 0.7) });
+    for (let y = y0 + 8; y < y1 - 8; y += rnd(16, 24)) if (ok(B, ax1 + 92, y)) fb(ch, 'mid', ax1 + 92 + rnd(-6, 6), y, rnd(16, 26), rnd(6, 9), rnd(1.5, 3.5), pick([Style.Concrete, Style.Panel]), { lit: rnd(0.4, 0.8) });
     // Revetments west of the runway: earth U-berms around fighters, linked by a loop.
     const vx = rx - 105;
     pathRoad(ch, B, () => vx + 34, y0, y1, 4, 'taxi', 'runway');
+    LINE(ch, vx + 34, ym, yl, 1, LC.Blue, 0.07);
     for (let y = y0 + 14; y < y1 - 14; y += 36) {
       if (!ok(B, vx, y)) continue;
-      fb(ch, 'wall', vx - 9, y, 3, 26, 2.4, Style.Concrete, { tint: '#2c2a25', lit: 0 });
-      fb(ch, 'wall', vx, y - 12, 20, 3, 2.4, Style.Concrete, { tint: '#2c2a25', lit: 0 });
-      fb(ch, 'wall', vx, y + 12, 20, 3, 2.4, Style.Concrete, { tint: '#2c2a25', lit: 0 });
-      if (Math.random() < 0.75) plane(ch, vx + 2, y, 11, 8.5, Math.PI, '#3c4248');
-      L(ch, vx + 14, y, 1.5, 0.8, LC.Blue, 0.4, 2);
+      fb(ch, 'wall', vx - 9, y, 3, 26, 2.4, Style.Concrete, { tint: '#3a372f', lit: 0 });
+      fb(ch, 'wall', vx, y - 12, 20, 3, 2.4, Style.Concrete, { tint: '#3a372f', lit: 0 });
+      fb(ch, 'wall', vx, y + 12, 20, 3, 2.4, Style.Concrete, { tint: '#3a372f', lit: 0 });
+      if (Math.random() < 0.75) plane(ch, vx + 2, y, 11, 8.5, Math.PI, '#5a6168');
+      L(ch, vx + 14, y, 1.5, 0.8, LC.Blue, 0.45, 2);
+      L(ch, vx, y, 0.5, 12, LC.Flood, 0.06, 4);
     }
     // Ammunition igloos and the fuel farm further out: they blow.
-    for (let y = y0 + 10; y < y1 - 10; y += 24) if (ok(B, rx - 210, y)) fb(ch, 'igloo', rx - 210 + (Math.floor(y / 24) % 2) * 22, y, 12, 9, 4, Style.Shell, { tint: '#3a3f3a', lit: 0, fuel: 1.2 });
-    if (Math.random() < 0.35) tankFarm(ch, B, ax1 + 210, (y0 + y1) / 2, 90, Math.min(90, y1 - y0));
+    for (let y = y0 + 10; y < y1 - 10; y += 24) if (ok(B, rx - 210, y)) fb(ch, 'igloo', rx - 210 + (Math.floor(y / 24) % 2) * 22, y, 12, 9, 4, Style.Shell, { tint: '#4a4f4a', lit: 0, fuel: 1.2 });
+    if (Math.random() < 0.35 && free(ax1 + 210, ym, 50)) tankFarm(ch, B, ax1 + 210, ym, 90, Math.min(90, yl));
     // Perimeter road and fence lights.
-    for (const px of [rx - 300, ax1 + 290]) { pathRoad(ch, B, () => px, y0, y1, 3, 'road'); for (let y = Math.ceil(y0 / 40) * 40; y < y1; y += 40) L(ch, px, y, 2, 0.7, LC.Sodium, 0.4, 0); }
+    for (const px of [rx - 300, ax1 + 290]) { pathRoad(ch, B, () => px, y0, y1, 3, 'road'); for (let y = Math.ceil(y0 / 40) * 40; y < y1; y += 40) L(ch, px, y, 2, 0.7, LC.Sodium, 0.45, 2); }
     // Control tower once per runway, mid-length.
     const tmid = (r.top + r.bot) / 2;
     if (tmid >= y0 && tmid < y1 && ok(B, ax1 + 18, tmid)) {
       const tw = fb(ch, 'tower', ax1 + 18, tmid, 7, 7, 18, Style.Glass, { lit: 0.8, keepLit: true }, [tier(7, 7, 0, 3), tier(3, 3, 3, 12), tier(6, 6, 15, 3)]);
-      L(ch, ax1 + 18, tmid, 18.6, 1.4, LC.White, 1, 7, 0, tw);
+      L(ch, ax1 + 18, tmid, 18.6, 1.6, LC.White, 1, 7, 0, tw);
     }
   }
-  // Between runways: grass, scattered huts, a crossing taxiway.
+  // Between runways: grass, scattered huts.
   if (Math.random() < 0.5) { const y = rnd(c0, c1), x = rnd(X0 + 40, RUNWAY_X - 330); if (ok(B, x, y, 6)) cluster(ch, B, x, y, 5, 25, Style.Concrete, 0); }
-  if (!sp) return;
-  const cy = (c0 + c1) / 2;
+}
+function airSetPiece(ch: Chunk, sp: string, cy: number) {
+  const B = Biome.Airfield;
   if (sp === 'bigtransport') {
-    const x = RUNWAY_X + 270, y = cy;
-    if (!free(x, y, 30)) return;
-    pad(ch, x - 40, y - 40, x + 40, y + 40, 'apron');
-    plane(ch, x, y, 52, 58, 0.1, '#5d646c');
-    flood(ch, x - 36, y - 36, 14, 40); flood(ch, x + 36, y + 36, 14, 40);
-    for (let i = 0; i < 6; i++) L(ch, x + rnd(-20, 20), y + rnd(-20, 20), 1, 0.7, LC.Amber, 0.6, 3);
-    claim(x - 42, y - 42, x + 42, y + 42);
+    // A giant transport on its own floodlit pad, crews and trucks around it, beacon flashing.
+    const x = RUNWAY_X + 290, y = cy;
+    pad(ch, x - 56, y - 56, x + 56, y + 56, 'apron'); zone(ch, x - 56, y - 56, x + 56, y + 56, 'apron');
+    plane(ch, x, y, 74, 80, 0.1, '#7a8189');
+    L(ch, x, y, 4, 1.2, LC.Amber, 0.9, 3, 0.2);
+    for (const [dx, dy] of [[-50, -50], [50, -50], [-50, 50], [50, 50]]) yardLight(ch, x + dx, y + dy, 16, 60, LC.Flood, 1);
+    for (let i = 0; i < 8; i++) L(ch, x + rnd(-30, 30), y + rnd(-30, 30), 1, 0.7, LC.Amber, 0.6, 3);
+    claim(x - 60, y - 60, x + 60, y + 60);
   } else if (sp === 'shelters') {
-    const x = RUNWAY_X - 420;
-    for (let i = 0; i < 4; i++) { const y = cy - 60 + i * 40; if (inBiome(B, x, y)) { fb(ch, 'dome', x, y, 26, 22, 7, Style.Shell, { tint: '#3d423d', lit: 0, fuel: 0.6 }); L(ch, x + 15, y, 1, 0.9, LC.Blue, 0.5, 2); } }
-    seg(ch, x + 14, cy - 80, x + 14, cy + 80, 6, 'taxi');
-    claim(x - 20, cy - 80, x + 20, cy + 80);
-  } else radarSite(ch, B, RUNWAY_X - 520, cy);
+    // Hardened aircraft shelters: a row of big domes, their mouths lit, on a taxi loop.
+    const x = safeX(RUNWAY_X - 340);
+    seg(ch, x + 22, cy - 120, x + 22, cy + 120, 7, 'taxi');
+    LINE(ch, x + 22, cy, 240, 1.2, LC.Blue, 0.1);
+    for (let i = 0; i < 5; i++) {
+      const y = cy - 100 + i * 50;
+      if (!inBiome(B, x, y)) continue;
+      fb(ch, 'dome', x, y, 34, 28, 9, Style.Shell, { tint: '#5a5f5a', lit: 0, fuel: 0.6 });
+      L(ch, x + 18, y, 0.5, 16, LC.Flood, 0.12, 4); L(ch, x + 18, y, 1.2, 0.9, LC.Blue, 0.6, 2);
+    }
+    claim(x - 24, cy - 125, x + 30, cy + 125);
+  } else radarSite(ch, B, safeX(RUNWAY_X - 330), cy);
 }
 function radarSite(ch: Chunk, b: Biome, x: number, cy: number, roof = 0) {
   if (!inBiome(b, x, cy)) return;
-  pad(ch, x - 30, cy - 26, x + 30, cy + 26, 'concrete');
-  for (const [dx, dy, s] of [[-14, -8, 14], [12, 6, 11], [-6, 14, 8]]) fb(ch, 'dome', x + dx, cy + dy, s, s, s * 0.8, Style.Shell, { tint: '#8d939a', lit: 0, roof });
-  fb(ch, 'mid', x + 16, cy - 14, 12, 7, 2.5, Style.Concrete, { lit: 0.5, roof });
-  const m = fb(ch, 'mast', x - 22, cy + 18, 1.2, 1.2, 16, Style.Metal, { lit: 0 });
-  L(ch, x - 22, cy + 18, 16.4, 1.2, LC.Amber, 0.9, 3, 0, m);
-  flood(ch, x, cy, 8, 30, LC.Flood, 0.6);
-  claim(x - 32, cy - 28, x + 32, cy + 28);
+  pad(ch, x - 44, cy - 38, x + 44, cy + 38, 'concrete');
+  for (const [dx, dy, s] of [[-20, -12, 22], [18, 10, 17], [-8, 22, 12]]) fb(ch, 'dome', x + dx, cy + dy, s, s, s * 0.8, Style.Shell, { tint: '#a3a9b0', lit: 0, roof });
+  fb(ch, 'mid', x + 24, cy - 22, 16, 9, 2.5, Style.Concrete, { lit: 0.6, roof });
+  const m = fb(ch, 'mast', x - 32, cy + 26, 1.4, 1.4, 22, Style.Metal, { lit: 0 });
+  L(ch, x - 32, cy + 26, 22.4, 1.2, LC.Amber, 0.9, 3, 0, m);
+  L(ch, x + 24, cy - 22, 4, 1.4, LC.White, 0.9, 7, 0.3);
+  yardLight(ch, x, cy, 10, 50, LC.Flood, 0.8);
+  claim(x - 46, cy - 40, x + 46, cy + 40);
 }
 
 /* ======================================================================================================== */
@@ -463,6 +566,7 @@ export function genDesert(ch: Chunk, c0: number, c1: number) {
   const B = Biome.Desert;
   CITY.sinceSet++;
   const sp = setPieceDue(B, c0, c1);
+  if (sp) desertSetPiece(ch, sp, c0, c1);
   // Highway and its convoys.
   pathRoad(ch, B, highwayX, c0, c1, 6, 'road');
   if (Math.random() < 0.55) {
@@ -524,44 +628,6 @@ export function genDesert(ch: Chunk, c0: number, c1: number) {
     const x = rnd(X0, X1), y = rnd(c0, c1);
     if (T(x, y).h > 33 && ok(B, x, y)) { const m = fb(ch, 'mast', x, y, 1, 1, 12, Style.Metal, { lit: 0 }); L(ch, x, y, 12.4, 1, LC.Amber, 0.85, 3, Math.random(), m); break; }
   }
-  if (!sp) return;
-  const cy = (c0 + c1) / 2, cx = pick([W * 0.3, W * 0.7]);
-  if (sp === 'launchsite') {
-    // A rocket on its pad under floodlights, steam rolling off the flame trench, a long road out.
-    if (!inBiome(B, cx, cy)) return;
-    pad(ch, cx - 46, cy - 46, cx + 46, cy + 46, 'pad'); zone(ch, cx - 46, cy - 46, cx + 46, cy + 46, 'apron');
-    seg(ch, cx, cy + 8, cx, cy + 62, 7, 'basin');
-    const rk = fb(ch, 'rocket', cx, cy, 6.5, 6.5, 50, Style.Shell, { tint: '#9aa0a6', lit: 0, keepLit: true, fuel: 2.4, spill: Burn.Oil });
-    rk.maxHp = rk.hp = 160; rk.value = 4;
-    fb(ch, 'gantry', cx + 8.5, cy, 7, 8, 54, Style.Metal, { lit: 0.6, keepLit: true, tint: '#3a3d40' });
-    for (let h = 6; h < 54; h += 6) L(ch, cx + 8.5, cy, h, 0.7, LC.Amber, 0.6, 2);
-    L(ch, cx + 8.5, cy, 54.6, 1.2, LC.White, 0.9, 3);
-    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { fb(ch, 'mast', cx + sx * 42, cy + sy * 42, 1.4, 1.4, 18, Style.Metal, { lit: 0 }); L(ch, cx + sx * 42, cy + sy * 42, 18.4, 1.6, LC.Flood, 1, 2); }
-    L(ch, cx, cy, 0.5, 90, LC.Flood, 0.04, 4);
-    fb(ch, 'mid', cx + 70, cy + 40, 12, 8, 2, Style.Concrete, { lit: 0.6, keepLit: true, roof: 0.5 });
-    seg(ch, cx, cy + 34, highwayX(cy + 120), cy + 120, 4, 'road');
-    claim(cx - 40, cy - 40, cx + 80, cy + 50);
-  } else if (sp === 'gasplant') {
-    // Gas-oil separation plant: tanks, columns, pipe racks, three flares. Hit it and it chains for seconds.
-    if (!inBiome(B, cx, cy)) return;
-    pad(ch, cx - 90, cy - 60, cx + 90, cy + 60, 'pad');
-    tankFarm(ch, B, cx - 45, cy, 80, 110);
-    for (let i = 0; i < 6; i++) fb(ch, 'silo', cx + 20 + (i % 3) * 14, cy - 30 + Math.floor(i / 3) * 30, 4, 4, rnd(10, 18), Style.Metal, { lit: 0, tint: '#4a4a48' });
-    for (let y = cy - 40; y <= cy + 40; y += 20) ch.props.push({ k: 'pipe', x: cx + 35, cy: y, w: 60, d: 1.4, h: 1.2, rot: 0, v: 0 });
-    for (let i = 0; i < 3; i++) fb(ch, 'flare', cx + 75, cy - 40 + i * 40, 1.8, 1.8, 18, Style.Metal, { lit: 0, keepLit: true, spill: Burn.Oil, tint: '#3b3631' });
-    for (let i = 0; i < 10; i++) L(ch, cx + rnd(-80, 80), cy + rnd(-55, 55), 6, 0.9, LC.Sodium, 0.6, 2);
-    claim(cx - 95, cy - 65, cx + 95, cy + 65);
-  } else {
-    // An old citadel on a rise: thick walls, corner towers, a lit keep.
-    if (!inBiome(B, cx, cy)) return;
-    const s = 56;
-    for (const [dx, dy, w, h] of [[0, -s / 2, s, 3], [0, s / 2, s, 3], [-s / 2, 0, 3, s], [s / 2, 0, 3, s]]) fb(ch, 'wall', cx + dx, cy + dy, w, h, 4, Style.Adobe, { tint: SAND, lit: 0, roof: 0.5 });
-    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { fb(ch, 'tower', cx + sx * s / 2, cy + sy * s / 2, 7, 7, 7, Style.Adobe, { tint: SAND, lit: 0.3, roof: 0.5 }); L(ch, cx + sx * s / 2, cy + sy * s / 2, 7.5, 0.9, LC.Warm, 0.7, 2); }
-    fb(ch, 'mid', cx, cy, 16, 14, 6, Style.Adobe, { tint: SAND, lit: 0.5, roof: 0.5 });
-    cluster(ch, B, cx, cy, 10, 20, Style.Adobe, 0.5, SAND, LC.Warm);
-    flood(ch, cx, cy + s / 2 + 4, 4, 30, LC.Warm, 0.7);
-    claim(cx - s / 2 - 6, cy - s / 2 - 6, cx + s / 2 + 6, cy + s / 2 + 6);
-  }
 }
 
 /* ======================================================================================================== */
@@ -572,6 +638,7 @@ export function genSnow(ch: Chunk, c0: number, c1: number) {
   const B = Biome.Snow;
   CITY.sinceSet++;
   const sp = setPieceDue(B, c0, c1);
+  if (sp) snowSetPiece(ch, sp, c0, c1);
   pathRoad(ch, B, valleyX, c0, c1, 4, 'snowroad');
   pathRoad(ch, B, valley2X, c0, c1, 3, 'snowroad');
   if (Math.random() < 0.35) { const y = rnd(c0, c1); if (inBiome(B, valleyX(y), y)) mover(ch, { k: 'car', x: valleyX(y), cy: y, v: (Math.random() < 0.5 ? -1 : 1) * rnd(6, 10), path: 2, a: 0, len: 0, n: 1 + Math.floor(Math.random() * 2) }); }
@@ -597,29 +664,6 @@ export function genSnow(ch: Chunk, c0: number, c1: number) {
     const x = valleyX(c1) + rnd(60, 120) * pick([-1, 1]), y = rnd(c0, c1);
     if (ok(B, x, y)) for (let i = 0; i < 8; i++) L(ch, x + i * 9, y - i * 6, 3, 0.6, LC.Warm, 0.45, 2);
   }
-  if (!sp) return;
-  const cy = (c0 + c1) / 2;
-  if (sp === 'dam') {
-    const x = valleyX(cy);
-    if (!inBiome(B, x, cy)) return;
-    dam(ch, B, x, cy, 70);
-    DAMS.push({ path: 0, cy, half: 80 });
-    claim(x - 80, cy - 20, x + 80, cy + 26);
-  } else if (sp === 'fort') {
-    const x = valleyX(cy) + 26;
-    if (!inBiome(B, x, cy)) return;
-    const s = 44;
-    for (const [dx, dy, w, h] of [[0, -s / 2, s, 2.5], [0, s / 2, s, 2.5], [-s / 2, 0, 2.5, s], [s / 2, 0, 2.5, s]]) fb(ch, 'wall', x + dx, cy + dy, w, h, 3, Style.Concrete, { lit: 0, roof: 1, tint: '#3c4046' });
-    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { fb(ch, 'tower', x + sx * s / 2, cy + sy * s / 2, 6, 6, 6, Style.Concrete, { lit: 0.4, roof: 1 }); flood(ch, x + sx * s / 2, cy + sy * s / 2, 6.5, 18, LC.Flood, 0.6); }
-    for (let i = 0; i < 4; i++) fb(ch, 'mid', x + rnd(-12, 12), cy + rnd(-12, 12), rnd(6, 10), rnd(5, 8), rnd(2, 3.5), Style.Concrete, { lit: rnd(0.4, 0.8), roof: 1 });
-    fb(ch, 'dome', x - 10, cy + 10, 6, 6, 4, Style.Shell, { tint: '#8d939a', lit: 0, roof: 1 });
-    claim(x - s / 2 - 8, cy - s / 2 - 8, x + s / 2 + 8, cy + s / 2 + 8);
-  } else {
-    // Radar on the highest ground in the band.
-    let bx = 0, by = 0, bh = -1;
-    for (let i = 0; i < 24; i++) { const x = rnd(80, W - 80), y = rnd(c0, c1); const h = T(x, y).h; if (h > bh && inBiome(B, x, y)) { bh = h; bx = x; by = y; } }
-    if (bh > 0) radarSite(ch, B, bx, by, 1);
-  }
 }
 
 /* ======================================================================================================== */
@@ -631,6 +675,7 @@ export function genForest(ch: Chunk, c0: number, c1: number) {
   const B = Biome.Forest;
   CITY.sinceSet++;
   const sp = setPieceDue(B, c0, c1);
+  if (sp) forestSetPiece(ch, sp, c0, c1);
   // Main road; a bridge where it crosses the river.
   pathRoad(ch, B, forestRoad, c0, c1, 3.6, 'dirt');
   const d0 = forestRoad(c1) - riverX(c1), d1 = forestRoad(c0) - riverX(c0);
@@ -681,37 +726,135 @@ export function genForest(ch: Chunk, c0: number, c1: number) {
   }
   // Barges on the river.
   if (Math.random() < 0.25) { const y = rnd(c0, c1); if (inBiome(B, riverX(y), y) && T(riverX(y), y).water > 0.8) mover(ch, { k: 'barge', x: riverX(y), cy: y, v: (Math.random() < 0.5 ? -1 : 1) * rnd(4, 7), path: 3, a: 0, len: 12, n: 1 }); }
-  if (!sp) return;
-  const cy = (c0 + c1) / 2;
-  if (sp === 'mill') {
-    // Lumber mill on the river bank: sheds, log decks, a smoking stack, log rafts.
-    const x = riverX(cy) + 46;
+}
+
+/* ---------------- set pieces of the desert, the mountains and the forest ---------------- */
+// Each is placed before the rest of its row (so it claims its ground), centred well inside the field (safeX) so it
+// scrolls through the whole view clear of the HUD's side panels, and carries a light signature that reads from orbit.
+function desertSetPiece(ch: Chunk, sp: string, c0: number, c1: number) {
+  const B = Biome.Desert, cy = (c0 + c1) / 2;
+  let cx = safeX(pick([W * 0.32, W * 0.68]));
+  if (Math.abs(cx - highwayX(cy)) < 140) cx = safeX(highwayX(cy) + (cx < highwayX(cy) ? -180 : 180));
+  if (!inBiome(B, cx, cy)) return;
+  if (sp === 'launchsite') {
+    // A rocket on its pad under a ring of floodlights, searchlights sweeping the sky, steam off the flame trench.
+    pad(ch, cx - 60, cy - 60, cx + 60, cy + 60, 'pad'); zone(ch, cx - 60, cy - 60, cx + 60, cy + 60, 'apron');
+    seg(ch, cx, cy + 10, cx, cy + 80, 9, 'basin');
+    const rk = fb(ch, 'rocket', cx, cy, 7, 7, 56, Style.Shell, { tint: '#b4b9bf', lit: 0, keepLit: true, fuel: 2.6, spill: Burn.Oil }, [tier(7, 7, 0, 50), tier(4, 4, 50, 6)]);
+    rk.maxHp = rk.hp = 180; rk.value = 4;
+    fb(ch, 'gantry', cx + 9, cy, 8, 9, 60, Style.Metal, { lit: 0.6, keepLit: true, tint: '#4a4d50' });
+    for (let h = 6; h < 60; h += 6) L(ch, cx + 9, cy, h, 0.7, LC.Amber, 0.65, 2);
+    L(ch, cx + 9, cy, 60.6, 1.3, LC.White, 0.95, 3);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2, mx = cx + Math.cos(a) * 54, my = cy + Math.sin(a) * 54;
+      fb(ch, 'mast', mx, my, 1.4, 1.4, 20, Style.Metal, { lit: 0 });
+      L(ch, mx, my, 20.4, 1.4, LC.Flood, 1, 2);
+    }
+    L(ch, cx, cy, 0.5, 120, LC.Flood, 0.05, 4);
+    for (const [dx, dy] of [[-56, -56], [56, 56]]) ch.props.push({ k: 'searchlight', x: cx + dx, cy: cy + dy, w: 0, d: 0, h: 2, rot: 0, v: Math.random() });
+    fb(ch, 'mid', cx + 90, cy + 50, 16, 10, 2.2, Style.Concrete, { lit: 0.7, keepLit: true, roof: 0.5 });
+    seg(ch, cx, cy + 60, highwayX(cy + 160), cy + 160, 5, 'road');
+    claim(cx - 66, cy - 66, cx + 100, cy + 66);
+  } else if (sp === 'gasplant') {
+    // Gas-oil separation plant: tank farm, process columns, pipe racks, a line of flares. Hit it and it chains.
+    pad(ch, cx - 130, cy - 80, cx + 130, cy + 80, 'pad');
+    tankFarm(ch, B, cx - 65, cy, 120, 150);
+    for (let i = 0; i < 9; i++) fb(ch, 'silo', cx + 20 + (i % 3) * 18, cy - 40 + Math.floor(i / 3) * 40, 5, 5, rnd(12, 22), Style.Metal, { lit: 0, tint: '#5a5a58' });
+    for (let y = cy - 60; y <= cy + 60; y += 20) ch.props.push({ k: 'pipe', x: cx + 50, cy: y, w: 90, d: 1.4, h: 1.2, rot: 0, v: 0 });
+    for (let i = 0; i < 4; i++) fb(ch, 'flare', cx + 115, cy - 60 + i * 40, 2, 2, 22, Style.Metal, { lit: 0, keepLit: true, spill: Burn.Oil, tint: '#3b3631' });
+    for (let i = 0; i < 16; i++) L(ch, cx + rnd(-120, 110), cy + rnd(-75, 75), 6, 0.9, LC.Sodium, 0.65, 2);
+    for (const [dx, dy] of [[-120, -75], [120, -75], [-120, 75], [120, 75]]) yardLight(ch, cx + dx, cy + dy, 14, 60, LC.Sodium, 0.9);
+    claim(cx - 135, cy - 85, cx + 135, cy + 85);
+  } else {
+    // An old citadel: thick walls, corner towers, a lit keep and the town packed around it.
+    const s = 90;
+    for (const [dx, dy, w, h] of [[0, -s / 2, s, 4], [0, s / 2, s, 4], [-s / 2, 0, 4, s], [s / 2, 0, 4, s]]) fb(ch, 'wall', cx + dx, cy + dy, w, h, 5, Style.Adobe, { tint: SAND, lit: 0, roof: 0.5 });
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { fb(ch, 'tower', cx + sx * s / 2, cy + sy * s / 2, 10, 10, 9, Style.Adobe, { tint: SAND, lit: 0.3, roof: 0.5 }); L(ch, cx + sx * s / 2, cy + sy * s / 2, 9.5, 1, LC.Warm, 0.8, 2); }
+    fb(ch, 'mid', cx, cy, 24, 20, 8, Style.Adobe, { tint: SAND, lit: 0.6, roof: 0.5 });
+    fb(ch, 'dome', cx + 22, cy - 22, 12, 12, 8, Style.Shell, { tint: '#6a6050', lit: 0, roof: 0.5 });
+    for (let i = 0; i < 24; i++) { const a = (i / 24) * Math.PI * 2; L(ch, cx + Math.cos(a) * (s / 2 + 3), cy + Math.sin(a) * (s / 2 + 3), 1, 18, LC.Warm, 0.035, 4); }
+    cluster(ch, B, cx, cy, 16, 32, Style.Adobe, 0.5, SAND, LC.Warm);
+    cluster(ch, B, cx + 70, cy + 40, 14, 40, Style.Adobe, 0.5, SAND, LC.Warm);
+    claim(cx - s / 2 - 8, cy - s / 2 - 8, cx + s / 2 + 8, cy + s / 2 + 8);
+  }
+}
+/** A dam across a valley or river: a concrete arc lit along its crest, the spillway glowing white below it. */
+function bigDam(ch: Chunk, cx: number, cy: number, half: number) {
+  const n = 9;
+  for (let i = 0; i < n; i++) {
+    const u = (i + 0.5) / n * 2 - 1, x = cx + u * half, y = cy - (1 - u * u) * half * 0.18;
+    fb(ch, 'dam', x, y, (half * 2) / n + 1, 7, 9, Style.Concrete, { lit: 0, tint: '#5a5e64', rot: -u * 0.35 });
+    L(ch, x, y - 3, 9.5, 0.8, LC.Sodium, 0.65, 2);
+  }
+  // Spillway: a bright apron of falling water and mist below the centre of the arc.
+  LINE(ch, cx, cy + 10, 26, 7, LC.Flood, 0.22);
+  L(ch, cx, cy + 22, 0.5, 40, LC.Flood, 0.06, 4);
+  L(ch, cx, cy + 12, 0.8, 18, LC.White, 0.1, 4);
+  fb(ch, 'warehouse', cx + half * 0.5, cy + 16, 26, 10, 5, Style.Industrial, { lit: 0.7, keepLit: true });
+  yardLight(ch, cx - half * 0.6, cy + 20, 8, 30, LC.Flood, 0.8);
+  yardLight(ch, cx + half * 0.6, cy + 20, 8, 30, LC.Flood, 0.8);
+}
+function snowSetPiece(ch: Chunk, sp: string, c0: number, c1: number) {
+  const B = Biome.Snow, cy = (c0 + c1) / 2;
+  if (sp === 'dam') {
+    const x = valleyX(cy);
+    if (!inBiome(B, x, cy) || x < SAFE_X0 - 60 || x > SAFE_X1 + 60) return;
+    bigDam(ch, x, cy, 110);
+    DAMS.push({ path: 0, cy, half: 120 });
+    claim(x - 120, cy - 26, x + 120, cy + 32);
+  } else if (sp === 'fort') {
+    // Star fort astride the pass: thick walls, bastions with floodlights, barracks, a radome.
+    const x = safeX(valleyX(cy) + 40);
     if (!inBiome(B, x, cy)) return;
-    pad(ch, x - 34, cy - 40, x + 40, cy + 40, 'dirt');
-    fb(ch, 'warehouse', x + 10, cy - 18, 36, 18, 5, Style.Industrial, { lit: 0.35 });
-    fb(ch, 'warehouse', x + 18, cy + 16, 22, 14, 4, Style.Industrial, { lit: 0.25 });
-    fb(ch, 'chimney', x - 8, cy + 8, 3, 3, 16, Style.Metal, { lit: 0 });
-    for (let i = 0; i < 10; i++) ch.props.push({ k: 'logs', x: x - 24 + (i % 2) * 9, cy: cy - 30 + Math.floor(i / 2) * 13, w: 8, d: 2.2, h: 1.6, rot: 0, v: Math.random() });
-    for (let i = 0; i < 6; i++) ch.props.push({ k: 'logs', x: riverX(cy) + rnd(-3, 3), cy: cy - 30 + i * 11, w: 2, d: 9, h: 0.6, rot: 0, v: Math.random() });
-    for (let i = 0; i < 6; i++) L(ch, x + rnd(-30, 36), cy + rnd(-36, 36), 5, 0.9, LC.Sodium, 0.6, 2);
-    flood(ch, x, cy, 9, 30, LC.Sodium, 0.7);
-    claim(x - 36, cy - 42, x + 42, cy + 42);
+    const s = 74;
+    for (const [dx, dy, w, h] of [[0, -s / 2, s, 3.5], [0, s / 2, s, 3.5], [-s / 2, 0, 3.5, s], [s / 2, 0, 3.5, s]]) fb(ch, 'wall', x + dx, cy + dy, w, h, 4, Style.Concrete, { lit: 0, roof: 1, tint: '#4a4e54' });
+    for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      fb(ch, 'tower', x + sx * s / 2, cy + sy * s / 2, 12, 12, 6, Style.Concrete, { lit: 0.5, roof: 1, rot: Math.PI / 4 });
+      yardLight(ch, x + sx * s / 2, cy + sy * s / 2, 7, 28, LC.Flood, 0.8);
+    }
+    for (let i = 0; i < 6; i++) fb(ch, 'mid', x + rnd(-22, 22), cy + rnd(-22, 22), rnd(8, 14), rnd(6, 10), rnd(2, 4), Style.Concrete, { lit: rnd(0.5, 0.9), roof: 1 });
+    fb(ch, 'dome', x - 16, cy + 16, 10, 10, 7, Style.Shell, { tint: '#a3a9b0', lit: 0, roof: 1 });
+    ch.props.push({ k: 'searchlight', x: x + s / 2, cy: cy - s / 2, w: 0, d: 0, h: 6, rot: 0, v: Math.random() });
+    claim(x - s / 2 - 10, cy - s / 2 - 10, x + s / 2 + 10, cy + s / 2 + 10);
+  } else {
+    // Radar on the highest ground in the band.
+    let bx = 0, by = 0, bh = -1;
+    for (let i = 0; i < 24; i++) { const x = rnd(SAFE_X0, SAFE_X1), y = rnd(c0, c1); const h = T(x, y).h; if (h > bh && inBiome(B, x, y)) { bh = h; bx = x; by = y; } }
+    if (bh > 0) radarSite(ch, B, bx, by, 1);
+  }
+}
+function forestSetPiece(ch: Chunk, sp: string, c0: number, c1: number) {
+  const B = Biome.Forest, cy = (c0 + c1) / 2;
+  if (sp === 'mill') {
+    // Lumber mill on the river bank: sheds, log decks, a smoking stack, log rafts, sodium yard lights.
+    const x = safeX(riverX(cy) + 60);
+    if (!inBiome(B, x, cy)) return;
+    pad(ch, x - 50, cy - 56, x + 60, cy + 56, 'dirt');
+    fb(ch, 'warehouse', x + 14, cy - 26, 50, 24, 6, Style.Industrial, { lit: 0.5, keepLit: true });
+    fb(ch, 'warehouse', x + 26, cy + 22, 30, 18, 5, Style.Industrial, { lit: 0.4, keepLit: true });
+    fb(ch, 'chimney', x - 12, cy + 10, 4, 4, 22, Style.Metal, { lit: 0 });
+    for (let i = 0; i < 14; i++) ch.props.push({ k: 'logs', x: x - 36 + (i % 2) * 11, cy: cy - 44 + Math.floor(i / 2) * 13, w: 10, d: 2.6, h: 1.8, rot: 0, v: Math.random() });
+    for (let i = 0; i < 8; i++) ch.props.push({ k: 'logs', x: riverX(cy) + rnd(-3, 3), cy: cy - 44 + i * 12, w: 2.4, d: 10, h: 0.7, rot: 0, v: Math.random() });
+    for (const [dx, dy] of [[-44, -50], [54, -50], [-44, 50], [54, 50]]) yardLight(ch, x + dx, cy + dy, 9, 34, LC.Sodium, 0.9);
+    claim(x - 52, cy - 58, x + 62, cy + 58);
   } else if (sp === 'dam') {
     const x = riverX(cy);
-    if (!inBiome(B, x, cy)) return;
-    dam(ch, B, x, cy, 48);
-    DAMS.push({ path: 1, cy, half: 70 });
-    claim(x - 56, cy - 20, x + 56, cy + 26);
+    if (!inBiome(B, x, cy) || x < SAFE_X0 - 60 || x > SAFE_X1 + 60) return;
+    bigDam(ch, x, cy, 72);
+    DAMS.push({ path: 1, cy, half: 90 });
+    claim(x - 80, cy - 26, x + 80, cy + 32);
   } else {
-    // Fire lookout on the highest ground, and a ranger post.
+    // Fire lookout on the highest ground, a ranger station and its floodlit yard.
     let bx = 0, by = 0, bh = -1;
-    for (let i = 0; i < 20; i++) { const x = rnd(80, W - 80), y = rnd(c0, c1); const h = T(x, y).h; if (h > bh && ok(B, x, y, 6)) { bh = h; bx = x; by = y; } }
+    for (let i = 0; i < 20; i++) { const x = rnd(SAFE_X0, SAFE_X1), y = rnd(c0, c1); const h = T(x, y).h; if (h > bh && ok(B, x, y, 10)) { bh = h; bx = x; by = y; } }
     if (bh < 0) return;
-    pad(ch, bx - 9, by - 9, bx + 9, by + 9, 'dirt');
-    const t = fb(ch, 'tower', bx, by, 3, 3, 14, Style.Glass, { lit: 0.9, keepLit: true }, [tier(1.4, 1.4, 0, 12), tier(3, 3, 12, 2)]);
-    L(ch, bx, by, 14.5, 1.1, LC.Warm, 0.9, 2, 0, t);
-    fb(ch, 'cabin', bx + 6, by + 5, 4, 3, 1.4, Style.House, { lit: 0.6 });
-    claim(bx - 10, by - 10, bx + 10, by + 10);
+    pad(ch, bx - 18, by - 18, bx + 18, by + 18, 'dirt');
+    const t = fb(ch, 'tower', bx, by, 4, 4, 18, Style.Glass, { lit: 0.9, keepLit: true }, [tier(1.6, 1.6, 0, 15), tier(4, 4, 15, 3)]);
+    L(ch, bx, by, 18.5, 1.2, LC.Warm, 0.95, 2, 0, t);
+    L(ch, bx, by, 19, 1, LC.White, 0.8, 7, 0.6, t);
+    fb(ch, 'cabin', bx + 10, by + 8, 7, 5, 2, Style.House, { lit: 0.8 });
+    yardLight(ch, bx + 10, by - 8, 5, 26, LC.Sodium, 0.8);
+    claim(bx - 20, by - 20, bx + 20, by + 20);
   }
 }
 

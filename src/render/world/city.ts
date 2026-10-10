@@ -16,7 +16,7 @@ import { rgb, Shape, DarkShape } from '../fx/quads';
 import { CITY, DARK, STOREY, CITY_K, bGeo, type Bldg, type Cloud, type Surface, type Mover } from '../../game/worldgen';
 import { TERR, FIRE, Burn, BURN_T, fireCellCy, fireCellX, highwayX, valleyX, riverX, pathX } from '../../game/terrain';
 import { Biome } from '../../game/biomes';
-import { U, darkTex, terrTex, fireTex, buildingMaterial, lightMaterial, trafficMaterial, craterMaterial, beamMaterial, terrainMaterial } from './shaders';
+import { U, darkTex, terrTex, fireTex, buildingMaterial, lightMaterial, trafficMaterial, craterMaterial, beamMaterial, terrainMaterial, cheapLights } from './shaders';
 
 const MAX_BLD = 12288, MAX_RND = 2048, MAX_FLAT = 14336, MAX_PROP = 8192, MAX_LIGHT = 12288, MAX_CARS = 2048, MAX_CRATER = 96;
 /** Detail sizes authored for the old ground scale shrink with the city (see worldgen CITY_K). */
@@ -24,13 +24,13 @@ const CK = CITY_K;
 const v = new THREE.Vector3(), w = new THREE.Vector3(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s3 = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0), col = new THREE.Color();
 const SMOKE = rgb('#25242a'), STEAM = rgb('#5d5c63'), FIRE_A = rgb('#ff8a2a'), FIRE_B = rgb('#ffcf6a'), EMBER = rgb('#ff5a1a');
-const CLOUD = rgb('#3c4250'), SEARCH = rgb('#cfe2ff'), FOAM = rgb('#9fb6cc'), HULL = rgb('#07090c'), HEAD = rgb('#ffe2b0'), TAIL = rgb('#ff9a40'), MAST = rgb('#f2f6ff'), BEAM_C = rgb('#d8e6ff'), ICE_STEAM = rgb('#8a96a6');
+const CLOUD = rgb('#3c4250'), SEARCH = rgb('#cfe2ff'), FOAM = rgb('#9fb6cc'), HULL = rgb('#07090c'), HEAD = rgb('#ffe2b0'), TAIL = rgb('#ff9a40'), MAST = rgb('#f2f6ff'), BEAM_C = rgb('#d8e6ff'), ICE_STEAM = rgb('#8a96a6'), PLANE_C = rgb('#5d646c'), WINGTIP = rgb('#7ef0c8');
 
 /** Ground surfaces (stylized: near-black with a hint of the zone). */
 const SURF: Record<Surface, string> = {
-  walk: '#1c1f24', plaza: '#24262b', grass: '#141c15', park: '#111a12', lot: '#17191c', gravel: '#1f1f1f', yard: '#1b1c1c',
-  dock: '#1f2124', rail: '#16130f', ash: '#1f1b1a', snow: '#2a3038', dirt: '#1d1912', bund: '#1a1918',
-  runway: '#202328', taxi: '#1b1d21', apron: '#2c2f33', concrete: '#212326', mark: '#6a6e73', pitch: '#2c5a32', sand: '#2a241b',
+  walk: '#1c1f24', plaza: '#24262b', grass: '#141c15', park: '#111a12', lot: '#1d1f22', gravel: '#1f1f1f', yard: '#1b1c1c',
+  dock: '#3a3d41', rail: '#16130f', ash: '#1f1b1a', snow: '#2a3038', dirt: '#1d1912', bund: '#1a1918',
+  runway: '#1c1e21', taxi: '#26292d', apron: '#3a3e42', concrete: '#303336', mark: '#6a6e73', pitch: '#2c5a32', sand: '#2a241b',
   road: '#101113', snowroad: '#262c35', basin: '#04070b', berm: '#1a1814', pad: '#252629', deck: '#1a1c1f',
 };
 const STYLE_TINT: number[][] = [
@@ -42,9 +42,9 @@ const STYLE_TINT: number[][] = [
 const CONTAINERS = ['#5a2a1e', '#1f3550', '#2c4a46', '#5c4a24', '#6a6e72', '#3a2f45', '#2a3a2a'].map((h) => new THREE.Color(h));
 /** Ground palettes per biome (linear): flat ground, moonlit faces, canopy, canopy highlight, water, params. */
 const GROUND: number[][][] = [
-  /* City */ [[0.018, 0.019, 0.022], [0.006, 0.007, 0.009], [0.01, 0.016, 0.011], [0.01, 0.02, 0.012], [0.004, 0.007, 0.012], [0, 0, 0.3]],
+  /* City */ [[0.012, 0.014, 0.018], [0.006, 0.007, 0.009], [0.01, 0.016, 0.011], [0.01, 0.02, 0.012], [0.004, 0.007, 0.012], [0, 0, 0.3]],
   /* Port */ [[0.02, 0.021, 0.023], [0.014, 0.016, 0.02], [0.01, 0.016, 0.011], [0.012, 0.022, 0.014], [0.003, 0.006, 0.011], [0, 3, 0.4]],
-  /* Airfield */ [[0.022, 0.026, 0.02], [0.012, 0.015, 0.012], [0.008, 0.013, 0.008], [0.01, 0.019, 0.011], [0.004, 0.007, 0.012], [0, 3, 0.4]],
+  /* Airfield */ [[0.014, 0.018, 0.012], [0.008, 0.011, 0.007], [0.008, 0.013, 0.008], [0.01, 0.019, 0.011], [0.004, 0.007, 0.012], [0, 3, 0.4]],
   /* Desert */ [[0.046, 0.035, 0.024], [0.055, 0.05, 0.045], [0.012, 0.017, 0.01], [0.012, 0.02, 0.01], [0.004, 0.006, 0.008], [0, 1, 0.6]],
   /* Snow */ [[0.075, 0.09, 0.118], [0.11, 0.14, 0.2], [0.006, 0.01, 0.011], [0.014, 0.024, 0.028], [0.02, 0.03, 0.045], [1, 2, 0.6]],
   /* Forest */ [[0.016, 0.019, 0.012], [0.008, 0.011, 0.007], [0.006, 0.011, 0.007], [0.02, 0.042, 0.022], [0.003, 0.006, 0.01], [0, 3, 0.6]],
@@ -85,7 +85,7 @@ class BldBatch {
 export class CityLayer implements Layer {
   name = 'city';
   root = new THREE.Group();
-  ground: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>;
+  ground: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshLambertMaterial>;
   /** Buildings by geometry: 0 box, 1 cylinder (tanks, stacks, rockets), 2 dome (radomes, igloos). */
   bld: BldBatch[];
   flats: THREE.InstancedMesh; props: THREE.InstancedMesh;
@@ -125,7 +125,7 @@ export class CityLayer implements Layer {
     this.ground.position.set(mid.x, -0.5, mid.z); this.ground.receiveShadow = true;
     e.scene.add(this.ground);
 
-    this.flats = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0.05 }), MAX_FLAT);
+    this.flats = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), cheapLights(new THREE.MeshLambertMaterial(), 'flats'), MAX_FLAT);
     this.flats.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_FLAT * 3), 3);
     Object.assign(this.flats, { count: 0, frustumCulled: false, receiveShadow: true });
 
@@ -138,7 +138,7 @@ export class CityLayer implements Layer {
       new BldBatch(dome, mat, MAX_RND),
     ];
 
-    this.props = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0.2 }), MAX_PROP);
+    this.props = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), cheapLights(new THREE.MeshLambertMaterial(), 'props'), MAX_PROP);
     this.props.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PROP * 3), 3);
     Object.assign(this.props, { count: 0, frustumCulled: false, receiveShadow: true });
 
@@ -231,14 +231,15 @@ export class CityLayer implements Layer {
     for (const key in SURF) surf[key] = new THREE.Color(SURF[key as Surface]);
     for (const ch of CITY.chunks) {
       for (const wt of ch.water) nf = this.flat(nf, wt.x0, wt.y0, wt.x1, wt.y1, 0.1, water);
-      for (const p of ch.pads) nf = this.flat(nf, p.x0, p.y0, p.x1, p.y1, p.s === 'mark' ? 0.55 : 0.4, surf[p.s]);
+      // City sidewalks ('walk') are the ground colour already: skipping them saves a full layer of overdraw.
+      for (const p of ch.pads) if (p.s !== 'walk') nf = this.flat(nf, p.x0, p.y0, p.x1, p.y1, p.s === 'mark' ? 0.55 : 0.4, surf[p.s]);
       for (const s of ch.segs) nf = this.strip(nf, s.x0, s.cy0, s.x1, s.cy1, s.w, s.s === 'mark' ? 0.55 : 0.45, surf[s.s]);
       for (const r of ch.roads) {
         nf = this.flat(nf, r.x0, r.y0, r.x1, r.y1, 0.8, road);
         // The street itself glows with its lamps: from this high the grid reads as faint lines of
         // light between dark blocks (kept dim: the city is the backdrop, never the subject).
-        if (r.dir === 0) this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.x1 - r.x0) * 1.6), lamp, r.major ? 0.11 : 0.06, 5, 0, R(r.y1 - r.y0), 0);
-        else this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.y1 - r.y0) * 1.6), lamp, 0.06, 5, 0, R(r.x1 - r.x0), 1);
+        if (r.dir === 0) this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.x1 - r.x0) * 1.15), lamp, r.major ? 0.13 : 0.075, 5, 0, R(r.y1 - r.y0), 0);
+        else this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.y1 - r.y0) * 1.15), lamp, 0.075, 5, 0, R(r.x1 - r.x0), 1);
         // Lamp heads only along the major avenues, a pixel of sodium every so often.
         if (r.major && r.dir === 0) for (let y = r.y0 + 6; y < r.y1; y += 22) for (const x of [r.x0 + 0.6, r.x1 - 0.6]) this.light(X(x), R(1), Z(y), R(1.3), lampHot, 0.55, 0);
       }
@@ -274,9 +275,11 @@ export class CityLayer implements Layer {
         }
       }
       for (const L of ch.lights) {
-        // Pinpoints are authored at their real size; from this altitude they need a couple of pixels to read.
-        const pool = L.k === 1 || L.k === 4, sz = pool ? L.s : Math.max(2.8, L.s * 2.6);
-        const i = this.light(X(L.x), R(L.h), Z(L.cy), R(sz), LIGHT_COL[L.c] ?? white, pool ? L.a * 1.3 : Math.min(0.85, 0.25 + L.a), L.k, L.p);
+        // Pinpoints are authored at their real size; from this altitude they need a couple of pixels to read, and they
+        // stay just under the bloom threshold (a crisp point, not a glowing ball: only fires bloom).
+        if (L.k === 9) { this.light(X(L.x), R(L.h), Z(L.cy), R(L.s), LIGHT_COL[L.c] ?? white, L.a, 9, 0, R(L.len ?? 10), L.ax ?? 0); continue; }
+        const pool = L.k === 1 || L.k === 4, sz = L.k === 4 ? L.s * 1.7 : pool ? L.s : Math.max(2.8, L.s * 2.6);
+        const i = this.light(X(L.x), R(L.h), Z(L.cy), R(sz), LIGHT_COL[L.c] ?? white, pool ? L.a * 1.3 : Math.min(0.4, 0.12 + L.a * 0.45), L.k, L.p);
         if (L.b && i >= 0) this.bLights.push({ i, b: L.b });
         if (L.k === 8) this.sweeps.push({ x: X(L.x), y: R(L.h), z: Z(L.cy), s: R(L.s), seed: L.p, b: L.b });
       }
@@ -367,11 +370,13 @@ export class CityLayer implements Layer {
       if (s.b?.dead) continue;
       const fy = (s.z + scrollZ - this.cz) / k + 450 + this.cz;
       if (fy < -300 || fy > FIELD_H + 100) continue;
-      const a = t * 0.8 + s.seed * 6, L = this.R(170);
+      const a = t * 0.8 + s.seed * 6, L = this.R(280);
       for (const o of [0, Math.PI]) {
         const ca = Math.cos(a + o), sa = Math.sin(a + o);
-        glow.add(s.x + ca * L * 0.5, s.y, s.z + scrollZ + sa * L * 0.5, a + o, L, this.R(14), BEAM_C, 0.06, Shape.Soft);
+        glow.add(s.x + ca * L * 0.5, s.y, s.z + scrollZ + sa * L * 0.5, a + o, L, this.R(26), BEAM_C, 0.11, Shape.Soft);
+        glow.add(s.x + ca * L * 0.25, s.y, s.z + scrollZ + sa * L * 0.25, a + o, L * 0.5, this.R(9), BEAM_C, 0.14, Shape.Soft);
       }
+      glow.add(s.x, s.y + 1, s.z + scrollZ, 0, this.R(9), this.R(9), BEAM_C, 0.5, Shape.Hot);
     }
     this.updateMovers(glow, dark, S.scrollY, t);
     this.updateGroundFires(glow, dark, S.scrollY, t);
@@ -397,6 +402,18 @@ export class CityLayer implements Layer {
       const fy = cy + scrollY;
       if (fy < -120 || fy > FIELD_H + 120 || x < -300 || x > FIELD_W + 300) continue;
       const wx = this.X(x), wz = this.Z(cy) + scrollY * this.k, rot = Math.atan2(hy, hx);
+      if (m.k === 'jet') {
+        // A taxiing aircraft: a pale cross, white tail strobe, teal and white wingtips, a pulsing amber beacon.
+        const L2 = R(m.len), cs = Math.cos(rot), sn = Math.sin(rot);
+        dark.add(wx, 1, wz, rot, L2, L2 * 0.14, PLANE_C, 0.9, DarkShape.Rect);
+        dark.add(wx + hx * L2 * 0.04, 1.1, wz + hy * L2 * 0.04, rot + Math.PI / 2, L2 * 0.95, L2 * 0.14, PLANE_C, 0.9, DarkShape.Rect);
+        glow.add(wx - sn * L2 * 0.47, 1.4, wz + cs * L2 * 0.47, 0, R(1.4), R(1.4), WINGTIP, 0.7, Shape.Hot);
+        glow.add(wx + sn * L2 * 0.47, 1.4, wz - cs * L2 * 0.47, 0, R(1.4), R(1.4), MAST, 0.6, Shape.Hot);
+        glow.add(wx - hx * L2 * 0.5, 1.4, wz - hy * L2 * 0.5, 0, R(1.2), R(1.2), MAST, 0.5 + 0.5 * (Math.sin(t * 9 + m.seed * 20) > 0.8 ? 1 : 0), Shape.Hot);
+        glow.add(wx, 1.6, wz, 0, R(1.6), R(1.6), TAIL, 0.25 + 0.6 * Math.max(0, Math.sin(t * 6 + m.seed * 9)), Shape.Hot);
+        glow.add(wx + hx * L2 * 0.9, 0.9, wz + hy * L2 * 0.9, rot, L2 * 0.9, L2 * 0.35, HEAD, 0.06, Shape.Soft);
+        continue;
+      }
       if (m.k === 'convoy' || m.k === 'car') {
         for (let i = 0; i < m.n; i++) {
           const bx = wx - hx * R(i * 6), bz = wz - hy * R(i * 6);
