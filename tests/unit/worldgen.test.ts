@@ -5,13 +5,15 @@ import type { Bldg } from '../../src/game/worldgen';
 // combat.ts pulls in the audio module, which reads localStorage at import time.
 (globalThis as unknown as { localStorage: unknown }).localStorage ??= { getItem: () => null, setItem: () => undefined };
 const { S } = await import('../../src/game/combat');
-const { seedDecor, updateBg, worldBlast, CITY, DARK } = await import('../../src/game/worldgen');
+const { seedDecor, updateBg, worldBlast, setBiome, isWater, isLand, surfaceAt, findSurface, terrainAt, biomeAt, CITY, DARK } = await import('../../src/game/worldgen');
+const { FIRE, Burn } = await import('../../src/game/terrain');
+const { biomeFor, BIOMES, BIOME_COUNT, RING } = await import('../../src/game/biomes');
 
 const bldgs = () => CITY.chunks.flatMap((c) => c.bldgs);
 
 describe('city worldgen', () => {
-  for (let theme = 0; theme < 5; theme++) it(`theme ${theme}: fills the view with a city`, () => {
-    S.theme = theme; seedDecor();
+  for (let theme = 0; theme < 6; theme++) it(`biome ${theme}: fills the view with structures`, () => {
+    S.theme = theme; S.biomeB = -1; seedDecor();
     expect(CITY.chunks.length).toBeGreaterThan(4);
     expect(bldgs().length).toBeGreaterThan(40);
     expect(S.decor.length).toBe(bldgs().length);
@@ -33,7 +35,7 @@ describe('city worldgen', () => {
   });
 
   it('a big enough blast levels buildings, pays scrap, leaves a crater and fire', () => {
-    S.theme = 4; seedDecor();
+    S.theme = 0; S.biomeB = -1; seedDecor();
     const target = bldgs().filter((b) => b.y > 200 && b.y < 700 && b.kind !== 'tank').sort((a, b) => a.maxHp - b.maxHp)[0] as Bldg;
     const scrap = worldBlast(target.x, target.y, 30, target.maxHp * 3);
     expect(target.dead).toBe(true);
@@ -54,10 +56,11 @@ describe('city worldgen', () => {
     expect(t.fire).toBeGreaterThan(0);
   });
 
-  it('refinery tanks chain-react', () => {
-    S.theme = 1; seedDecor();
+  it('fuel (tanks, wellheads, flares) chain-reacts', () => {
     S.P = null;
-    const tank = bldgs().find((b) => b.kind === 'tank' && b.y > 150 && b.y < 750);
+    let tank: Bldg | undefined;
+    for (let i = 0; i < 12 && !tank; i++) { S.theme = 3; S.biomeB = -1; seedDecor(); tank = bldgs().find((b) => b.fuel > 0 && b.y > 150 && b.y < 750); }
+    expect(tank).toBeTruthy();
     if (!tank) return;
     worldBlast(tank.x, tank.y, 20, 999);
     expect(tank.dead).toBe(true);
@@ -76,8 +79,9 @@ describe('city worldgen', () => {
 });
 
 describe('building destruction (gameplay)', () => {
-  it('every building pays 1-4 scrap, and bigger buildings pay more', () => {
-    S.theme = 0; seedDecor();
+  it('every structure in every biome pays 1-4 scrap, and bigger buildings pay more', () => {
+    for (let b = 1; b < 6; b++) { S.theme = b; S.biomeB = -1; seedDecor(); for (const x of bldgs()) { expect(x.value).toBeGreaterThanOrEqual(1); expect(x.value).toBeLessThanOrEqual(4); } }
+    S.theme = 0; S.biomeB = -1; seedDecor();
     const all = bldgs();
     for (const b of all) { expect(b.value).toBeGreaterThanOrEqual(1); expect(b.value).toBeLessThanOrEqual(4); }
     const small = all.filter((b) => b.maxHp < 80), big = all.filter((b) => b.maxHp > 200);
@@ -117,12 +121,82 @@ describe('building destruction (gameplay)', () => {
   });
 
   it('chain reactions never spill scrap themselves (combat pays through groundBlast)', () => {
-    S.theme = 1; seedDecor(); S.P = null; S.active = false;
-    const tank = bldgs().find((b) => b.kind === 'tank' && b.y > 150 && b.y < 750);
+    S.theme = 3; S.biomeB = -1; seedDecor(); S.P = null; S.active = false;
+    const tank = bldgs().find((b) => b.fuel > 0 && b.y > 150 && b.y < 750);
     if (!tank) return;
     const n0 = S.pickups.length;
     worldBlast(tank.x, tank.y, 20, 999);
     for (let i = 0; i < 30; i++) updateBg(1 / 30);
     expect(S.pickups.length).toBe(n0);
+  });
+});
+
+describe('biomes', () => {
+  it('a campaign crosses every biome, two neighbours per sector, crossing between them mid-sector', () => {
+    for (const seed of [undefined, 1, 77, 123456]) {
+      const seen = new Set<number>();
+      for (let sector = 1; sector <= 3; sector++) for (let floor = 0; floor <= 10; floor++) {
+        const p = biomeFor(sector, floor, seed);
+        seen.add(p.a); if (p.b >= 0) { seen.add(p.b); expect(RING.indexOf(p.b as never)).toBe((RING.indexOf(p.a as never) + 1) % BIOME_COUNT); }
+      }
+      expect(seen.size).toBe(BIOME_COUNT);
+    }
+    // The balance harness (no seed) starts at the night city.
+    expect(biomeFor(1, 2).a).toBe(0);
+    expect(biomeFor(1, 4).b).toBe(1);
+    expect(BIOMES.length).toBe(BIOME_COUNT);
+  });
+
+  it('the ground turns into the second biome along a ragged edge, and the ship crosses it', () => {
+    setBiome(0, 1, 200); S.P = null; S.active = false;
+    expect(CITY.biomeB).toBe(1);
+    // Ahead of the edge it is harbour; behind, still the city.
+    expect(biomeAt(800, -900)).toBe(1);
+    expect(biomeAt(800, 880)).toBe(0);
+    for (let i = 0; i < 900; i++) updateBg(1 / 30);
+    expect(CITY.crossed).toBe(true);
+    expect(S.theme).toBe(1);
+    expect(CITY.theme).toBe(1);
+    S.biomeB = -1;
+  });
+
+  it('terrain queries: harbour water on the left, land on the right; a runway at the airbase', () => {
+    setBiome(1); S.P = null;
+    expect(isWater(40, 400)).toBe(true);
+    expect(isLand(1500, 400)).toBe(true);
+    expect(surfaceAt(40, 400)).toBe('water');
+    const t = terrainAt(1500, 400);
+    expect(t.biome).toBe(1);
+    expect(t.water).toBeLessThan(0.5);
+    setBiome(2);
+    const rw = findSurface('runway', 0, -300, 1600, 900, 400);
+    expect(rw).toBeTruthy();
+    expect(surfaceAt(rw!.x, rw!.y)).toBe('runway');
+    setBiome(3);
+    expect(['sand', 'rock', 'road', 'forest', 'apron']).toContain(surfaceAt(800, 400));
+  });
+
+  it('a blast in the forest starts a wildfire that spreads through the canopy', () => {
+    setBiome(5); S.P = null; S.active = false;
+    const p = findSurface('forest', 100, 100, 1500, 600, 400)!;
+    expect(p).toBeTruthy();
+    worldBlast(p.x, p.y, 30, 60);
+    const n0 = FIRE.active.length;
+    expect(n0).toBeGreaterThan(0);
+    for (let i = 0; i < 150; i++) updateBg(1 / 30);
+    expect(FIRE.active.length).toBeGreaterThan(n0);
+  });
+
+  it('frozen lakes crack under fire; open water swallows the crater', () => {
+    let ice: { x: number; y: number } | null = null;
+    for (let i = 0; i < 10 && !ice; i++) { setBiome(4); ice = findSurface('ice', 0, 0, 1600, 900, 600); }
+    if (ice) {
+      worldBlast(ice.x, ice.y, 30, 60);
+      expect(FIRE.active.some((c) => FIRE.data[c * 2 + 1] === Burn.Ice)).toBe(true);
+    }
+    setBiome(1);
+    const c0 = CITY.craters.length;
+    worldBlast(40, 400, 30, 60);
+    expect(CITY.craters.length).toBe(c0);
   });
 });

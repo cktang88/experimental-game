@@ -26,7 +26,8 @@ export function vnoise(x: number, y: number) {
 }
 export function fbm(x: number, y: number, oct = 4) {
   let s = 0, a = 0.5, n = 0;
-  for (let i = 0; i < oct; i++) { s += vnoise(x, y) * a; n += a; x = x * 2.03 + 17.1; y = y * 2.03 - 9.7; a *= 0.5; }
+  // Each octave is rotated (~37 degrees) so the value-noise lattice never lines up into straight creases.
+  for (let i = 0; i < oct; i++) { s += vnoise(x, y) * a; n += a; const nx = (x * 0.8 - y * 0.6) * 2.03 + 17.1; y = (x * 0.6 + y * 0.8) * 2.03 - 9.7; x = nx; a *= 0.5; }
   return s / n;
 }
 const smooth = (a: number, b: number, x: number) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -152,10 +153,12 @@ function fieldOf(b: Biome, x: number, cy: number, o: TerrainSample): TerrainSamp
     }
     case Biome.Snow: {
       // Ridged mountains (big shapes first, little detail) with two valleys carved through them.
-      let h = 0, a = 1, fx = x * 0.0016, fy = cy * 0.0016, n = 0;
+      let h = 0, a = 1, fx = (x * 0.87 - cy * 0.5) * 0.0016, fy = (x * 0.5 + cy * 0.87) * 0.0016, n = 0;
       for (let i = 0; i < 4; i++) {
+        // Ridged octaves, each rotated so the noise lattice never shows as straight creases.
         const r = 1 - Math.abs(2 * vnoise(fx, fy) - 1);
-        h += r * r * a; n += a; a *= 0.42; fx = fx * 2.1 + 3.1; fy = fy * 2.1 - 1.3;
+        h += r * r * a; n += a; a *= 0.42;
+        const nx = (fx * 0.8 - fy * 0.6) * 2.1 + 3.1; fy = (fx * 0.6 + fy * 0.8) * 2.1 - 1.3; fx = nx;
       }
       h = (h / n) * 170;
       const d1 = Math.abs(x - valleyX(cy)), d2 = Math.abs(x - valley2X(cy));

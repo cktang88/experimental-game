@@ -19,12 +19,12 @@ export interface BiomeInfo {
 }
 
 export const BIOMES: readonly BiomeInfo[] = [
-  { id: Biome.City, name: 'Sodium City', kind: 'Night city', pay: 0.11 },
-  { id: Biome.Port, name: 'Iron Harbour', kind: 'Port', pay: 0.2 },
-  { id: Biome.Airfield, name: 'Kestrel Airbase', kind: 'Airfield', pay: 0.34 },
-  { id: Biome.Desert, name: 'Glass Desert', kind: 'Desert', pay: 0.42 },
-  { id: Biome.Snow, name: 'White Range', kind: 'Mountains', pay: 0.4 },
-  { id: Biome.Forest, name: 'Deepwood', kind: 'Forest', pay: 0.38 },
+  { id: Biome.City, name: 'Sodium City', kind: 'Night city', pay: 0.12 },
+  { id: Biome.Port, name: 'Iron Harbour', kind: 'Port', pay: 0.073 },
+  { id: Biome.Airfield, name: 'Kestrel Airbase', kind: 'Airfield', pay: 0.44 },
+  { id: Biome.Desert, name: 'Glass Desert', kind: 'Desert', pay: 0.2 },
+  { id: Biome.Snow, name: 'White Range', kind: 'Mountains', pay: 0.18 },
+  { id: Biome.Forest, name: 'Deepwood', kind: 'Forest', pay: 0.37 },
 ];
 
 /**
