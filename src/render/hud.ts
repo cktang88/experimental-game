@@ -334,11 +334,13 @@ function reticle(c: CanvasRenderingContext2D) {
   if (act.some((g) => g.family === 'missile')) {
     const L = aim.lock;
     if (L && !L.dead) {
+      // grey when no missile mount can take this lock (a top-deck pod on a ground target)
+      const takes = act.some((g) => g.family === 'missile' && g.mounts.some((m) => aim.bears[m.part!.uid] !== false));
       const k = clamp(aim.lockT / 0.25, 0, 1), rr = (L.isBoss ? Math.min(90, L.halfW * 0.5) : L.r + 12) * (2 - k);
       c.save(); c.translate(L.x, L.y); c.rotate((1 - k) * Math.PI / 4);
-      c.strokeStyle = '#ff9f5a'; c.lineWidth = 2.5; brackets(c, 0, 0, rr, rr * 0.45);
+      c.strokeStyle = takes ? '#ff9f5a' : '#7d8a96'; c.lineWidth = 2.5; brackets(c, 0, 0, rr, rr * 0.45);
       c.restore();
-      if (k >= 1) { label(c, 'LOCK', L.x + rr + 6, L.y - rr + 4, '#ff9f5a', 11, 'left'); c.strokeStyle = 'rgba(255,159,90,.35)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y); c.lineTo(L.x, L.y); c.stroke(); }
+      if (k >= 1 && takes) { label(c, 'LOCK', L.x + rr + 6, L.y - rr + 4, '#ff9f5a', 11, 'left'); c.strokeStyle = 'rgba(255,159,90,.35)'; c.lineWidth = 1; c.beginPath(); c.moveTo(x, y); c.lineTo(L.x, L.y); c.stroke(); }
     }
   }
   // the reticle itself

@@ -283,7 +283,7 @@ h2 { font-family: var(--f-stencil); font-weight: 400; font-size: 34px; line-heig
 .slip-txt { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .slip .nm { font-family: var(--f-stencil); font-weight: 400; font-size: 18px; line-height: 1.05; letter-spacing: .03em; text-transform: uppercase; color: var(--ink); }
 .slip .mk { font-family: var(--f-mono); font-size: 12px; color: var(--ink-2); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
-.slip-tags { display: flex; align-items: center; gap: 8px; }
+.slip-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .slip .ds { font-size: 13.5px; line-height: 1.4; color: #3a3528; flex: 1; }
 .slip .meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 8px; font-family: var(--f-mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); border-top: 1px solid rgba(60, 50, 30, .3); }
 .slip .price { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px 2px; font-size: 13px; color: #f6ead0; background: #2a2116; transform: rotate(-2deg); box-shadow: 0 1px 2px rgba(0, 0, 0, .5); }

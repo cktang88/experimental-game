@@ -14,11 +14,11 @@ const LAYER_LABEL: Record<string, string> = { air: 'AIR', ground: 'GROUND', both
  *  top deck does not (placementNote says it in full). */
 const cardLayer = (p: Part) => {
   const l = partLayer(p);
-  return isWeapon(p.id) && (l === 'air' || l === 'both') ? { cls: 'both', text: 'AIR · GND BY MOUNT' } : { cls: l, text: LAYER_LABEL[l] };
+  return isWeapon(p.id) && (l === 'air' || l === 'both') ? { cls: 'both', text: 'BY MOUNT' } : { cls: l, text: LAYER_LABEL[l] };
 };
 export const layerTag = (p: Part) => { const t = cardLayer(p); return el('em', 'layer ' + t.cls, t.text); };
 /** AUTO weapons fire on their own; HEAVY ones join a numbered group the pilot fires with the mouse. */
-export const controlTag = (p: Part) => (isWeapon(p.id) ? el('em', 'layer ctl ' + weaponControl(p.id), weaponControl(p.id) === 'heavy' ? 'HEAVY · AIMED' : 'AUTO') : null);
+export const controlTag = (p: Part) => (isWeapon(p.id) ? el('em', 'layer ctl ' + weaponControl(p.id), weaponControl(p.id) === 'heavy' ? 'AIMED' : 'AUTO') : null);
 
 /** Mk rank as a row of lamps: lit up to the tier. */
 export function rankPips(tier: number, max = 5) {
