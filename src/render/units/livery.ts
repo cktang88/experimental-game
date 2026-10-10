@@ -24,7 +24,7 @@ export const LIVERY = {
   /** Salvage: worn hazard-yellow (scrap colour) over steel; lamps glow scrap gold. */
   salvage: { paint: 0x8a6a2a, metal: 0x4c5157, lamp: '#ffc24a', lampK: 3.5, rim: '#ffc24a', rimK: 1.0 },
   /** Infantry fatigues. */
-  fatigue: { paint: 0x46502f, metal: 0x2a2c2a, lamp: '#fff1d6', lampK: 3, rim: '#ff5a4e', rimK: 1.5 },
+  fatigue: { paint: 0x46502f, metal: 0x2a2c2a, lamp: '#fff1d6', lampK: 3, rim: '#ff5a4e', rimK: 0.55 },
 } satisfies Record<string, Livery>;
 export type LiveryName = keyof typeof LIVERY;
 

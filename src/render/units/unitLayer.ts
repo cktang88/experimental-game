@@ -443,7 +443,8 @@ export class UnitLayer implements Layer {
       const salvage = v.type === 'cache' || v.type === 'wreck';
       e.dark.add(vpos.x, 1.2 * k, vpos.z, fwdYaw, mk * 2.8, mk * 2.8, C.shadow, 0.78 * fade, DarkShape.Soft);
       const pulse = 0.85 + 0.15 * Math.sin(t * 3);
-      e.glow.add(vpos.x, 1.6 * k, vpos.z, 0, mk * 2.0, mk * 2.0, salvage ? C.markScrap : C.mark, (salvage ? 0.6 : 0.75) * pulse * fade, Shape.Bracket);
+      // Infantry come in clumps of squads: overlapping brackets turn to confetti, so they get the halo only.
+      if (v.type !== 'infantry') e.glow.add(vpos.x, 1.6 * k, vpos.z, 0, mk * 2.0, mk * 2.0, salvage ? C.markScrap : C.mark, (salvage ? 0.6 : 0.75) * pulse * fade, Shape.Bracket);
     } else {
       e.dark.add(vpos.x, vpos.y - 8, vpos.z, 0, mk * 2.6, mk * 2.6, C.shadow, 0.55 * fade, DarkShape.Soft);
       const sh = 1 - v.alt / 900;

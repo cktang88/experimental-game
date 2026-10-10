@@ -187,8 +187,8 @@ export class CityLayer implements Layer {
         nf = this.flat(nf, r.x0, r.y0, r.x1, r.y1, 0.8, road);
         // The street itself glows with its lamps: from this high the grid reads as faint lines of
         // light between dark blocks (kept dim: the city is the backdrop, never the subject).
-        if (r.dir === 0) this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.x1 - r.x0) * 1.6), lamp, r.major ? 0.13 : 0.075, 5, 0, R(r.y1 - r.y0), 0);
-        else this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.y1 - r.y0) * 1.6), lamp, 0.075, 5, 0, R(r.x1 - r.x0), 1);
+        if (r.dir === 0) this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.x1 - r.x0) * 1.6), lamp, r.major ? 0.11 : 0.06, 5, 0, R(r.y1 - r.y0), 0);
+        else this.light(X((r.x0 + r.x1) / 2), 1.2, Z((r.y0 + r.y1) / 2), R((r.y1 - r.y0) * 1.6), lamp, 0.06, 5, 0, R(r.x1 - r.x0), 1);
         // Lamp heads only along the major avenues, a pixel of sodium every so often.
         if (r.major && r.dir === 0) for (let y = r.y0 + 6; y < r.y1; y += 22) for (const x of [r.x0 + 0.6, r.x1 - 0.6]) this.light(X(x), R(1), Z(y), R(1.3), lampHot, 0.55, 0);
       }
@@ -380,8 +380,8 @@ export class CityLayer implements Layer {
       w.subVectors(aim, v); const L = w.length(); w.divideScalar(L);
       q.setFromUnitVectors(UP, w);
       beam.position.copy(v); beam.quaternion.copy(q); beam.scale.set(L * 0.032, L, L * 0.032);
-      beam.visible = true; mat.uniforms.uA.value = 0.7 * fade * (0.85 + 0.15 * Math.sin(t * 13 + a.phase));
-      e.glow.add(v.x, v.y + 1, v.z, 0, 22 * this.k, 22 * this.k, SEARCH, 0.9 * fade, Shape.Hot);
+      beam.visible = true; mat.uniforms.uA.value = 0.3 * fade * (0.85 + 0.15 * Math.sin(t * 13 + a.phase));
+      e.glow.add(v.x, v.y + 1, v.z, 0, 10 * this.k, 10 * this.k, SEARCH, 0.5 * fade, Shape.Hot);
     }
     for (; bi < this.beams.length; bi++) { this.beams[bi].visible = false; this.beamAim[bi].set(0, 0, 0); }
   }

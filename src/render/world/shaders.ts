@@ -84,7 +84,7 @@ const BLD_FRAG = /* glsl */ `
     // Roof: dark membrane with a lighter parapet lip that catches the moon.
     float edge = min(vSz.x * 0.5 - abs(vObj.x), vSz.z * 0.5 - abs(vObj.z));
     float lip = 1.0 - smoothstep(0.15 * uK, 0.45 * uK, edge);
-    diffuseColor.rgb *= mix(0.2, 0.6, lip) * (0.8 + 0.4 * h12(floor(vCity.xz / (2.0 * uK)) + seed));
+    diffuseColor.rgb *= mix(0.2, 0.6, lip) * (0.88 + 0.24 * h12(vec2(seed * 71.0, seed * 13.0)));
     float firePatch = smoothstep(0.55, 0.9, vnoise(vCity.xz / (1.2 * uK) + seed * 9.0 + vec2(uTime * 0.4, 0.0)));
     diffuseColor.rgb *= 1.0 - 0.6 * fire;
     totalEmissiveRadiance += vec3(1.0, 0.38, 0.08) * fire * flick * firePatch * 1.4 * (1.0 - vFall);
