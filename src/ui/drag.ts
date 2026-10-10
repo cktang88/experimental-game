@@ -25,7 +25,7 @@ export const dragging = () => !!active;
 /** Cancel the drag in progress, if any (Escape, screen change). */
 export const cancelDrag = () => active?.cancel();
 
-const HOLD_MS = 260, SLOP = 6;
+const HOLD_MS = 260, SLOP = 6, CARRY = 0.82;
 
 /** Make `src` draggable. `hooks()` is asked at drag start and may return null to refuse (nothing to carry). */
 export function draggable(src: HTMLElement, hooks: () => DragHooks | null) {
@@ -33,15 +33,14 @@ export function draggable(src: HTMLElement, hooks: () => DragHooks | null) {
     if (e.button !== 0 || active) return;
     const touch = e.pointerType === 'touch', x0 = e.clientX, y0 = e.clientY, id = e.pointerId;
     let started = false, h: DragHooks | null = null, ghost: HTMLElement | null = null, target: HTMLElement | null = null;
-    let gx = 0, gy = 0, ox = 0, oy = 0, timer = 0, lx = x0, ly = y0;
+    let gx = 0, gy = 0, timer = 0, lx = x0, ly = y0;
     const begin = () => {
       h = hooks(); if (!h) { off(); return; }
       started = true;
       const r = src.getBoundingClientRect();
-      ox = x0 - r.left; oy = y0 - r.top;
       ghost = h.ghost ? h.ghost() : (src.cloneNode(true) as HTMLElement);
       ghost.classList.add('dnd-ghost'); ghost.removeAttribute('id'); ghost.setAttribute('aria-hidden', 'true');
-      Object.assign(ghost.style, { position: 'fixed', left: '0', top: '0', width: `${r.width}px`, height: `${r.height}px`, margin: '0', pointerEvents: 'none', zIndex: '1000' });
+      Object.assign(ghost.style, { position: 'fixed', left: '0', top: '0', transformOrigin: '0 0', width: `${r.width}px`, height: `${r.height}px`, margin: '0', pointerEvents: 'none', zIndex: '1000' });
       document.body.append(ghost);
       src.classList.add('dnd-src'); document.body.classList.add('dnd-on');
       active = { cancel: () => finish(null, true) };
@@ -52,8 +51,9 @@ export function draggable(src: HTMLElement, hooks: () => DragHooks | null) {
       if (touch && navigator.vibrate) try { navigator.vibrate(12); } catch { /* not allowed */ }
     };
     const place = (x: number, y: number) => {
-      gx = x - ox; gy = y - oy;
-      if (ghost) ghost.style.transform = `translate(${gx}px, ${gy}px) rotate(-1.5deg)`;
+      // Carried a little smaller, hanging below-right of the pointer, so the socket under it stays readable.
+      gx = x + 14; gy = y + 16;
+      if (ghost) ghost.style.transform = `translate(${gx}px, ${gy}px) scale(${CARRY}) rotate(-1.5deg)`;
       const under = document.elementFromPoint(x, y) as HTMLElement | null;
       const t = (under?.closest('[data-drop]') as HTMLElement | null) ?? null;
       if (t !== target) { target = t; h?.over(t); }
@@ -104,8 +104,8 @@ export function draggable(src: HTMLElement, hooks: () => DragHooks | null) {
       const done = () => { g.remove(); src.classList.remove('dnd-src'); document.body.classList.remove('dnd-on'); if (commit) commit(); hk.end(); };
       if (!to || still) { done(); return; }
       // Snap: the tile drops square into the socket (fast, slight overshoot), or springs home when refused.
-      const gr = g.getBoundingClientRect();
-      const tx = to.left + (to.width - gr.width) / 2, ty = to.top + (to.height - gr.height) / 2;
+      const gw = g.offsetWidth, gh = g.offsetHeight;
+      const tx = to.left + (to.width - gw) / 2, ty = to.top + (to.height - gh) / 2;
       g.classList.add(commit ? 'dnd-snap' : 'dnd-return');
       g.style.transform = `translate(${tx}px, ${ty}px)`;
       setTimeout(done, commit ? 150 : 220);

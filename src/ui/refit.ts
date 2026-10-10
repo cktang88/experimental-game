@@ -46,7 +46,8 @@ const parseDrop = (s: string | undefined): Dst | null => {
   const m = /^slot:(\d+):(\d+)$/.exec(s);
   return m ? { k: 'slot', si: +m[1], i: +m[2] } : null;
 };
-const sideOf = (d: Derived, si: number, i: number) => d.mounts.find((m) => m.si === si && m.i === i)?.side ?? 0;
+/** The flank a mount would fire to with a broadside gun in it, from where it sits (derive() gives 0 when the part in it is, say, a bomb). */
+const sideOf = (d: Derived, si: number, i: number): -1 | 0 | 1 => { const m = d.mounts.find((x) => x.si === si && x.i === i); return !m || d.rects[si].type !== 'battery' ? 0 : m.ox < -1 ? -1 : m.ox > 1 ? 1 : 0; };
 
 /** Board anchors: where each mount is drawn on the plan (the bridge's mount is called out above the ship). */
 const anchorsOf = (d: Derived) => d.mounts.map((m) => {
@@ -194,7 +195,7 @@ export function refitPanel(run: RunState, onChange: () => void, extras: RefitExt
     const arcFor = (si: number, i: number, cand: boolean, hot: boolean) => {
       const m = show.mounts.find((x) => x.si === si && x.i === i); if (!m) return;
       let tr: Traverse = m.trav;
-      if (cand && p) { const sec = run.build.sections[si]; tr = mountTraverse(sec.type, SECTIONS[sec.type].slots[i], p.id, m.side); }
+      if (cand && p) { const sec = run.build.sections[si]; tr = mountTraverse(sec.type, SECTIONS[sec.type].slots[i], p.id, sideOf(show, si, i)); }
       if (!tr.sectors.length) return;
       const [x, y] = L!.anchors[`${si}-${i}`], col = ARC_INFO[tr.arc].col, big = Math.max(64, Math.min(120, L!.ship.s * 48)), r = hot ? big : big * 0.46;
       const g = svg('g', { class: `arc-w${hot ? ' hot' : ''}${tr.down ? ' down' : ''}`, style: `--arc:${col}` });

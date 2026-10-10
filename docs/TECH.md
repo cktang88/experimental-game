@@ -321,8 +321,8 @@ service, which also passes the counter (`market`, `sections` getters on `RefitEx
   `firepower()`, mass, thrust, PD, repair, drones). A section drag redraws the reordered hull at its own fit.
 - **Drag** (`draggable(el, hooks)`): pointer events, one path for mouse, pen and touch. Mouse/pen start after 6 px of travel,
   a finger after a 260 ms press-and-hold (a quick swipe still scrolls). Targets are `[data-drop]` elements
-  (`slot:<si>:<i>`, `hold`, `sec:<i>`, `cut`); the carried tile is a clone that snaps into the target (150 ms overshoot) or
-  springs back. Edge auto-scroll while carrying (phones: hold below the board). Escape cancels. The board does not re-render
+  (`slot:<si>:<i>`, `hold`, `sec:<i>`, `cut`); the carried tile is a clone hung below-right of the pointer (so the socket under it stays
+  readable) that snaps into the target (150 ms overshoot) or springs back. Edge auto-scroll while carrying (phones: hold below the board). Escape cancels. The board does not re-render
   mid-drag (`dragging()`).
 - **Feedback**: landing plays `uiSound('stamp')` (a counter purchase `'buy'`), the socket does a clunk (scale overshoot and a
   well flash) and its leader and ring flash; refused drops `'deny'` and wobble. Gauges rebuild only when the committed fit
@@ -330,6 +330,8 @@ service, which also passes the counter (`market`, `sections` getters on `RefitEx
 - **Click and keyboard**: click (or Enter) a hold part to pick it, then a socket to place it; click a mounted part to pick it
   up, then another socket to swap or "Return to hold"; Delete unmounts the focused socket; Esc lets go. Sections also keep
   their ▲ ▼ buttons and guarded Cut switch; dropping a section in the cut bin asks for confirmation.
+- Screenshots: `docs/shots/ui-refit-*.jpg` (board idle, drag over a lit / refused socket, equipped, swap, section drag,
+  merchant counter, an 8-section build, phone).
 - Hooks for tests: `.mtile[data-slot="si-i"]` (`.cand`, `.nope`, `.over`), `[data-inv]`, `[data-mkt]`, `.rf-hold`,
   `li.sec[data-sec]`, `.rf-toast`, `.board-lines .lead` / `.arc-w.hot`.
 
