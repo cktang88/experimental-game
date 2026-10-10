@@ -153,7 +153,8 @@ export class ShipLayer implements Layer {
       let fl = 0.84 + 0.08 * Math.sin(t * 1.3) + 0.05 * Math.sin(t * 7.9) - (Math.sin(t * 5.7) * Math.sin(t * 3.1) > 0.9 - 0.06 * esc ? 0.4 : 0) - (Math.random() < 0.025 * esc ? 0.35 : 0);
       if (r.outage > 0) fl *= r.outage > 0.45 ? (Math.random() < 0.12 ? 0.6 : 0.06) : 1 - r.outage;
       const pulse = 0.75 + 0.25 * Math.sin(t * 1.7);
-      L.u.flicker.value = fl; lightUniforms.uFlick.value = fl; L.u.time.value = t;
+      // The point lights carry the corpse-light signature at game zoom: they run a little hotter than the hull's emissives.
+      L.u.flicker.value = fl; lightUniforms.uFlick.value = fl * 1.6; L.u.time.value = t;
       L.u.pulse.value = pulse; L.u.dead.value = 0.5 + 0.15 * esc; L.u.ember.value = 0.35 + 0.3 * esc + 0.1 * Math.sin(t * 2.1);
       (m.lights.material as THREE.ShaderMaterial).uniforms.uAlarm.value = r.outage > 0.45 ? 0 : 0.3 + esc * 0.35;
       if (m.edges) (m.edges.material as THREE.LineBasicMaterial).opacity = 0.55 * pulse * (0.7 + 0.3 * fl);
@@ -347,7 +348,7 @@ export class ShipLayer implements Layer {
         e.glow.add(v.x, v.y + 1, v.z, 0, 3.2 * s * fl, 3.2 * s * fl, rgb(FIRE[2]), 0.35 * fl, Shape.Soft);
         for (let k = 0; k < 5; k++) {
           const q = (t * 0.32 + k / 5 + i * 0.23) % 1, sz = (2.5 + q * 13) * s;
-          e.dark.add(v.x + d.x * q * 70 * s + Math.sin(i * 2.1 + q * 5) * 3 * s, v.y + 3 + q * 12, v.z + d.z * q * 70 * s, q * 2 + i, sz, sz * 0.8, rgb('#1d1d20'), (1 - q) * Math.min(1, q * 6) * 0.42, DarkShape.Soft);
+          e.dark.add(v.x + d.x * q * 70 * s + Math.sin(i * 2.1 + q * 5) * 3 * s, v.y + 3 + q * 12, v.z + d.z * q * 70 * s, q * 2 + i, sz, sz * 0.8, rgb('#3a3838'), (1 - q) * Math.min(1, q * 6) * 0.5, DarkShape.Soft);
         }
       }
       r.smokeAcc += dt * nw * (0.5 + 0.5 * esc);

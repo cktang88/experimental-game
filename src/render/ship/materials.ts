@@ -273,12 +273,15 @@ function ghostPatches(mats: Record<MatKey, THREE.Material>, u: Livery['u']) {
        float fl=step(0.96,fract(sin(floor(uGTime*8.0)+h*91.0)*43758.5));
        diffuseColor.rgb*=h<uDead?fl*0.7:1.0;}`);
   });
-  // Old wounds smoulder: the densest soot of each scorch scar glows like banked embers.
+  // Old wounds smoulder: cinders (fine speckles, never a flat blob) in the densest soot of each scorch
+  // scar, each one breathing on its own.
   addPatch(mats.scorch, 'ghostember', (sh) => {
     sh.uniforms.uEmber = u.ember; sh.uniforms.uGTime = u.time;
-    sh.fragmentShader = 'uniform float uEmber;uniform float uGTime;\n' + sh.fragmentShader.replace('#include <alphamap_fragment>', `#include <alphamap_fragment>
-      {float cov=texture2D(alphaMap,vAlphaMapUv).g;float e=smoothstep(0.72,1.0,cov)*uEmber*(0.75+0.25*sin(uGTime*2.3+vAlphaMapUv.x*17.0));
-       diffuseColor.rgb=vec3(1.0,0.3,0.07)*e*1.3;}`);
+    sh.fragmentShader = 'uniform float uEmber;uniform float uGTime;\n' + GHOST_GLSL + sh.fragmentShader.replace('#include <alphamap_fragment>', `#include <alphamap_fragment>
+      {vec2 uv=vAlphaMapUv;float cov=texture2D(alphaMap,uv).g;
+       float sp=gdVN(uv*38.0)*0.7+gdVN(uv*90.0)*0.3,c=smoothstep(0.66,0.8,sp)*smoothstep(0.35,0.8,cov);
+       float br=0.6+0.4*sin(uGTime*(1.5+gdH2(floor(uv*38.0))*3.0)+gdH2(floor(uv*38.0)+5.0)*6.28);
+       diffuseColor.rgb=vec3(1.0,0.32,0.08)*c*br*uEmber*2.2;}`);
   });
 }
 
