@@ -14,7 +14,7 @@ import { settings as uiSettings, onSettings } from './ui/settings';
 import { wireAudioSettings } from './ui/sound';
 import {
   newRun, loadRun, saveRun, clearSave, maxHp, dv, mods, level, bossLevel, heal, healAmount, repairQuote, buyRepair, partChoices, relicChoices, addRelic, addSection,
-  nextSectionCost, enterNextSector, deathGhost, changeBuild, runRng, type RunState,
+  nextSectionCost, enterNextSector, deathGhost, changeBuild, runRng, floorOf, type RunState,
 } from './game/run';
 import { NODE_INFO, reachable, type NodeType } from './game/map';
 import { fetchGhosts, submitGhost, chooseGhost, aiGhost, registryOnline, sanitizeName, type Ghost } from './game/ghosts';
@@ -313,6 +313,7 @@ function fight(enc: Encounter, after: () => void, ghost?: Ghost) {
   startCombat({
     enc, level: enc.kind === 'boss' ? bossLevel(r) : level(r, enc.kind === 'elite'), sector: r.sector, build: r.build, hp: r.hp, relics: r.relics, mods: mods(r), ghost, cheatDeathAvailable: !r.jumpUsed,
     overdrive: HULLS[r.hull].overdrive, heat: heatFx(r.heat), odCharge: r.odStart,
+    floor: enc.kind === 'boss' ? 10 : floorOf(r), seed: r.seed,
   });
   onCombatDone = (o) => {
     const fs = S.stats, rs = r.stats;

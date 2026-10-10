@@ -84,13 +84,14 @@ class GradeEffect extends Effect {
   }
 }
 
-/** Per-sector grades, indexed like THEMES. Lift tints the shadows, gain the highlights. */
+/** Per-biome grades, indexed like THEMES (S.theme). Lift tints the shadows, gain the highlights. */
 const GRADES: { lift: [number, number, number]; gain: [number, number, number]; gam: number; sat: number }[] = [
-  { lift: [0.0, 0.006, 0.016], gain: [1.02, 1.0, 0.96], gam: 1.0, sat: 1.06 }, // Ashport: cold shadows, sodium highlights
-  { lift: [0.014, 0.006, 0.0], gain: [1.06, 0.99, 0.88], gam: 1.0, sat: 1.0 }, // Rust Flats: warm dust
-  { lift: [0.0, 0.01, 0.022], gain: [0.94, 1.0, 1.08], gam: 1.02, sat: 0.9 }, // Glacier Yard: steel blue
-  { lift: [0.01, 0.006, 0.006], gain: [1.03, 0.97, 0.94], gam: 0.98, sat: 0.82 }, // Ash Belt: grey ash
-  { lift: [0.012, 0.0, 0.02], gain: [1.02, 0.95, 1.06], gam: 1.0, sat: 1.16 }, // Neon Sprawl
+  { lift: [0.0, 0.006, 0.016], gain: [1.02, 1.0, 0.96], gam: 1.0, sat: 1.06 }, // Sodium City: cold shadows, sodium highlights
+  { lift: [0.0, 0.008, 0.02], gain: [0.99, 1.0, 1.02], gam: 1.0, sat: 1.0 }, // Iron Harbour: sea-cold
+  { lift: [0.004, 0.006, 0.012], gain: [1.0, 1.0, 0.99], gam: 1.0, sat: 0.95 }, // Kestrel Airbase: neutral night
+  { lift: [0.014, 0.006, 0.0], gain: [1.06, 0.99, 0.88], gam: 1.0, sat: 1.0 }, // Glass Desert: warm dust
+  { lift: [0.0, 0.01, 0.022], gain: [0.94, 1.0, 1.08], gam: 1.02, sat: 0.9 }, // White Range: steel blue
+  { lift: [0.0, 0.008, 0.006], gain: [0.98, 1.02, 0.96], gam: 1.0, sat: 0.95 }, // Deepwood: green-black
 ];
 
 /** Auto-pick a tier: low on software GL, phones and very dense small screens. Overridable with ?quality= or localStorage gd.quality. */

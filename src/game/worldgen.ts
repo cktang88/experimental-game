@@ -1,26 +1,38 @@
-// World generation: the night city scrolling beneath the fight, plus the cloud deck.
-// Owned by the city/world agent. Combat calls seedDecor() on start, updateBg(dt) every tick and
-// worldBlast() for every ground explosion; it returns scrap to spill (destroyed buildings pay out).
+// World generation: the biome scrolling far beneath the fight (night city, harbour, airbase, desert, mountains,
+// forest), plus the cloud deck. Owned by the city/world agent. Combat calls seedDecor() on start, updateBg(dt) every
+// tick and worldBlast() for every ground explosion; it returns scrap to spill (destroyed structures pay out).
 //
 // COORDINATES
-//  Everything here is in FIELD units (see field.ts). The city is generated in rows ("chunks") in a
-//  fixed CITY space: field y = cy + S.scrollY, so a building's cy never changes while it scrolls.
+//  Everything here is in FIELD units (see field.ts). The world is generated in rows ("chunks") in a fixed CITY
+//  space: field y = cy + S.scrollY, so a structure's cy never changes while it scrolls.
 //  Decor.x / Decor.y are kept in field space every tick for gameplay code; the renderer works from cy.
 //  Rows are generated upward (decreasing cy) and dropped once they scroll past the bottom edge.
 //  Heights (hgt, tier.z0, tier.hgt) are field units too; the renderer multiplies everything by
 //  engine.groundScale.
 //
 // SCALE
-//  The dreadnought is an aircraft carrier (~330 m) seen from far above: a city block is a small
-//  fraction of its hull and buildings read as tiny lit rectangles. The fillers below are authored in
-//  DESIGN units (a block is ~100-200 design units, FLOOR is one storey) and every row is shrunk by
-//  CITY_K into field units about the field's centre line as it is generated (see shrinkRow).
-//  Hit points and scrap values are computed from the design size, so a building takes as many bomb
-//  hits as before; there are just many more of them under every blast (cityPay() rebalances that).
+//  The dreadnought is an aircraft carrier (~330 m) seen from far above: a city block is a small fraction of its hull
+//  and buildings read as tiny lit rectangles. The city fillers below are authored in DESIGN units (a block is
+//  ~100-200 design units, FLOOR is one storey) and every row is shrunk by CITY_K into field units about the field's
+//  centre line (see shrinkRow). The other biomes (biomegen.ts) are authored in field units directly; their
+//  structures still get hit points and scrap from their design size (fb()).
+//
+// BIOMES (biomes.ts, terrain.ts, biomegen.ts)
+//  S.theme is the biome of the fight; CITY.biomeB (or -1) is the biome it crosses into at city y CITY.edge
+//  (a coastline, a desert edge, a snowline). The ground itself is analytic (terrain.ts) and baked per row into a
+//  grid the ground shader samples; structures, roads, lights and moving traffic are generated per row and masked by
+//  the biome weight, so the edge is a ragged blend, not a cut. When the ship crosses the edge S.theme becomes the
+//  second biome (post grade and the banner follow).
 import { rnd, pick, clamp } from '../util/rng';
 import { FIELD_W as W, FIELD_H as H } from './field';
-import { S, groundBlast } from './combat';
+import { S, groundBlast, setBanner } from './combat';
 import { addFx, boomFx, V } from './vfx';
+import { Biome, BIOMES, BIOME_COUNT, biomeName } from './biomes';
+import {
+  BIO, TERR, FIRE, Burn, BURN_T, bakeTerrain, terrainWant, terrainLag, resetTerrain, resetFire, clearFireRows, sampleCy, weightB, weightOf, biomeAtCy,
+  setNoiseSeed, hash2, fireCell, fireCellCy, fireCellX, igniteCell, type SurfaceKind, type TerrainInfo, type TerrainSample,
+} from './terrain';
+import { GEN, setPieceIn, resetBiomeGen } from './biomegen';
 
 /** Field units per design unit: how far below the ship the city is shrunk. */
 export const CITY_K = 0.25;
@@ -28,28 +40,43 @@ export const CITY_K = 0.25;
 export const FLOOR = 4.4;
 export const STOREY = FLOOR * CITY_K;
 /**
- * Every blast now covers about 1/CITY_K^2 times as many buildings, each still paying 1-4 scrap.
- * Combat multiplies worldBlast()'s scrap by cityPay() so city destruction pays what it did at the old scale.
+ * Every blast covers many small structures, each still paying 1-4 scrap. Combat multiplies worldBlast()'s scrap by
+ * cityPay(): the pay of the biome the last blast landed in (BIOMES[b].pay, tuned per biome against
+ * tests/unit/economy.test.ts so every biome pays about what the night city does).
  */
-export const CITY_PAY = [0.12, 0.11, 0.095, 0.08, 0.3];
-/** CITY_PAY for the city on screen now (tuned per theme against tests/unit/economy.test.ts). */
-export const cityPay = () => CITY_PAY[CITY.theme % CITY_PAY.length];
-/** City generated across this x span (wider than the field: the top of the view is wider). */
+export const cityPay = () => CITY.payK;
+/** World generated across this x span (wider than the field: the top of the view is wider). */
 export const X0 = -330, X1 = W + 330;
 /** The same span in design units, and the design <-> field mapping (about the field's centre line). */
 const DX0 = W / 2 + (X0 - W / 2) / CITY_K, DX1 = W / 2 + (X1 - W / 2) / CITY_K;
-const fx = (dx: number) => W / 2 + (dx - W / 2) * CITY_K;
-const toDX = (x: number) => W / 2 + (x - W / 2) / CITY_K;
+export const fx = (dx: number) => W / 2 + (dx - W / 2) * CITY_K;
+export const toDX = (x: number) => W / 2 + (x - W / 2) / CITY_K;
 const GEN_TOP = -380, DROP_BOTTOM = H + 90;
 /** A generated chunk holds whole block rows until it is at least this tall (field units). */
 const CHUNK_MIN = 120;
 
-export type Surface = 'walk' | 'plaza' | 'grass' | 'park' | 'lot' | 'gravel' | 'yard' | 'dock' | 'rail' | 'ash' | 'snow' | 'dirt' | 'bund';
-export const SURFACES: Surface[] = ['walk', 'plaza', 'grass', 'park', 'lot', 'gravel', 'yard', 'dock', 'rail', 'ash', 'snow', 'dirt', 'bund'];
-export type BKind = 'tower' | 'mid' | 'low' | 'house' | 'warehouse' | 'tank' | 'chimney' | 'flare' | 'cooler' | 'ruin' | 'silo';
-export type PropKind = 'tree' | 'container' | 'crane' | 'railcar' | 'loco' | 'pipe' | 'ship' | 'searchlight' | 'lamp' | 'fire' | 'rubble' | 'hulk' | 'pylon';
-/** Facade styles (renderer maps to textures and window patterns). */
-export const enum Style { Brick = 0, Concrete = 1, Panel = 2, Glass = 3, GlassTeal = 4, Industrial = 5, House = 6, Charred = 7, Metal = 8 }
+export type Surface =
+  | 'walk' | 'plaza' | 'grass' | 'park' | 'lot' | 'gravel' | 'yard' | 'dock' | 'rail' | 'ash' | 'snow' | 'dirt' | 'bund'
+  | 'runway' | 'taxi' | 'apron' | 'concrete' | 'mark' | 'pitch' | 'sand' | 'road' | 'snowroad' | 'basin' | 'berm' | 'pad' | 'deck';
+export const SURFACES: Surface[] = [
+  'walk', 'plaza', 'grass', 'park', 'lot', 'gravel', 'yard', 'dock', 'rail', 'ash', 'snow', 'dirt', 'bund',
+  'runway', 'taxi', 'apron', 'concrete', 'mark', 'pitch', 'sand', 'road', 'snowroad', 'basin', 'berm', 'pad', 'deck',
+];
+export type BKind =
+  | 'tower' | 'mid' | 'low' | 'house' | 'warehouse' | 'tank' | 'chimney' | 'flare' | 'cooler' | 'ruin' | 'silo'
+  | 'crane' | 'ship' | 'cargo' | 'hangar' | 'plane' | 'dome' | 'igloo' | 'rocket' | 'gantry' | 'wall' | 'dam' | 'bridge'
+  | 'cabin' | 'lighthouse' | 'pump' | 'mast' | 'stand';
+export type PropKind = 'tree' | 'container' | 'crane' | 'railcar' | 'loco' | 'pipe' | 'ship' | 'searchlight' | 'lamp' | 'fire' | 'rubble' | 'hulk' | 'pylon' | 'logs' | 'palm';
+/** Facade styles (renderer maps them to window patterns). */
+export const enum Style {
+  Brick = 0, Concrete = 1, Panel = 2, Glass = 3, GlassTeal = 4, Industrial = 5, House = 6, Charred = 7, Metal = 8,
+  /** Desert mud brick: a few small warm windows. */ Adobe = 9,
+  /** Hangar: dark, a lit strip along the door side. */ Hangar = 10,
+  /** Plain pale shell, no windows (radomes, igloos, rockets). */ Shell = 11,
+  /** Ship hull: dark, a row of deck lights. */ Hull = 12,
+}
+/** Geometry a building kind is drawn with (renderer): 0 box, 1 cylinder, 2 dome. */
+export const bGeo = (k: BKind) => (k === 'tank' || k === 'silo' || k === 'chimney' || k === 'flare' || k === 'cooler' || k === 'rocket' || k === 'lighthouse') ? 1 : (k === 'dome' || k === 'igloo') ? 2 : 0;
 
 export interface Decor {
   type: 'bldg' | 'crater';
@@ -74,20 +101,52 @@ export interface Bldg extends Decor {
   /** CITY.time the collapse started (-1 standing). */
   collapseT: number;
   dead: boolean; chunk: Chunk;
-  /** Rotation in radians about the vertical axis (houses, tanks). */
+  /** Rotation in radians about the vertical axis (houses, tanks, ships). Tier offsets rotate with it. */
   rot: number;
-  /** Renderer bookkeeping: first instance index of its tiers and how many (-1 / 0 when not drawn). */
-  ri: number; rn: number;
+  /** Colour override (hex) instead of the style's tint: containers, hulls, radomes. */
+  tint?: string;
+  /** Snow (1) or sand (0.5) settled on the roof. */
+  roof: number;
+  /** Fuel: when it collapses it goes up in a fireball and a chain blast of this many times its size (0 none). */
+  fuel: number;
+  /** Ground fire it leaves (terrain.ts Burn): burning oil, a fuel spill. */
+  spill: number;
+  /** Renderer bookkeeping: geometry batch, first instance index of its tiers and how many (-1 / 0 when not drawn). */
+  rg: number; ri: number; rn: number;
 }
 export interface Crater extends Decor { type: 'crater'; born: number }
 export interface Pad { x0: number; y0: number; x1: number; y1: number; s: Surface }
 /** dir 0: avenue along the scroll (vertical on screen); 1: cross street. */
 export interface Road { x0: number; y0: number; x1: number; y1: number; dir: 0 | 1; lanes: number; major: boolean }
+/** A straight strip at any angle (country roads, runway markings, pipelines, walls on the ground). */
+export interface Seg { x0: number; cy0: number; x1: number; cy1: number; w: number; s: Surface }
 export interface Prop { k: PropKind; x: number; cy: number; w: number; d: number; h: number; rot: number; v: number; on?: Bldg }
 export interface Water { x0: number; y0: number; x1: number; y1: number }
+/**
+ * A point light on the ground. c: colour (LC), k: kind (0 lamp that blacks out, 2 always on, 3 blink,
+ * 6 sequenced strobe running along p 0..1, 7 rotating beacon alternating white / teal), p: phase.
+ */
+export interface WLight { x: number; cy: number; h: number; s: number; c: number; a: number; k: number; p: number; b?: Bldg }
+/** Light colours (renderer palette): sodium, white, amber, taxi blue, teal-green, warm window, cold flood, fire orange. */
+export const enum LC { Sodium = 0, White = 1, Amber = 2, Blue = 3, Teal = 4, Warm = 5, Flood = 6, Fire = 7 }
+/**
+ * Something that moves on its own (drawn per frame by the renderer from CITY.time): boats with wakes, convoys,
+ * cars. path: 0 straight along angle a (field radians, 0 = +x, PI/2 = down the screen), 1 desert highway,
+ * 2 mountain valley road, 3 forest river, 4 forest road (x follows the path, cy moves at v). Moves v field units/s
+ * from (x, cy) at CITY.time t0 (path movers keep x's offset from the path).
+ */
+export interface Mover {
+  k: 'ship' | 'tug' | 'boat' | 'convoy' | 'car' | 'barge';
+  x: number; cy: number; t0: number; v: number; path: number; a: number;
+  /** Hull length (field units) or vehicles in a convoy. */
+  len: number; n: number; seed: number;
+}
+/** A rectangle of a known surface, for terrain queries (runways, docks, roads, built-up blocks). */
+export interface ZoneRect { x0: number; y0: number; x1: number; y1: number; s: SurfaceKind }
 export interface Chunk {
   id: number; cy0: number; cy1: number; theme: number;
   bldgs: Bldg[]; pads: Pad[]; roads: Road[]; props: Prop[]; water: Water[];
+  segs: Seg[]; lights: WLight[]; movers: Mover[]; zones: ZoneRect[];
 }
 
 type Zone = 'water' | 'docks' | 'harbor' | 'down' | 'core' | 'mid' | 'park' | 'refinery' | 'tanks' | 'works' | 'rail' | 'yard' | 'suburb' | 'ruins' | 'neon' | 'housing';
@@ -103,14 +162,23 @@ export const CITY = {
   gen: 0,
   /** World clock (seconds); drives every city animation and state transition. */
   time: 0,
-  theme: 0,
+  /** Biome under the ship now (S.theme follows it), the biome of the fight's start, and the one it crosses into. */
+  theme: 0, biomeA: 0 as Biome, biomeB: -1 as Biome | -1,
+  /** City y of the biome edge (BIO.edge), and whether the ship has crossed it. */
+  edge: -1e9, crossed: false,
+  /** Scrap multiplier of the last blast's biome (cityPay()). */
+  payK: BIOMES[0].pay,
+  /** Per-fight seed of every analytic field (terrain.ts). */
+  seed: 1,
   chunks: [] as Chunk[],
   craters: [] as Crater[],
   /** Buildings whose state changed since the renderer last looked. */
   dirty: [] as Bldg[],
   /** Buildings currently burning or smouldering (for fx). */
   burning: [] as Bldg[],
+  /** Street plan of the night city (null when no city is on the ground). */
   plan: null as Plan | null,
+  seeded: false,
   /** Camera height in world units and ground scale, set by the renderer (parallax of clouds). */
   camH: 3038, groundK: 1.65,
   /**
@@ -120,6 +188,8 @@ export const CITY = {
   project: (x: number, y: number, _alt: number, out: { x: number; y: number }) => { out.x = x; out.y = y; return out; },
   nextCy: 0, nextId: 1,
   pending: [] as Pending[],
+  /** Rows since the last set piece, per biome generator (biomegen.ts). */
+  sinceSet: 0,
 };
 
 /**
@@ -147,50 +217,27 @@ function blackout(x: number, y: number, rad: number) {
   }
 }
 
-/* ---------------- plan: avenues, columns and zones per theme ---------------- */
-function makePlan(theme: number): Plan {
+/* ---------------- plan: avenues, columns and zones of the night city ---------------- */
+function makePlan(): Plan {
   const cols: Col[] = [], aves: Ave[] = [];
-  const wide = theme === 1 ? [190, 300] : theme === 3 ? [150, 210] : theme === 4 ? [110, 170] : [130, 200];
   let x = DX0 - 40, n = 0;
-  const coast = theme === 0 ? toDX(rnd(330, 460)) : -9999;
   while (x < DX1 + 40) {
     const major = n % 3 === 0;
-    const aw = major ? (theme === 4 ? 34 : 30) : theme === 3 ? 16 : 20;
-    if (!(theme === 0 && x + aw < coast)) aves.push({ x0: x, x1: x + aw, major });
+    const aw = major ? 32 : 20;
+    aves.push({ x0: x, x1: x + aw, major });
     x += aw;
-    const bw = rnd(wide[0], wide[1]);
+    const bw = rnd(130, 200);
     cols.push({ x0: x, x1: x + bw, zone: 'down' });
     x += bw; n++;
   }
-  // Zones per column.
-  const mid = W / 2;
-  cols.forEach((c, i) => {
-    // Zones are laid out across the screen (field units), so the view keeps its composition.
-    const cx = (c.x0 + c.x1) / 2, dc = (Math.abs(cx - mid) * CITY_K) / (W / 2);
-    switch (theme) {
-      case 0: c.zone = c.x1 < coast ? 'water' : c.x0 < coast + 40 ? 'docks' : cx < coast + 700 ? 'harbor' : dc < 0.45 ? 'core' : 'down'; break;
-      case 1: c.zone = i % 3 === 1 ? 'tanks' : dc < 0.25 ? 'refinery' : i % 3 === 2 ? 'works' : 'refinery'; break;
-      case 2: c.zone = Math.abs(cx - mid) < 560 ? 'rail' : dc < 0.75 ? 'yard' : 'housing'; break;
-      case 3: c.zone = dc < 0.3 ? 'ruins' : 'suburb'; break;
-      default: c.zone = dc < 0.55 ? 'neon' : 'core';
-    }
+  // Zones are laid out across the screen (field units), so the view keeps its composition: a glittering core
+  // down the middle with a neon strip, office districts, mid-rise housing, then low suburbs at the edges.
+  const mid = W / 2, neonSide = Math.random() < 0.5 ? -1 : 1;
+  cols.forEach((c) => {
+    const cx = (c.x0 + c.x1) / 2, sd = ((cx - mid) * CITY_K) / (W / 2), dc = Math.abs(sd);
+    c.zone = dc < 0.16 ? 'core' : dc < 0.36 ? (Math.sign(sd) === neonSide && dc < 0.32 ? 'neon' : 'core') : dc < 0.62 ? 'down' : dc < 0.85 ? (Math.random() < 0.25 ? 'park' : 'mid') : 'suburb';
   });
-  if (theme === 0) {
-    // Fill the water: one wide water column ending at the coast.
-    const first = cols.findIndex((c) => c.zone !== 'water');
-    if (first > 0) { cols.splice(0, first, { x0: DX0 - 60, x1: cols[first].x0, zone: 'water' }); }
-  }
-  if (theme === 2) {
-    // The rail yard is one wide corridor without avenues through it.
-    const rc = cols.filter((c) => c.zone === 'rail');
-    if (rc.length) {
-      const x0 = rc[0].x0, x1 = rc[rc.length - 1].x1;
-      for (let i = aves.length - 1; i >= 0; i--) if (aves[i].x0 > x0 && aves[i].x1 < x1) aves.splice(i, 1);
-      const at = cols.indexOf(rc[0]);
-      cols.splice(at, rc.length, { x0, x1, zone: 'rail' });
-    }
-  }
-  return { theme, cols, aves, coast };
+  return { theme: Biome.City, cols, aves, coast: -9999 };
 }
 
 /**
@@ -203,7 +250,8 @@ const SCROLLED = Object.defineProperty({}, 'y', { get(this: Decor) { return this
 let seedCounter = 1;
 const nextSeed = () => ((seedCounter = (seedCounter * 1103515245 + 12345) >>> 0) % 100000) / 100000 + Math.random() * 1e-3;
 
-function bldg(ch: Chunk, kind: BKind, x0: number, y0: number, x1: number, y1: number, tiers: Tier[], style: Style, o: Partial<Bldg> = {}): Bldg {
+/** A building in DESIGN units (shrunk with its row). */
+export function bldg(ch: Chunk, kind: BKind, x0: number, y0: number, x1: number, y1: number, tiers: Tier[], style: Style, o: Partial<Bldg> = {}): Bldg {
   const w = x1 - x0, h = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   let top = 0; for (const t of tiers) top = Math.max(top, t.z0 + t.hgt);
   const floors = Math.max(1, Math.round(top / FLOOR));
@@ -212,17 +260,36 @@ function bldg(ch: Chunk, kind: BKind, x0: number, y0: number, x1: number, y1: nu
     type: 'bldg' as const, kind, x: cx, cy, w, h, r: Math.hypot(w, h) / 2, hgt: top, tiers, style, seed: nextSeed(), floors,
     lit: rnd(0.25, 0.7), keepLit: Math.random() < 0.12, neon: 0,
     hp: maxHp, maxHp, value: scrapValue(kind, maxHp),
-    fire: 0, burnT: -1, collapseT: -1, dead: false, chunk: ch, rot: 0, ri: -1, rn: 0, ...o,
+    fire: 0, burnT: -1, collapseT: -1, dead: false, chunk: ch, rot: 0, roof: 0, fuel: 0, spill: 0, rg: 0, ri: -1, rn: 0, ...o,
   });
+  if (o.fuel === undefined && (kind === 'tank' || kind === 'silo' || kind === 'flare')) b.fuel = 1;
   ch.bldgs.push(b); S.decor.push(b);
   return b;
 }
 /** Scrap a collapsed building pays (1-4, bigger pays more); combat scales it by carnage. */
 export function scrapValue(kind: BKind, maxHp: number) {
-  if (kind === 'tank') return 3;
+  if (kind === 'tank' || kind === 'rocket') return 3;
   return clamp(Math.round(maxHp / 60), 1, 4);
 }
-const tier = (w: number, h: number, z0: number, hgt: number, ox = 0, oy = 0): Tier => ({ ox, oy, w, h, z0, hgt });
+export const tier = (w: number, h: number, z0: number, hgt: number, ox = 0, oy = 0): Tier => ({ ox, oy, w, h, z0, hgt });
+
+function shrinkBldg(b: Bldg) {
+  const k = CITY_K;
+  b.x = fx(b.x); b.cy *= k;
+  b.w *= k; b.h *= k; b.r *= k; b.hgt *= k;
+  for (const t of b.tiers) { t.ox *= k; t.oy *= k; t.w *= k; t.h *= k; t.z0 *= k; t.hgt *= k; }
+}
+/**
+ * A structure in FIELD units (the other biomes): centre (x, cy), footprint w x h, height hgt, or explicit tiers
+ * (field units, offsets from the centre). Hit points and scrap come from its design size, like the city's.
+ */
+export function fb(ch: Chunk, kind: BKind, x: number, cy: number, w: number, h: number, hgt: number, style: Style, o: Partial<Bldg> = {}, tiers?: Tier[]): Bldg {
+  const k = CITY_K;
+  const td = (tiers ?? [tier(w, h, 0, hgt)]).map((t) => tier(t.w / k, t.h / k, t.z0 / k, t.hgt / k, t.ox / k, t.oy / k));
+  const b = bldg(ch, kind, toDX(x) - w / k / 2, cy / k - h / k / 2, toDX(x) + w / k / 2, cy / k + h / k / 2, td, style, o);
+  shrinkBldg(b);
+  return b;
+}
 
 /** Split [a, b] into pieces of roughly size s (at least 1). */
 function splits(a: number, b: number, s0: number, s1: number): number[] {
@@ -233,7 +300,7 @@ function splits(a: number, b: number, s0: number, s1: number): number[] {
 
 /** A lot with a building: picks massing from the zone. */
 function lotBuilding(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, y1: number, dens: number) {
-  const w = x1 - x0, h = y1 - y0, m = rnd(0.6, 1.8);
+  const w = x1 - x0, h = y1 - y0;
   if (w < 10 || h < 10) return;
   const fl = (a: number, b: number) => Math.round(rnd(a, b)) * FLOOR;
   let style: Style = pick([Style.Brick, Style.Concrete, Style.Panel, Style.Brick, Style.Concrete]);
@@ -279,7 +346,6 @@ function lotBuilding(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, 
     }
     default: tiers.push(tier(w, h, 0, fl(2, 6)));
   }
-  void m;
   const b = bldg(ch, kind, x0, y0, x1, y1, tiers, style);
   if (zone === 'neon') b.neon = Math.random() < 0.75 ? 1 + Math.floor(Math.random() * 4) : 0;
   if (zone === 'neon') b.lit = rnd(0.45, 0.85);
@@ -319,105 +385,11 @@ function fillPark(ch: Chunk, x0: number, y0: number, x1: number, y1: number) {
   if (Math.random() < 0.4) ch.props.push({ k: 'searchlight', x: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: 0, d: 0, h: 0, rot: rnd(0, 6.28), v: Math.random() });
 }
 
-function fillDocks(ch: Chunk, plan: Plan, x0: number, y0: number, x1: number, y1: number) {
-  // Quay along the coast with cranes; piers reach out over the water.
-  ch.pads.push({ x0, y0, x1, y1, s: 'dock' });
-  const qx = plan.coast;
-  for (let y = y0 + rnd(5, 20); y < y1 - 20; y += rnd(36, 60)) ch.props.push({ k: 'crane', x: qx + 10, cy: y, w: 14, d: 12, h: rnd(36, 46), rot: 0, v: Math.random() });
-  // Container stacks on the quay (each prop is a block of boxes: from up here they are coloured specks).
-  for (let y = y0 + 8; y < y1 - 12; y += 17) for (let x = qx + 34; x < x1 - 16; x += 30) if (Math.random() < 0.7)
-    ch.props.push({ k: 'container', x, cy: y, w: 26, d: 12, h: Math.floor(rnd(1, 4.4)) * 2.8, rot: 0, v: Math.random() });
-  for (let i = 0; i < 4; i++) ch.props.push({ k: 'lamp', x: rnd(qx + 4, x1 - 4), cy: rnd(y0, y1), w: 0, d: 0, h: 9, rot: 0, v: 1 });
-}
-
-function fillWaterRow(ch: Chunk, plan: Plan, y0: number, y1: number) {
-  ch.water.push({ x0: DX0 - 100, y0, x1: plan.coast, y1 });
-  // A pier with a moored ship every few rows.
-  if (Math.random() < 0.55) {
-    const py = rnd(y0 + 10, y1 - 20), len = rnd(160, 300);
-    ch.pads.push({ x0: plan.coast - len, y0: py, x1: plan.coast, y1: py + 14, s: 'dock' });
-    for (let x = plan.coast - len + 10; x < plan.coast - 10; x += rnd(40, 70)) ch.props.push({ k: 'lamp', x, cy: py + 7, w: 0, d: 0, h: 6, rot: 0, v: 1 });
-    if (Math.random() < 0.8) {
-      const sl = rnd(110, Math.min(220, len)), sx = plan.coast - 12 - sl / 2;
-      const side = py - 4 - 14 > y0 ? -1 : 1;
-      ch.props.push({ k: 'ship', x: sx, cy: side < 0 ? py - 13 : py + 27, w: sl, d: 22, h: 6, rot: 0, v: Math.random() });
-    }
-  }
-}
-
-function fillRefinery(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, y1: number) {
-  if (zone === 'tanks') {
-    // Tank farm: big storage tanks inside bunds, chains of secondaries when hit.
-    ch.pads.push({ x0, y0, x1, y1, s: 'bund' });
-    const s = rnd(48, 70), cnt = Math.floor((x1 - x0) / (s + 8)), cntY = Math.max(1, Math.floor((y1 - y0) / (s + 8)));
-    const ox = x0 + ((x1 - x0) - cnt * (s + 8)) / 2 + 4 + s / 2, oy = y0 + ((y1 - y0) - cntY * (s + 8)) / 2 + 4 + s / 2;
-    for (let i = 0; i < cnt; i++) for (let j = 0; j < cntY; j++) {
-      if (Math.random() < 0.12) continue;
-      const d = s * rnd(0.8, 1), cx = ox + i * (s + 8), cy = oy + j * (s + 8);
-      const b = bldg(ch, 'tank', cx - d / 2, cy - d / 2, cx + d / 2, cy + d / 2, [tier(d, d, 0, d * rnd(0.35, 0.55))], Style.Metal);
-      b.r = d / 2; b.lit = 0;
-    }
-    return;
-  }
-  ch.pads.push({ x0, y0, x1, y1, s: zone === 'works' ? 'yard' : 'gravel' });
-  const r = Math.random();
-  if (zone === 'works' || r < 0.3) {
-    const xs = splits(x0 + 4, x1 - 4, 50, 90);
-    for (let i = 0; i < xs.length - 1; i++) {
-      const hh = rnd(0.45, 0.85) * (y1 - y0);
-      const b = bldg(ch, 'warehouse', xs[i] + 3, y0 + 6, xs[i + 1] - 3, y0 + 6 + hh, [tier(xs[i + 1] - xs[i] - 6, hh, 0, Math.round(rnd(2, 4)) * FLOOR)], Style.Industrial);
-      b.lit = rnd(0.05, 0.2);
-    }
-    for (let i = 0; i < 4; i++) ch.props.push({ k: 'lamp', x: rnd(x0, x1), cy: rnd(y0, y1), w: 0, d: 0, h: 10, rot: 0, v: 1 });
-    return;
-  }
-  // Process unit: columns, chimneys, a flare stack, pipe racks.
-  const n = Math.floor(rnd(3, 7));
-  for (let i = 0; i < n; i++) {
-    const cx = rnd(x0 + 14, x1 - 14), cy = rnd(y0 + 14, y1 - 14), d = rnd(6, 12);
-    bldg(ch, 'silo', cx - d / 2, cy - d / 2, cx + d / 2, cy + d / 2, [tier(d, d, 0, rnd(18, 50))], Style.Metal, { lit: 0 });
-  }
-  const nc = Math.floor(rnd(1, 3.5));
-  for (let i = 0; i < nc; i++) {
-    const cx = rnd(x0 + 20, x1 - 20), cy = rnd(y0 + 20, y1 - 20), d = rnd(7, 11);
-    bldg(ch, 'chimney', cx - d / 2, cy - d / 2, cx + d / 2, cy + d / 2, [tier(d, d, 0, rnd(70, 120))], Style.Metal, { lit: 0 });
-  }
-  if (Math.random() < 0.15) {
-    const cx = rnd(x0 + 20, x1 - 20), cy = rnd(y0 + 20, y1 - 20);
-    bldg(ch, 'flare', cx - 3, cy - 3, cx + 3, cy + 3, [tier(5, 5, 0, rnd(80, 110))], Style.Metal, { lit: 0, keepLit: true });
-  }
-  if (Math.random() < 0.35) {
-    const cx = rnd(x0 + 30, x1 - 30), cy = rnd(y0 + 30, y1 - 30), d = rnd(36, 50);
-    bldg(ch, 'cooler', cx - d / 2, cy - d / 2, cx + d / 2, cy + d / 2, [tier(d, d, 0, d * 1.25)], Style.Concrete, { lit: 0 });
-  }
-  for (let y = y0 + 8; y < y1 - 4; y += rnd(26, 50)) ch.props.push({ k: 'pipe', x: (x0 + x1) / 2, cy: y, w: x1 - x0 - 10, d: 4, h: 4, rot: 0, v: Math.random() });
-  for (let i = 0; i < 6; i++) ch.props.push({ k: 'lamp', x: rnd(x0, x1), cy: rnd(y0, y1), w: 0, d: 0, h: 12, rot: 0, v: 1 });
-}
-
-function fillRail(ch: Chunk, x0: number, y0: number, x1: number, y1: number) {
-  ch.pads.push({ x0, y0, x1, y1, s: 'rail' });
-  // Tracks every 11 units; trains sit on some of them (moving trains are animated by the renderer).
-  const tracks = Math.floor((x1 - x0 - 10) / 16);
-  for (let i = 0; i < tracks; i++) {
-    const tx = x0 + 10 + i * 16;
-    if (Math.random() < 0.5) {
-      let y = y0 + rnd(0, 30);
-      const moving = Math.random() < 0.25;
-      while (y < y1 - 18) {
-        ch.props.push({ k: 'railcar', x: tx, cy: y + 16, w: 5, d: 34, h: 4.2, rot: moving ? 1 : 0, v: Math.random() });
-        y += 37;
-        if (Math.random() < 0.08) break;
-      }
-    }
-  }
-  for (let y = y0; y < y1; y += 46) for (let x = x0 + 30; x < x1; x += 120) ch.props.push({ k: 'pylon', x, cy: y, w: 0, d: 0, h: 14, rot: 0, v: 1 });
-}
-
 function fillSuburb(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, y1: number) {
-  const burnt = zone === 'ruins' ? 0.75 : 0.4;
-  ch.pads.push({ x0, y0, x1, y1, s: 'ash' });
+  const burnt = zone === 'ruins' ? 0.75 : 0.06;
+  ch.pads.push({ x0, y0, x1, y1, s: zone === 'ruins' ? 'ash' : 'grass' });
   if (zone === 'ruins') {
-    // Burned-out downtown remnants: broken mid-rises, rubble, fires.
+    // Burned-out remnants: broken mid-rises, rubble, fires.
     const xs = splits(x0 + 3, x1 - 3, 44, 70), ys = splits(y0 + 3, y1 - 3, 44, 70);
     for (let i = 0; i < xs.length - 1; i++) for (let j = 0; j < ys.length - 1; j++) {
       if (Math.random() < 0.25) { ch.props.push({ k: 'rubble', x: (xs[i] + xs[i + 1]) / 2, cy: (ys[j] + ys[j + 1]) / 2, w: xs[i + 1] - xs[i] - 4, d: ys[j + 1] - ys[j] - 4, h: rnd(3, 7), rot: 0, v: Math.random() }); continue; }
@@ -426,70 +398,36 @@ function fillSuburb(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, y
       b.lit = b.style === Style.Charred ? 0 : rnd(0.02, 0.15);
     }
   } else {
-    // Terraces facing the street, back yards between.
+    // Terraces facing the street, back gardens between.
     const rowsY = [y0 + 12, y1 - 12];
     for (const ry of rowsY) for (let x = x0 + 22; x < x1 - 22; x += rnd(46, 60)) {
-      if (Math.random() < 0.2) { ch.props.push({ k: 'rubble', x, cy: ry, w: 28, d: 12, h: 2.5, rot: 0, v: Math.random() }); continue; }
       const w = rnd(30, 40), d = rnd(12, 16);
       const b = bldg(ch, 'house', x - w / 2, ry - d / 2, x + w / 2, ry + d / 2, [tier(w, d, 0, FLOOR * (Math.random() < 0.3 ? 2 : 1))], Math.random() < burnt ? Style.Charred : Style.House);
-      b.lit = b.style === Style.Charred ? 0 : rnd(0.1, 0.55);
-      for (let t = 0; t < 2; t++) if (Math.random() < 0.6) ch.props.push({ k: 'tree', x: x + rnd(-10, 10), cy: (y0 + y1) / 2 + rnd(-12, 12), w: rnd(4, 7), d: 0, h: rnd(4, 7), rot: 0, v: Math.random() < burnt ? 1 : Math.random() * 0.5 });
+      b.lit = b.style === Style.Charred ? 0 : rnd(0.15, 0.6);
+      for (let t = 0; t < 2; t++) if (Math.random() < 0.6) ch.props.push({ k: 'tree', x: x + rnd(-10, 10), cy: (y0 + y1) / 2 + rnd(-12, 12), w: rnd(4, 7), d: 0, h: rnd(4, 7), rot: 0, v: Math.random() * 0.5 });
     }
   }
-  const fires = zone === 'ruins' ? rnd(1, 4) : rnd(0, 1.6);
+  const fires = zone === 'ruins' ? rnd(1, 4) : 0;
   for (let i = 0; i < Math.floor(fires); i++) ch.props.push({ k: 'fire', x: rnd(x0 + 5, x1 - 5), cy: rnd(y0 + 5, y1 - 5), w: rnd(5, 10), d: 0, h: 0, rot: 0, v: Math.random() });
-  if (Math.random() < 0.3) ch.props.push({ k: 'hulk', x: rnd(x0 + 10, x1 - 10), cy: rnd(y0 + 10, y1 - 10), w: 10, d: 5, h: 3, rot: rnd(0, 6.28), v: Math.random() });
-}
-
-function fillYard(ch: Chunk, zone: Zone, x0: number, y0: number, x1: number, y1: number) {
-  ch.pads.push({ x0, y0, x1, y1, s: 'snow' });
-  if (zone === 'housing') {
-    const xs = splits(x0 + 3, x1 - 3, 40, 60);
-    for (let i = 0; i < xs.length - 1; i++) {
-      const b = bldg(ch, 'mid', xs[i] + 3, y0 + 8, xs[i + 1] - 3, y0 + 8 + rnd(14, 20), [tier(xs[i + 1] - xs[i] - 6, 16, 0, Math.round(rnd(4, 12)) * FLOOR)], pick([Style.Panel, Style.Concrete]));
-      b.h = b.tiers[0].h; b.lit = rnd(0.35, 0.7);
-    }
-    for (let i = 0; i < 5; i++) ch.props.push({ k: 'tree', x: rnd(x0 + 4, x1 - 4), cy: rnd(y0 + 30, y1 - 4), w: rnd(3, 5), d: 0, h: rnd(5, 9), rot: 0, v: 0.2 });
-    return;
-  }
-  // Freight yard: warehouses with containers stacked in the snow.
-  const r = Math.random();
-  if (r < 0.55) {
-    const xs = splits(x0 + 4, x1 - 4, 50, 90);
-    for (let i = 0; i < xs.length - 1; i++) {
-      const hh = rnd(0.4, 0.7) * (y1 - y0);
-      bldg(ch, 'warehouse', xs[i] + 3, y0 + 6, xs[i + 1] - 3, y0 + 6 + hh, [tier(xs[i + 1] - xs[i] - 6, hh, 0, Math.round(rnd(2, 3)) * FLOOR)], Style.Industrial, { lit: rnd(0.05, 0.3) });
-    }
-  }
-  for (let y = y0 + (r < 0.55 ? (y1 - y0) * 0.75 : 10); y < y1 - 8; y += 16) for (let x = x0 + 16; x < x1 - 16; x += 30) if (Math.random() < 0.6)
-    ch.props.push({ k: 'container', x, cy: y, w: 26, d: 11, h: Math.floor(rnd(1, 3.4)) * 2.8, rot: 0, v: Math.random() });
-  for (let i = 0; i < 3; i++) ch.props.push({ k: 'lamp', x: rnd(x0, x1), cy: rnd(y0, y1), w: 0, d: 0, h: 12, rot: 0, v: 1 });
 }
 
 /** Density along the city: a slowly wandering downtown core. */
-const densAt = (cy: number) => clamp(0.55 + 0.45 * Math.sin(cy * 0.0021 + CITY.nextId * 0.0) + 0.25 * Math.sin(cy * 0.0057 + 1.7), 0.15, 1.25);
+const densAt = (cy: number) => clamp(0.55 + 0.45 * Math.sin(cy * 0.0021) + 0.25 * Math.sin(cy * 0.0057 + 1.7), 0.15, 1.25);
 
-/** One row of blocks (design units) below design y cy1 into the chunk; returns the row's top. */
+/** One row of night-city blocks (design units) below design y cy1 into the chunk; returns the row's top. */
 function genBlockRow(ch: Chunk, plan: Plan, cy1: number) {
-  const th = plan.theme;
-  const blockD = th === 1 ? rnd(150, 230) : th === 3 ? rnd(96, 124) : th === 4 ? rnd(90, 140) : rnd(100, 160);
-  const streetW = th === 1 && Math.random() < 0.3 ? 0 : th === 3 ? 14 : th === 4 ? 20 : 18;
+  const blockD = rnd(100, 160), streetW = 18;
   const cy0 = cy1 - blockD - streetW;
-  const sx0 = th === 0 ? plan.coast : DX0 - 60;
-  if (streetW > 0) ch.roads.push({ x0: sx0, x1: DX1 + 60, y0: cy1 - streetW, y1: cy1, dir: 1, lanes: 2, major: false });
+  ch.roads.push({ x0: DX0 - 60, x1: DX1 + 60, y0: cy1 - streetW, y1: cy1, dir: 1, lanes: 2, major: false });
   for (const a of plan.aves) ch.roads.push({ x0: a.x0, x1: a.x1, y0: cy0, y1: cy1, dir: 0, lanes: a.major ? 4 : 2, major: a.major });
   const by0 = cy0, by1 = cy1 - streetW, dens = densAt(cy0 * CITY_K);
   for (const c of plan.cols) {
     const s = 4; // sidewalk width
-    if (c.zone === 'water') { fillWaterRow(ch, plan, cy0, cy1); continue; }
-    if (c.zone === 'rail') { fillRail(ch, c.x0, by0, c.x1, by1); if (streetW) ch.pads.push({ x0: c.x0, y0: by1, x1: c.x1, y1: cy1, s: 'rail' }); continue; }
-    ch.pads.push({ x0: c.x0, y0: by0, x1: c.x1, y1: by1, s: th === 2 ? 'snow' : th === 3 ? 'ash' : 'walk' });
+    ch.pads.push({ x0: c.x0, y0: by0, x1: c.x1, y1: by1, s: 'walk' });
     const x0 = c.x0 + s, x1 = c.x1 - s, y0 = by0 + s, y1 = by1 - s;
     switch (c.zone) {
-      case 'docks': fillDocks(ch, plan, c.x0, by0, c.x1, by1); break;
-      case 'refinery': case 'tanks': case 'works': fillRefinery(ch, c.zone, x0, y0, x1, y1); break;
-      case 'yard': case 'housing': fillYard(ch, c.zone, x0, y0, x1, y1); break;
       case 'suburb': case 'ruins': fillSuburb(ch, c.zone, x0, y0, x1, y1); break;
+      case 'park': if (Math.random() < 0.5) { fillPark(ch, x0, y0, x1, y1); break; } fillDense(ch, 'mid', x0, y0, x1, y1, dens * 0.7); break;
       default: fillDense(ch, c.zone, x0, y0, x1, y1, c.zone === 'core' || c.zone === 'neon' ? dens + 0.2 : dens * 0.8);
     }
   }
@@ -499,11 +437,7 @@ function genBlockRow(ch: Chunk, plan: Plan, cy1: number) {
 /** Shrinks a chunk generated in design units into field units (see SCALE in the header). */
 function shrinkRow(ch: Chunk) {
   const k = CITY_K;
-  for (const b of ch.bldgs) {
-    b.x = fx(b.x); b.cy *= k;
-    b.w *= k; b.h *= k; b.r *= k; b.hgt *= k;
-    for (const t of b.tiers) { t.ox *= k; t.oy *= k; t.w *= k; t.h *= k; t.z0 *= k; t.hgt *= k; }
-  }
+  for (const b of ch.bldgs) shrinkBldg(b);
   for (const p of ch.pads) { p.x0 = fx(p.x0); p.x1 = fx(p.x1); p.y0 *= k; p.y1 *= k; }
   for (const r of ch.roads) { r.x0 = fx(r.x0); r.x1 = fx(r.x1); r.y0 *= k; r.y1 *= k; }
   for (const w of ch.water) { w.x0 = fx(w.x0); w.x1 = fx(w.x1); w.y0 *= k; w.y1 *= k; }
@@ -520,29 +454,111 @@ function shrinkRow(ch: Chunk) {
   ch.props.length = n;
 }
 
-/** Generates the next chunk above the city: whole rows of blocks, at least CHUNK_MIN field units tall. */
-function genRow(plan: Plan) {
-  const ch: Chunk = { id: CITY.nextId++, cy0: 0, cy1: CITY.nextCy, theme: plan.theme, bldgs: [], pads: [], roads: [], props: [], water: [] };
-  const bottom = CITY.nextCy / CITY_K;
-  let top = bottom;
-  while ((bottom - top) * CITY_K < CHUNK_MIN) top = genBlockRow(ch, plan, top);
-  shrinkRow(ch);
-  ch.cy0 = top * CITY_K;
+/* ---------------- biome masks ---------------- */
+/** True when (x, cy) belongs to biome b (with a little dither so the edge frays instead of cutting). */
+export function inBiome(b: Biome, x: number, cy: number) {
+  if (BIO.b < 0) return BIO.a === b;
+  const w = weightOf(b, x, cy);
+  if (w >= 0.999) return true;
+  if (w <= 0.001) return false;
+  return w + (hash2(Math.floor(x * 0.37), Math.floor(cy * 0.37)) - 0.5) * 0.3 > 0.5;
+}
+const clipRoad = (r: Road, alongX: boolean, a: number, b: number): Road => (alongX ? { ...r, x0: r.x0 + a, x1: r.x0 + b } : { ...r, y0: r.y0 + a, y1: r.y0 + b });
+/** Remove the night city's rows where the ground belongs to the other biome (rects are clipped along their length). */
+function maskCity(ch: Chunk) {
+  const keepB = (b: Bldg) => inBiome(Biome.City, b.x, b.cy);
+  const gone = new Set<Bldg>();
+  ch.bldgs = ch.bldgs.filter((b) => (keepB(b) ? true : (gone.add(b), false)));
+  if (gone.size) S.decor = S.decor.filter((d) => !gone.has(d as Bldg));
+  ch.pads = ch.pads.filter((p) => inBiome(Biome.City, (p.x0 + p.x1) / 2, (p.y0 + p.y1) / 2));
+  ch.props = ch.props.filter((p) => inBiome(Biome.City, p.x, p.cy) && (!p.on || !gone.has(p.on)));
+  const roads: Road[] = [];
+  for (const r of ch.roads) {
+    const alongX = r.x1 - r.x0 > r.y1 - r.y0, len = alongX ? r.x1 - r.x0 : r.y1 - r.y0, step = 12;
+    let run0 = -1;
+    for (let t = 0; t <= len; t += step) {
+      const x = alongX ? r.x0 + t : (r.x0 + r.x1) / 2, cy = alongX ? (r.y0 + r.y1) / 2 : r.y0 + t;
+      const ok = weightOf(Biome.City, x, cy) > 0.5;
+      if (ok && run0 < 0) run0 = t;
+      if (!ok && run0 >= 0) { if (t - run0 > 4) roads.push(clipRoad(r, alongX, run0, t)); run0 = -1; }
+    }
+    if (run0 >= 0 && len - run0 > 4) roads.push(clipRoad(r, alongX, run0, len));
+  }
+  ch.roads = roads;
+}
+
+/** Fraction range of biome B weight over a band of city y (sampled across the generated width). */
+function bandWeight(cy0: number, cy1: number, out: { lo: number; hi: number }) {
+  out.lo = 1; out.hi = 0;
+  if (BIO.b < 0) { out.lo = out.hi = 0; return out; }
+  for (let cy = cy0; cy <= cy1 + 1; cy += Math.max(10, (cy1 - cy0) / 3)) for (let x = X0; x <= X1; x += 60) {
+    const w = weightB(x, cy); out.lo = Math.min(out.lo, w); out.hi = Math.max(out.hi, w);
+  }
+  return out;
+}
+const bw = { lo: 0, hi: 0 };
+
+/** Generates the next chunk above the world: whole block rows (city) or a fixed band, at least CHUNK_MIN tall. */
+function genRow() {
+  const ch: Chunk = { id: CITY.nextId++, cy0: 0, cy1: CITY.nextCy, theme: CITY.theme, bldgs: [], pads: [], roads: [], props: [], water: [], segs: [], lights: [], movers: [], zones: [] };
+  bandWeight(CITY.nextCy - 220, CITY.nextCy, bw);
+  const aHere = bw.lo < 0.999, bHere = bw.hi > 0.001;
+  const cityHere = (BIO.a === Biome.City && aHere) || (BIO.b === Biome.City && bHere);
+  if (cityHere && CITY.plan) {
+    const bottom = CITY.nextCy / CITY_K;
+    let top = bottom;
+    while ((bottom - top) * CITY_K < CHUNK_MIN) top = genBlockRow(ch, CITY.plan, top);
+    shrinkRow(ch);
+    ch.cy0 = top * CITY_K;
+    if (BIO.b >= 0) maskCity(ch);
+  } else ch.cy0 = CITY.nextCy - CHUNK_MIN;
   CITY.nextCy = ch.cy0;
-  clearDarkRows(ch.cy0, ch.cy1);
+  clearDarkRows(ch.cy0, ch.cy1); clearFireRows(ch.cy0, ch.cy1);
+  terrainWant(ch.cy0);
+  // The other biomes fill the same band (each masks its own content).
+  if (aHere) GEN[BIO.a](ch, ch.cy0, ch.cy1);
+  if (bHere && BIO.b >= 0) GEN[BIO.b as Biome](ch, ch.cy0, ch.cy1);
+  // Zones for terrain queries: the night city's blocks and streets.
+  if (cityHere) {
+    for (const r of ch.roads) ch.zones.push({ x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1, s: 'road' });
+  }
   CITY.chunks.push(ch);
   return ch;
 }
 
 /* ---------------- seeding and scrolling ---------------- */
+/** Biome edge for a fight that crosses into a second biome: the boundary reaches the ship about 20 s in. */
+const EDGE_CY = -760;
+/**
+ * Set the biomes on the ground. combat.ts (startCombat) sets S.theme / S.biomeB from the run; debug and screenshots
+ * can call this directly (window.__city.setBiome(a, b, edgeCy)).
+ */
+export function setBiome(a: number, b: number = -1, edge = EDGE_CY) {
+  S.theme = a; S.biomeB = b; edgeOnce = edge;
+  seedDecor();
+}
+let edgeOnce: number | null = null;
+
 export function seedDecor() {
   S.scrollY = 0;
   S.decor = [];
-  CITY.gen++; CITY.theme = S.theme; CITY.chunks = []; CITY.craters = []; CITY.dirty = []; CITY.burning = []; CITY.pending = [];
-  CITY.plan = makePlan(S.theme % 5);
+  const a = (((S.theme | 0) % BIOME_COUNT) + BIOME_COUNT) % BIOME_COUNT as Biome;
+  const b = S.biomeB >= 0 && S.biomeB !== a ? (S.biomeB % BIOME_COUNT) as Biome : -1;
+  CITY.gen++; CITY.theme = a; CITY.biomeA = a; CITY.biomeB = b; CITY.crossed = false; CITY.seeded = true;
+  CITY.edge = edgeOnce ?? EDGE_CY; edgeOnce = null;
+  CITY.chunks = []; CITY.craters = []; CITY.dirty = []; CITY.burning = []; CITY.pending = []; CITY.sinceSet = 3;
+  resetBiomeGen();
+  CITY.seed = (Math.random() * 1e9) | 0;
+  CITY.payK = BIOMES[a].pay;
+  setNoiseSeed(CITY.seed);
+  BIO.a = a; BIO.b = b; BIO.edge = b >= 0 ? CITY.edge : -1e9;
+  for (let i = 0; i < BIO.ph.length; i++) BIO.ph[i] = Math.random() * 100;
+  CITY.plan = a === Biome.City || b === Biome.City ? makePlan() : null;
   DARK.data.fill(0); DARK.ver++;
   CITY.nextCy = DROP_BOTTOM + 40;
-  while (CITY.nextCy > GEN_TOP) genRow(CITY.plan);
+  resetTerrain(CITY.nextCy); resetFire();
+  while (CITY.nextCy > GEN_TOP) genRow();
+  bakeTerrain(1e9);
   S.clouds = [];
   for (let i = 0; i < 9; i++) S.clouds.push(makeCloud(rnd(-200, H + 100)));
 }
@@ -553,12 +569,15 @@ function makeCloud(y: number): Cloud {
 }
 
 const proj = { x: 0, y: 0 };
+let fireTick = 0;
 export function updateBg(dt: number) {
   const dy = S.scroll * dt;
   S.scrollY += dy; CITY.time += dt;
-  if (!CITY.plan || CITY.theme !== S.theme) seedDecor();
-  const plan = CITY.plan!;
-  while (CITY.nextCy + S.scrollY > GEN_TOP) genRow(plan);
+  if (!CITY.seeded || CITY.theme !== S.theme) seedDecor();
+  while (CITY.nextCy + S.scrollY > GEN_TOP) genRow();
+  // Bake the ground ahead of the view a few rows a frame (all of it if it falls far behind).
+  const lag = terrainLag();
+  if (lag > 0) bakeTerrain(lag > 45 ? lag - 30 : 4);
   // Drop rows that have scrolled away.
   while (CITY.chunks.length && CITY.chunks[0].cy0 + S.scrollY > DROP_BOTTOM) {
     const gone = CITY.chunks.shift()!;
@@ -568,6 +587,14 @@ export function updateBg(dt: number) {
   if (CITY.craters.length && CITY.craters[0].y > DROP_BOTTOM + 40) {
     CITY.craters = CITY.craters.filter((c) => c.y < DROP_BOTTOM + 40);
     S.decor = S.decor.filter((d) => d.type !== 'crater' || d.y < DROP_BOTTOM + 40);
+  }
+  // Crossing into the second biome: the grade and the name follow the ship.
+  if (CITY.biomeB >= 0 && !CITY.crossed) {
+    const py = S.P ? S.P.y : H * 0.7;
+    if (weightB(S.P ? S.P.x : W / 2, py - S.scrollY) > 0.5) {
+      CITY.crossed = true; CITY.theme = CITY.biomeB; S.theme = CITY.biomeB;
+      if (S.active && !S.banner) setBanner(biomeName(CITY.biomeB).toUpperCase(), `Sector ${S.sector} · crossing`, 1.8, '#9fb3c8');
+    }
   }
   // Clouds drift with parallax: higher layers slide faster than the ground.
   for (const c of S.clouds as Cloud[]) {
@@ -602,7 +629,66 @@ export function updateBg(dt: number) {
       addFx({ type: 'spark', x: proj.x + rnd(-b.w, b.w) * 0.3, y: proj.y + rnd(-b.h, b.h) * 0.3, vx: rnd(-30, 30), vy: rnd(-50, -10), life: rnd(0.4, 1), max: 1, size: rnd(0.8, 1.6), drag: 1.5, tint: '#ffb04a', ground: true });
     }
   }
+  fireTick += dt;
+  if (fireTick >= 0.25) { spreadFire(fireTick); fireTick = 0; }
 }
+
+/* ---------------- ground fires: wildfire, burning oil, broken ice ---------------- */
+const ts: TerrainSample = { h: 0, water: 0, cover: 0 };
+/** Cap on burning cells (each is drawn as flames on the ground plus a sample of smoke columns). */
+const FIRE_MAX = 420;
+const NB = [1, -1, 0, 0, 1, -1, 1, -1], NBY = [0, 0, 1, -1, 1, 1, -1, -1];
+function spreadFire(step: number) {
+  const act = FIRE.active, t = CITY.time, n = FIRE.n, refCy = -S.scrollY + H / 2;
+  for (let j = act.length - 1; j >= 0; j--) {
+    const i = act[j], t0 = FIRE.data[i * 2], k = FIRE.data[i * 2 + 1];
+    const age = t - t0, dur = BURN_T[k] ?? 10;
+    const cy = fireCellCy(i, refCy), y = cy + S.scrollY;
+    if (age > dur || y > DROP_BOTTOM + 40 || y < GEN_TOP - 200) { act[j] = act[act.length - 1]; act.pop(); continue; }
+    // Burning cells under a structure set it alight.
+    if (k !== Burn.Ice && Math.random() < step * 0.6) for (const ch of CITY.chunks) {
+      if (cy < ch.cy0 - 20 || cy > ch.cy1 + 20) continue;
+      const x = fireCellX(i);
+      for (const b of ch.bldgs) if (!b.dead && Math.abs(b.x - x) < FIRE.cell * 0.6 + b.w / 2 && Math.abs(b.cy - cy) < FIRE.cell * 0.6 + b.h / 2) { ignite(b, 0.25); CITY.dirty.push(b); }
+    }
+    // Wildfire runs downwind (right and down the screen) through canopy; scrub fires stay small; oil burns in place.
+    if (k !== Burn.Forest && k !== Burn.Scrub) continue;
+    if (act.length >= FIRE_MAX || age < 1.2 || age > dur * 0.7) continue;
+    const gx = i % n, row = Math.floor(i / n);
+    for (let d = 0; d < 8; d++) {
+      const wind = NB[d] > 0 || NBY[d] > 0 ? 1.4 : 0.7;
+      if (Math.random() > step * (k === Burn.Forest ? 0.32 : 0.12) * wind) continue;
+      const nx = gx + NB[d]; if (nx < 0 || nx >= n) continue;
+      const nrow = (row + NBY[d] + n) % n, ni = nrow * n + nx;
+      if (FIRE.data[ni * 2] > 0) continue;
+      const ncy = cy + NBY[d] * FIRE.cell, x = fireCellX(ni);
+      sampleCy(x, ncy, ts);
+      if (ts.water > 0.4) continue;
+      if (ts.cover > 0.45) igniteCell(ni, t + Math.random() * 0.3, Burn.Forest);
+      else if (ts.cover > 0.2 && k === Burn.Forest && Math.random() < 0.3) igniteCell(ni, t, Burn.Scrub);
+    }
+  }
+}
+/** A blast on the ground: start a wildfire in canopy, crack ice, or set a spill burning. */
+function groundFire(x: number, cy: number, r: number, spill: number) {
+  const t = CITY.time, c = FIRE.cell;
+  for (let oy = -r; oy <= r; oy += c) for (let ox = -r; ox <= r; ox += c) {
+    if (ox * ox + oy * oy > r * r * 1.1) continue;
+    const px = x + ox, pcy = cy + oy, i = fireCell(px, pcy);
+    if (i < 0 || FIRE.data[i * 2] > 0) continue;
+    sampleCy(px, pcy, ts);
+    if (spill) { if (ts.water < 0.5) igniteCell(i, t + Math.random() * 0.2, spill); continue; }
+    if (ts.water > 0.5) {
+      // Frozen lakes crack open (steam and black water); open water just takes the blast.
+      if (frozenAt(px, pcy)) igniteCell(i, t, Burn.Ice);
+      continue;
+    }
+    if (ts.cover > 0.45) igniteCell(i, t + Math.random() * 0.4, Burn.Forest);
+    else if (ts.cover > 0.2 && Math.random() < 0.6) igniteCell(i, t, Burn.Scrub);
+  }
+}
+/** Lakes freeze in the mountains. */
+const frozenAt = (x: number, cy: number) => biomeAtCy(x, cy) === Biome.Snow;
 
 /* ---------------- destruction ---------------- */
 function ignite(b: Bldg, amt: number) {
@@ -625,17 +711,21 @@ function collapse(b: Bldg) {
     addFx({ type: 'debris', x: b.x, y: b.y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rnd(0.5, 1.1), max: 1.1, size: rnd(0.8, 1.8), rot: rnd(0, 6.28), vr: rnd(-10, 10), drag: 1.8, col: '#4a4540', ground: true });
   }
   if (big) V.shake = Math.min(18, V.shake + 6);
-  if (b.kind === 'tank' || b.kind === 'silo' || b.kind === 'flare') {
+  if (b.fuel > 0) {
     // Fuel goes up: a fireball now and a chain blast that can take the neighbours with it.
-    boomFx(b.x, b.y, Math.max(16, b.w * 1.8), '#ffb347', true);
-    CITY.pending.push({ t: rnd(0.15, 0.45), x: b.x, cy: b.cy, r: Math.max(10, b.w * 1.3), dmg: 40 });
+    const s = Math.max(b.w, b.h) * b.fuel;
+    boomFx(b.x, b.y, Math.max(16, s * 1.8), '#ffb347', true);
+    CITY.pending.push({ t: rnd(0.15, 0.45), x: b.x, cy: b.cy, r: Math.max(10, s * 1.3), dmg: 40 });
     ignite(b, 1);
   }
+  if (b.spill) groundFire(b.x, b.cy, Math.max(FIRE.cell, Math.max(b.w, b.h) * 1.4), b.spill);
 }
 
 /** A ground explosion at field (x, y). Returns scrap to spill from anything it destroyed. */
 export function worldBlast(x: number, y: number, r: number, dmg: number): number {
   let scrap = 0;
+  const bcy = y - S.scrollY;
+  CITY.payK = BIOMES[biomeAtCy(x, bcy)].pay;
   for (const ch of CITY.chunks) {
     const fy0 = ch.cy0 + S.scrollY, fy1 = ch.cy1 + S.scrollY;
     if (fy1 < y - r - 90 || fy0 > y + r + 30) continue;
@@ -660,19 +750,86 @@ export function worldBlast(x: number, y: number, r: number, dmg: number): number
       CITY.dirty.push(b);
     }
   }
+  // The ground itself: canopy catches, ice cracks, open water swallows the crater.
+  sampleCy(x, bcy, ts);
+  const onWater = ts.water > 0.5 && !frozenAt(x, bcy);
+  if (r >= 8 && y > -60 && y < H + 60 && (ts.cover > 0.2 || ts.water > 0.5)) groundFire(x, bcy, r * 0.7, 0);
+  if (onWater && r >= 8 && y > -40 && y < H + 40) {
+    // A white column of spray instead of a scorch mark.
+    for (let i = 0; i < 4; i++) addFx({ type: 'smoke', x: x + rnd(-r, r) * 0.3, y: y + rnd(-r, r) * 0.3, vx: rnd(-8, 8), vy: rnd(-8, 8), life: rnd(0.8, 1.6), max: 1.6, size: r * rnd(0.4, 0.7), grow: 1.4, a: 0.35, drag: 1, col: '#9fb2c4', ground: true });
+    return scrap;
+  }
   // Craters: skip one that would land on top of a fresh one (the lance ticks every 50 ms).
   let near = false;
   for (let i = CITY.craters.length - 1; i >= Math.max(0, CITY.craters.length - 6); i--) {
     const o = CITY.craters[i];
-    if (Math.abs(o.x - x) < r * 0.5 && Math.abs(o.cy - (y - S.scrollY)) < r * 0.5) { near = true; break; }
+    if (Math.abs(o.x - x) < r * 0.5 && Math.abs(o.cy - bcy) < r * 0.5) { near = true; break; }
   }
   if (r >= 10 && !near && y > -40 && y < H + 40) {
-    const c: Crater = Object.assign(Object.create(SCROLLED) as Crater, { type: 'crater' as const, x, cy: y - S.scrollY, w: r, h: r, r: r * rnd(0.55, 0.8), hgt: 0, born: CITY.time });
+    const c: Crater = Object.assign(Object.create(SCROLLED) as Crater, { type: 'crater' as const, x, cy: bcy, w: r, h: r, r: r * rnd(0.55, 0.8), hgt: 0, born: CITY.time });
     CITY.craters.push(c); S.decor.push(c);
     if (CITY.craters.length > 90) { const old = CITY.craters.shift()!; const at = S.decor.indexOf(old); if (at >= 0) S.decor.splice(at, 1); }
   }
   return scrap;
 }
 
+/* ---------------- terrain queries (for naval / ground spawns and gameplay) ---------------- */
+// All take FIELD coordinates (x, y as on screen now) and only answer for the generated band (about field y -380 to
+// 990): outside it they answer from the analytic fields, which are still right for the ground but know nothing of
+// structures. None of them allocates unless noted.
+const qs: TerrainSample = { h: 0, water: 0, cover: 0 };
+function zoneAt(x: number, cy: number): SurfaceKind | null {
+  for (const ch of CITY.chunks) {
+    if (cy < ch.cy0 || cy > ch.cy1) continue;
+    for (let i = ch.zones.length - 1; i >= 0; i--) { const z = ch.zones[i]; if (x >= z.x0 && x <= z.x1 && cy >= z.y0 && cy <= z.y1) return z.s; }
+  }
+  return null;
+}
+/** Biome at a field point (the edge between two biomes wanders across the field). */
+export const biomeAt = (x: number, y: number): Biome => biomeAtCy(x, y - S.scrollY);
+/** Open water (harbour, rivers, lakes that are not frozen). Naval units can sail here. */
+export function isWater(x: number, y: number) { const cy = y - S.scrollY; return sampleCy(x, cy, qs).water > 0.5 && !frozenAt(x, cy) && zoneAt(x, cy) !== 'dock'; }
+/** Frozen lake: walkable, and it cracks under fire. */
+export function isIce(x: number, y: number) { const cy = y - S.scrollY; return sampleCy(x, cy, qs).water > 0.5 && frozenAt(x, cy); }
+/** Solid ground (not open water). */
+export const isLand = (x: number, y: number) => !isWater(x, y);
+/** On a runway (airbase): aircraft can take off along it. */
+export const isRunway = (x: number, y: number) => zoneAt(x, y - S.scrollY) === 'runway';
+/** On a road, runway, taxiway or quay: wheeled convoys prefer these. */
+export function isRoad(x: number, y: number) { const z = zoneAt(x, y - S.scrollY); return z === 'road' || z === 'runway' || z === 'apron' || z === 'dock'; }
+/** What the ground is at a field point. */
+export function surfaceAt(x: number, y: number): SurfaceKind {
+  const cy = y - S.scrollY, z = zoneAt(x, cy);
+  if (z) return z;
+  const t = sampleCy(x, cy, qs), b = biomeAtCy(x, cy);
+  if (t.water > 0.5) return frozenAt(x, cy) ? 'ice' : 'water';
+  if (t.cover > 0.5) return 'forest';
+  switch (b) {
+    case Biome.City: return 'urban';
+    case Biome.Port: return 'urban';
+    case Biome.Desert: return t.h > 30 ? 'rock' : 'sand';
+    case Biome.Snow: return t.h > 95 ? 'rock' : 'snow';
+    default: return 'grass';
+  }
+}
+/** Everything at once (allocates one object; pass `out` to reuse). */
+export function terrainAt(x: number, y: number, out: TerrainInfo = { biome: Biome.City, surface: 'urban', h: 0, water: 0, cover: 0 }): TerrainInfo {
+  const cy = y - S.scrollY;
+  sampleCy(x, cy, qs);
+  out.biome = biomeAtCy(x, cy); out.h = qs.h; out.water = qs.water; out.cover = qs.cover; out.surface = surfaceAt(x, y);
+  return out;
+}
+/**
+ * A random field point of a surface inside a box (default: the top of the screen, where spawns enter), or null
+ * after `tries` misses. E.g. findSurface('water') for a gunboat, findSurface('runway') for a jet's take-off roll.
+ */
+export function findSurface(s: SurfaceKind | ((x: number, y: number) => boolean), x0 = 40, y0 = -60, x1 = W - 40, y1 = 260, tries = 40): { x: number; y: number } | null {
+  for (let i = 0; i < tries; i++) {
+    const x = rnd(x0, x1), y = rnd(y0, y1);
+    if (typeof s === 'function' ? s(x, y) : surfaceAt(x, y) === s) return { x, y };
+  }
+  return null;
+}
+
 // Debug handle for tests and screenshots (window.__city).
-if (typeof window !== 'undefined') (window as unknown as { __city: unknown }).__city = { CITY, DARK, worldBlast };
+if (typeof window !== 'undefined') (window as unknown as { __city: unknown }).__city = { CITY, DARK, TERR, FIRE, BIO, worldBlast, setBiome, surfaceAt, isWater, isRunway, terrainAt, setPieceIn };

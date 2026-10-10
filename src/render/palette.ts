@@ -17,12 +17,13 @@ export const PAL = {
   white: '#fff4e0',
 } as const;
 
-/** One look per sector. Ground tones are the city at night; fog and sky set the mood. */
+/** One look per biome (src/game/biomes.ts, indexed by S.theme). Ground tones, fog and window colour set the mood. */
 export const THEMES = [
-  { name: 'Ashport', base: '#1d2124', alt: '#2a2f33', line: '#3a3f42', dec: '#121517', acc: '#4a4030', fog: '#0d1114', window: '#ffb347' },
-  { name: 'Rust Flats', base: '#2a2219', alt: '#3a2f24', line: '#47392b', dec: '#1a1510', acc: '#5a4630', fog: '#130f0b', window: '#ffa040' },
-  { name: 'Glacier Yard', base: '#1c242c', alt: '#26313b', line: '#33424f', dec: '#11171d', acc: '#3f5363', fog: '#0b1015', window: '#bfe6ff' },
-  { name: 'Ash Belt', base: '#262224', alt: '#332d30', line: '#3e3639', dec: '#171415', acc: '#4b3f43', fog: '#0f0c0d', window: '#ff9a6a' },
-  { name: 'Neon Sprawl', base: '#181a26', alt: '#212536', line: '#2c3245', dec: '#10121b', acc: '#3a3157', fog: '#0a0b12', window: '#ff6ad5' },
+  { name: 'Sodium City', base: '#1d2124', alt: '#2a2f33', line: '#3a3f42', dec: '#121517', acc: '#4a4030', fog: '#0d1114', window: '#ffb347' },
+  { name: 'Iron Harbour', base: '#1b2024', alt: '#262c31', line: '#363d43', dec: '#111518', acc: '#3a4148', fog: '#0a0f14', window: '#ffb347' },
+  { name: 'Kestrel Airbase', base: '#1c1f1d', alt: '#272b28', line: '#373c38', dec: '#121412', acc: '#3e4540', fog: '#0b0e10', window: '#ffd29a' },
+  { name: 'Glass Desert', base: '#2a2219', alt: '#3a2f24', line: '#47392b', dec: '#1a1510', acc: '#5a4630', fog: '#120e0a', window: '#ffa860' },
+  { name: 'White Range', base: '#1c242c', alt: '#26313b', line: '#33424f', dec: '#11171d', acc: '#3f5363', fog: '#0b1017', window: '#ffc48a' },
+  { name: 'Deepwood', base: '#171c18', alt: '#212821', line: '#2e362e', dec: '#0f130f', acc: '#2f3a2f', fog: '#080c0a', window: '#ffb060' },
 ] as const;
 export type Theme = (typeof THEMES)[number];

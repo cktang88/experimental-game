@@ -87,6 +87,8 @@ export interface CombatSetup {
   ghost?: Ghost; cheatDeathAvailable: boolean;
   overdrive?: OverdriveKind; heat?: HeatFx;
   /** Overdrive charge to start with (0..1), from rank perks. */ odCharge?: number;
+  /** Map floor of the node (boss = 10) and the run seed: they pick the biomes below (biomes.ts biomeFor). */
+  floor?: number; seed?: number;
 }
 export type CombatMode = 'play' | 'clear' | 'bossdown' | 'dying' | 'done';
 
@@ -101,6 +103,8 @@ export const S = {
   P: null as Player | null, boss: null as Boss | null, elite: null as Enemy | null,
   enemies: [] as Enemy[], pb: [] as Ent[], eb: [] as Ent[], pickups: [] as Pickup[], beams: [] as Beam[], decor: [] as Decor[], clouds: [] as { x: number; y: number; w: number; h: number }[],
   god: false, scrap: 0, kills: 0, score: 0, firstHitUsed: false, cheatDeath: false, cheatDeathUsed: false, theme: 0,
+  /** Biome the fight crosses into part-way (-1 none); S.theme is the biome under the ship (worldgen.ts). */
+  biomeB: -1,
   overdrive: newOverdrive(), carnage: newCarnage() as Carnage, heat: neutralHeat(),
   /** Hitstop: while stop.left > 0 the simulation is frozen (render keeps drawing). */
   stop: newStop(),
@@ -142,7 +146,7 @@ export function startCombat(c: CombatSetup) {
     salvageLeft: c.enc.salvage, salvageT: 3, banner: null, boss: null, elite: null,
     enemies: [], pb: [], eb: [], pickups: [], beams: [], scrap: 0, kills: 0, score: 0,
     firstHitUsed: false, cheatDeath: c.cheatDeathAvailable && hasFlag(c.relics, 'cheat_death'), cheatDeathUsed: false,
-    theme: (c.sector - 1) % 5,
+    theme: biomeFor(c.sector, c.floor, c.seed).a, biomeB: biomeFor(c.sector, c.floor, c.seed).b,
     overdrive: newOverdrive(c.overdrive ?? 'lance'), carnage: newCarnage(), heat: c.heat ?? neutralHeat(),
     stop: newStop(), slowmo: newSlow(), slowK: 1, slowFx: 0, events: [], pickStreak: { n: 0, t: 9 },
     stats: newStats(), seen: {}, timers: [],
@@ -163,7 +167,7 @@ export function startCombat(c: CombatSetup) {
     setBanner('ELITE CONTACT', c.enc.name, 2.6, '#ff5a4e'); sfx('alarm');
     later(2.2, () => { if (S.active && S.mode === 'play') spawnElite(c.enc.elite!); });
   } else {
-    setBanner(c.enc.name.toUpperCase(), `Sector ${c.sector}`, 2.2);
+    setBanner(c.enc.name.toUpperCase(), `Sector ${c.sector} · ${biomeName(S.theme)}`, 2.2);
   }
 }
 
@@ -171,6 +175,7 @@ export function startCombat(c: CombatSetup) {
 // World generation (city, roads, clouds) lives in ./worldgen; re-exported for existing callers.
 export { seedDecor, updateBg } from './worldgen';
 import { seedDecor, updateBg, worldBlast, cityPay } from './worldgen';
+import { biomeFor, biomeName } from './biomes';
 /** Every ground blast goes through here: buildings it destroys pay scrap (times carnage) and feed carnage/overdrive. */
 export function groundBlast(x: number, y: number, r: number, d: number, lance = false) {
   const sc = worldBlast(x, y, r, d) * cityPay(); // cityPay(): the city is drawn far below at a small scale (worldgen.ts)
