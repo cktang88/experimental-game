@@ -193,6 +193,12 @@ function makePlan(theme: number): Plan {
   return { theme, cols, aves, coast };
 }
 
+/**
+ * Decor's field y follows the scroll through a shared getter (field y = cy + S.scrollY), so thousands of
+ * small buildings cost nothing per tick.
+ */
+const SCROLLED = Object.defineProperty({}, 'y', { get(this: Decor) { return this.cy + S.scrollY; }, enumerable: true });
+
 /* ---------------- block fillers ---------------- */
 let seedCounter = 1;
 const nextSeed = () => ((seedCounter = (seedCounter * 1103515245 + 12345) >>> 0) % 100000) / 100000 + Math.random() * 1e-3;
@@ -202,12 +208,12 @@ function bldg(ch: Chunk, kind: BKind, x0: number, y0: number, x1: number, y1: nu
   let top = 0; for (const t of tiers) top = Math.max(top, t.z0 + t.hgt);
   const floors = Math.max(1, Math.round(top / FLOOR));
   const maxHp = kind === 'tank' ? 40 + w : Math.min(240, 30 + floors * 5 + (w * h) / 90);
-  const b: Bldg = {
-    type: 'bldg', kind, x: cx, y: cy + S.scrollY, cy, w, h, r: Math.hypot(w, h) / 2, hgt: top, tiers, style, seed: nextSeed(), floors,
+  const b: Bldg = Object.assign(Object.create(SCROLLED) as Bldg, {
+    type: 'bldg' as const, kind, x: cx, cy, w, h, r: Math.hypot(w, h) / 2, hgt: top, tiers, style, seed: nextSeed(), floors,
     lit: rnd(0.25, 0.7), keepLit: Math.random() < 0.12, neon: 0,
     hp: maxHp, maxHp, value: scrapValue(kind, maxHp),
     fire: 0, burnT: -1, collapseT: -1, dead: false, chunk: ch, rot: 0, ri: -1, rn: 0, ...o,
-  };
+  });
   ch.bldgs.push(b); S.decor.push(b);
   return b;
 }
@@ -494,7 +500,7 @@ function genBlockRow(ch: Chunk, plan: Plan, cy1: number) {
 function shrinkRow(ch: Chunk) {
   const k = CITY_K;
   for (const b of ch.bldgs) {
-    b.x = fx(b.x); b.cy *= k; b.y = b.cy + S.scrollY;
+    b.x = fx(b.x); b.cy *= k;
     b.w *= k; b.h *= k; b.r *= k; b.hgt *= k;
     for (const t of b.tiers) { t.ox *= k; t.oy *= k; t.w *= k; t.h *= k; t.z0 *= k; t.hgt *= k; }
   }
@@ -559,7 +565,6 @@ export function updateBg(dt: number) {
     S.decor = S.decor.filter((d) => d.type !== 'bldg' || (d as Bldg).chunk !== gone);
     CITY.burning = CITY.burning.filter((b) => b.chunk !== gone);
   }
-  for (const d of S.decor) d.y = d.cy + S.scrollY;
   if (CITY.craters.length && CITY.craters[0].y > DROP_BOTTOM + 40) {
     CITY.craters = CITY.craters.filter((c) => c.y < DROP_BOTTOM + 40);
     S.decor = S.decor.filter((d) => d.type !== 'crater' || d.y < DROP_BOTTOM + 40);
@@ -592,7 +597,7 @@ export function updateBg(dt: number) {
       if (b.hp > b.maxHp * 0.15) b.hp -= b.maxHp * 0.01 * b.fire * dt;
     }
     if (b.fire <= 0.01) { CITY.burning.splice(i, 1); b.fire = 0; CITY.dirty.push(b); continue; }
-    if (Math.random() < dt * 5 * b.fire) {
+    if (Math.random() < dt * 2.5 * b.fire) {
       CITY.project(b.x, b.y, b.dead ? 2 : b.hgt, proj);
       addFx({ type: 'spark', x: proj.x + rnd(-b.w, b.w) * 0.3, y: proj.y + rnd(-b.h, b.h) * 0.3, vx: rnd(-30, 30), vy: rnd(-50, -10), life: rnd(0.4, 1), max: 1, size: rnd(0.8, 1.6), drag: 1.5, tint: '#ffb04a', ground: true });
     }
@@ -636,6 +641,8 @@ export function worldBlast(x: number, y: number, r: number, dmg: number): number
     if (fy1 < y - r - 90 || fy0 > y + r + 30) continue;
     for (const b of ch.bldgs) {
       if (b.dead) continue;
+      // Cheap reject first: a chunk holds hundreds of small buildings (the roof as seen shifts by < 90).
+      if (Math.abs(x - b.x) > r + b.w + 60 || Math.abs(y - b.y) > r + b.h + 90) continue;
       // Distance from the blast to the building, measured to its footprint and to its roof as seen.
       const hw = b.w / 2, hh = b.h / 2;
       let ddx = Math.max(0, Math.abs(x - b.x) - hw), ddy = Math.max(0, Math.abs(y - b.y) - hh);
@@ -660,7 +667,7 @@ export function worldBlast(x: number, y: number, r: number, dmg: number): number
     if (Math.abs(o.x - x) < r * 0.5 && Math.abs(o.cy - (y - S.scrollY)) < r * 0.5) { near = true; break; }
   }
   if (r >= 10 && !near && y > -40 && y < H + 40) {
-    const c: Crater = { type: 'crater', x, y, cy: y - S.scrollY, w: r, h: r, r: r * rnd(0.55, 0.8), hgt: 0, born: CITY.time };
+    const c: Crater = Object.assign(Object.create(SCROLLED) as Crater, { type: 'crater' as const, x, cy: y - S.scrollY, w: r, h: r, r: r * rnd(0.55, 0.8), hgt: 0, born: CITY.time });
     CITY.craters.push(c); S.decor.push(c);
     if (CITY.craters.length > 90) { const old = CITY.craters.shift()!; const at = S.decor.indexOf(old); if (at >= 0) S.decor.splice(at, 1); }
   }
