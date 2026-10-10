@@ -20,7 +20,7 @@ import { KIT_MAT, STENCIL_CHARS, type Livery, type MatKey } from './materials';
 import { LightSet, LMode, lightMaterial } from './lights';
 import { buildMount, GunRig, type Turret } from './turrets';
 import { mountTraverse } from './arcs';
-import { occupied, claim, onDeck, deckGreebles, beltGreebles, stencil, antenna, dish, type GCtx } from './greebles';
+import { occupied, claim, onDeck, deckGreebles, beltGreebles, stencil, antenna, dish, machinery, type GCtx } from './greebles';
 
 /** Ships are designed at this SHIP_SCALE; other scales build at the reference size and scale the body. */
 const REF_SCALE = 2.6;
@@ -61,6 +61,8 @@ function pool(c: Ctx, x: number, z: number, w: number, d: number, y: number, k =
 function roof(c: Ctx, x0: number, z0: number, x1: number, z1: number, y: number) {
   const P = c.L.paint, w = x1 - x0, d = z1 - z0;
   if (w < 3 || d < 3) return;
+  // Big roofs carry a whole machinery field (the small-scale layer that makes the block a building).
+  if (w * d > 40) { machinery(c, c.rnd, x0 + 0.4, z0 + 0.4, x1 - 0.4, z1 - 0.4, y, 0.9); return; }
   if (c.rnd() < 0.6 && d > 5) { const sx = x0 + w * (0.2 + c.rnd() * 0.6); flat(c.bk, 'window', sx - 0.25, z0 + 1, sx + 0.25, z1 - 1, y + 0.04, P.full, [[0, 0.25], [0, 0.5], [(d - 2) / 60, 0.5], [(d - 2) / 60, 0.25]]); }
   // Dense rooftop plant: the small-scale layer that gives the tower its size.
   const n = Math.min(14, Math.floor((w * d) / 14));
@@ -320,6 +322,8 @@ function radar(c: Ctx, x: number, y: number, z: number, r: number, speed: number
 function fan(c: Ctx, x: number, z: number, s: number, y = DECK) {
   kit(c, 'Prop_Fan_Small', x, y + 0.25 * s, z, 0, s);
   const parts = kitParts('Prop_Fan_Small_Propeller'); if (!parts.length) return;
+  // Only the big engine intakes spin (each spinner is its own draw call); small fans are merged, static.
+  if (s < 2) { kit(c, 'Prop_Fan_Small_Propeller', x, y + 0.3 * s, z, c.rnd() * 6, s); return; }
   const g = new THREE.Group(); g.position.set(x, y + 0.3 * s, z); g.scale.setScalar(s);
   const bk = new Buckets(); for (const p of parts) bk.get(p.key).addGeometry(p.geo, p.m, kitCol(c, p.key));
   bk.meshes(c.L.mats, g, false); c.root.add(g); c.spin.push({ obj: g, speed: 7 + c.rnd() * 4 });
@@ -692,7 +696,7 @@ export function buildShip(dv: Derived, L: Livery, sigText: string, callsign = ''
     const pos: number[] = [];
     for (const g of c.edgeSegs) { const a = g.getAttribute('position'); for (let i = 0; i < a.count; i++) pos.push(a.getX(i), a.getY(i) + 0.05, a.getZ(i)); g.dispose(); }
     const eg = new THREE.BufferGeometry(); eg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    const em = new THREE.LineBasicMaterial({ color: '#ff5040', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }); em.color.multiplyScalar(2.2); em.toneMapped = false;
+    const em = new THREE.LineBasicMaterial({ color: '#ff5040', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }); em.color.multiplyScalar(1.5); em.toneMapped = false;
     edges = new THREE.LineSegments(eg, em); edges.userData.own = true; body.add(edges);
   } else for (const g of c.edgeSegs) g.dispose();
   let tris = 0; body.traverse((o) => { const g = (o as THREE.Mesh).geometry; if ((o as THREE.Mesh).isMesh && g) tris += (g.index ? g.index.count : g.getAttribute('position').count) / 3; });

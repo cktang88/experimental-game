@@ -55,7 +55,7 @@ export function lightMaterial(hostile: boolean) {
         else if(aMode>3.5){a=0.35+0.65*pow(0.5+0.5*sin(uTime*3.2+aPh*6.28),3.0);}
         if(aMode<0.5){float k=fract(aPh*7.31+position.x*0.013+position.z*0.017);
           if(k<uDmg){float f=fract(sin(floor(uTime*9.0)+aPh*91.0)*43758.5);a*=step(0.93,f)*1.5;}}
-        vA=a*min(1.0,px/1.3);gl_PointSize=max(1.3,px);vCol=aCol;}`,
+        vA=a*clamp(px/1.3,0.2,1.0);gl_PointSize=max(1.15,px);vCol=aCol;}`,
     fragmentShader: `uniform float uFlick;varying vec3 vCol;varying float vA;
       void main(){vec2 p=gl_PointCoord*2.0-1.0;float d=dot(p,p);if(d>1.0)discard;
         float a=pow(1.0-d,1.5)*vA*uFlick;gl_FragColor=vec4(vCol*a,1.0);}`,

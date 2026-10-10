@@ -13,7 +13,7 @@ import * as THREE from 'three';
 import { Buckets, B, R, block, lathe, box, flatRect, octagon, type V2, type V3 } from './mesh';
 import { gunMaterial, gunUniforms, MAX_GUNS, type GunUniforms, type Livery, type MatKey } from './materials';
 import { LightSet, LMode } from './lights';
-import type { Traverse } from './arcs';
+import { gunCount, type Traverse } from './arcs';
 
 export type AimKind = 'track' | 'fixed' | 'spin';
 export interface Gun {
@@ -181,8 +181,6 @@ export interface MountSpec {
 }
 export interface MountOut { t: Turret; claim: [number, number, number, number] }
 
-const gunCount = (id: string, tier: number) =>
-  id === 'rail' ? (tier >= 4 ? 2 : 1) : id === 'artillery' ? (tier >= 3 ? 2 : 1) : id === 'tesla' ? 1 : id === 'missile' ? (tier >= 3 ? 3 : 2) : tier >= 4 ? 4 : tier >= 2 ? 3 : 2;
 
 export function buildMount(s: MountSpec, rig: GunRig, hb: Buckets, L: Livery, lights: LightSet): MountOut {
   const { id, tier, trav } = s, P0 = L.paint, LL = L.light, c2: Ctx2 = { hb, L, lights };

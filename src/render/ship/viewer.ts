@@ -34,7 +34,9 @@ if (ghost) {
   S.boss = { ghost: { name: 'viewer' } as Ghost, build, dv, s, x, y, homeY: y, halfW: (dv.width * s) / 2, r: (dv.width * s) / 2, layer: 'both', isBoss: true, alive: true, dead: false,
     hp: hp * 1000, maxHp: 1000, shield: 0, shieldMax: 0, shieldHitT: 9, regen: 0, tractor: 0, droneEvery: 0, droneT: 9, speedMul: 1, fireMul: 1, cdMul: 1, t: 0, phase: hp < 0.5 ? 2 : 1, flash: 0, entered: true,
     weps: [] } as unknown as typeof S.boss;
-  S.P = null;
+  // A target for the ghost's guns (px/py, field units); not drawn.
+  const tx = q.get('px'), ty = q.get('py');
+  S.P = tx ? { x: Number(tx), y: Number(ty || y), build, dv, hp: 1, shield: 0, cds: {}, lastHit: 9, flash: 0, tx: null, ty: null, droneCd: [], vx: 0, vy: 0, bank: 0 } as unknown as typeof S.P : null;
 } else {
   S.P = { x, y, build, dv, hp: dv.maxHp * hp, shield: 0, cds: {}, lastHit: 9, flash: 0, tx: null, ty: null, droneCd: [], vx: 0, vy: 0, bank: 0 };
 }

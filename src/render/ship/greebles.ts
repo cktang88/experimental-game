@@ -118,7 +118,7 @@ export function deckGreebles(c: GCtx, rnd: Rng, za: number, zb: number, type: st
   const P = c.L.paint, LL = c.L.light, y = 8; // DECK
   const area = (zb - za) * c.de((za + zb) / 2) * 2;
   // Machinery fields: rectangles of all sizes, biggest first so they find room.
-  const nf = Math.round(area / (type === 'armor' ? 160 : 60));
+  const nf = Math.round(area / (type === 'armor' ? 90 : 26));
   for (let i = 0; i < nf; i++) {
     const big = i < nf * 0.3, w = big ? 6 + rnd() * 9 : 2.4 + rnd() * 5, d = big ? 5 + rnd() * 10 : 2.4 + rnd() * 5;
     const e = c.de(za + (zb - za) / 2);

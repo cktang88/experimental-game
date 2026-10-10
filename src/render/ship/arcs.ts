@@ -48,3 +48,7 @@ export function clampYaw(t: Traverse, want: number) {
   if (Math.abs(d) > t.half + 0.5) return t.center;
   return t.center + Math.max(-t.half, Math.min(t.half, d));
 }
+
+/** Guns in a mount's cluster (the blueprint draws the same count). */
+export const gunCount = (id: string, tier: number) =>
+  id === 'rail' ? (tier >= 4 ? 2 : 1) : id === 'artillery' ? (tier >= 3 ? 2 : 1) : id === 'tesla' ? 1 : id === 'missile' ? (tier >= 3 ? 3 : 2) : tier >= 4 ? 4 : tier >= 2 ? 3 : 2;
