@@ -43,7 +43,7 @@ if (q.get('enemies') === '1') S.enemies = [
   { x: x + 260, y: y - 260, layer: 'air', dead: false }, { x: x - 300, y: y - 60, layer: 'ground', dead: false },
 ] as unknown as typeof S.enemies;
 // Zoom: pull the camera toward the ship.
-const look = new THREE.Vector3(); eng.toFlight(x, y, 0, look);
+const look = new THREE.Vector3(); eng.toFlight(x + Number(q.get("lx") || 0), y + Number(q.get("ly") || 0), 0, look);
 const off = eng.camPos.clone().sub(eng.camLook);
 eng.camLook.copy(look); eng.camPos.copy(look).addScaledVector(off, zoom);
 const yaw = Number(q.get('orbit') || 0); if (yaw) eng.camPos.sub(look).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw).add(look);
@@ -51,15 +51,33 @@ const tilt = Number(q.get('tilt') || 0); if (tilt) { const o = eng.camPos.clone(
 
 await preloadKits(['scifi']);
 let t = 0, frames = 0;
+// Perf readout for screenshots: draw calls and triangles for a whole frame (all post passes included),
+// and the ship meshes alone.
+eng.renderer.info.autoReset = false;
+let last = { calls: 0, triangles: 0 };
+(window as unknown as { __shipInfo: () => unknown }).__shipInfo = () => {
+  let shipCalls = 0, shipTris = 0, lights = 0;
+  eng.scene.traverse((o) => {
+    if (!o.visible) return;
+    let p: THREE.Object3D | null = o; let inShip = false; while (p) { if (p.name === 'dreadnought' || p.name === 'ghost-dreadnought') { inShip = p.visible; break; } p = p.parent; }
+    if (!inShip) return;
+    const m = o as THREE.Mesh; if (!(m.isMesh || (o as THREE.Points).isPoints)) return;
+    shipCalls++;
+    const g = m.geometry; if ((o as THREE.Points).isPoints) lights += g.getAttribute('position').count; else shipTris += (g.index ? g.index.count : g.getAttribute('position').count) / 3;
+  });
+  return { frame: last, shipCalls, shipTris: Math.round(shipTris), lights };
+};
 const tEnd = Number(q.get('t') || 3);
 function frame() {
   const dt = 1 / 30; t += dt; S.t = t;
   if (fire) for (const sct of build.sections) for (const p of sct.slots) if (p && WEAPONS[p.id] && Math.random() < dt * 1.2) fireLog.set(p.uid, t);
   if (q.get('sway') === '1' && S.P) S.P.x = x + Math.sin(t * 0.8) * 120;
+  eng.renderer.info.reset();
   eng.render({ dt, t, S, V, showPlayer: !ghost });
+  last = { calls: eng.renderer.info.render.calls, triangles: eng.renderer.info.render.triangles };
   frames++;
   if (t >= tEnd && document.title !== 'ready') document.title = 'ready';
   requestAnimationFrame(frame);
 }
-void layer;
+(window as unknown as { __shipLayer: unknown }).__shipLayer = layer;
 frame();

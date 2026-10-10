@@ -14,7 +14,9 @@ import { kitLoaded } from '../assets';
 import { livery } from './materials';
 import { buildShip, disposeShip, DECK, type ShipModel } from './hull';
 import { lightUniforms } from './lights';
-import type { Turret } from './turrets';
+import type { Gun, Turret } from './turrets';
+import type { V3 } from './mesh';
+import { clampYaw } from './arcs';
 
 /** Flight-plane altitude of the ship origin: keeps the deck just under the bullet/muzzle layer. */
 const P_ALT = -10;
@@ -25,7 +27,7 @@ interface Rig {
   px: number; py: number; vx: number; vy: number;
   roll: number; rollV: number; pitch: number; pitchV: number; yaw: number;
   seen: Map<number, number>; retarget: Map<number, number>; aims: Map<number, number>;
-  lidOpen: number[]; salvo: number[]; fireAcc: number; sparkAcc: number; smokeAcc: number;
+  fireAcc: number; sparkAcc: number; smokeAcc: number;
 }
 
 export class ShipLayer implements Layer {
@@ -37,12 +39,12 @@ export class ShipLayer implements Layer {
   constructor(private engine: Engine) {}
 
   /** Cached ship model for a hull (built on first use). */
-  private model(dv: Derived, hostile: boolean, sigBase: string) {
-    const sig = `${hostile ? 'G' : 'P'}|${kitLoaded('scifi') ? 1 : 0}|${sigBase}`;
+  private model(dv: Derived, hostile: boolean, sigBase: string, callsign = '') {
+    const sig = `${hostile ? 'G' : 'P'}|${kitLoaded('scifi') ? 1 : 0}|${callsign}|${sigBase}`;
     let m = this.cache.get(sig);
     if (!m) {
       const t0 = performance.now(), L = livery(hostile, this.engine.renderer), t1 = performance.now();
-      m = buildShip(dv, L, sigBase);
+      m = buildShip(dv, L, sigBase, callsign);
       if (import.meta.env.DEV) console.info(`[ship] livery ${(t1 - t0).toFixed(0)} ms; built ${hostile ? 'ghost' : 'player'} hull in ${(performance.now() - t1).toFixed(0)} ms, ${Math.round(m.tris / 1000)}k tris, ${m.lights.geometry.getAttribute('position').count} lights`);
       this.cache.set(sig, m);
       // Keep a handful of hulls (refits flip back and forth); dispose the oldest beyond that.
@@ -55,8 +57,8 @@ export class ShipLayer implements Layer {
     return { m, sig };
   }
 
-  private rig(prev: Rig | null, dv: Derived, hostile: boolean, sigBase: string, x: number, y: number): Rig {
-    const { m, sig } = this.model(dv, hostile, sigBase);
+  private rig(prev: Rig | null, dv: Derived, hostile: boolean, sigBase: string, x: number, y: number, callsign = ''): Rig {
+    const { m, sig } = this.model(dv, hostile, sigBase, callsign);
     if (prev && prev.sig === sig) return prev;
     if (prev) prev.model.root.removeFromParent();
     this.engine.scene.add(m.root);
@@ -64,8 +66,15 @@ export class ShipLayer implements Layer {
     for (const t of m.turrets) seen.set(t.uid, fireLog.get(t.uid) ?? -1);
     return {
       model: m, sig, px: x, py: y, vx: 0, vy: 0, roll: 0, rollV: 0, pitch: 0, pitchV: 0, yaw: 0,
-      seen, retarget: new Map(), aims: new Map(), lidOpen: m.turrets.map(() => 0), salvo: m.turrets.map(() => 0), fireAcc: 0, sparkAcc: 0, smokeAcc: 0,
+      seen, retarget: new Map(), aims: new Map(), fireAcc: 0, sparkAcc: 0, smokeAcc: 0,
     };
+  }
+
+  private cs: string | null = null;
+  /** The commander's callsign, stencilled on the deck (read once from the saved profile). */
+  private callsign() {
+    if (this.cs === null) { try { this.cs = localStorage.getItem('gd.callsign') || ''; } catch { this.cs = ''; } }
+    return this.cs;
   }
 
   clear() {
@@ -93,7 +102,7 @@ export class ShipLayer implements Layer {
     lightUniforms.uPx.value = e.renderer.domElement.height * e.camera.projectionMatrix.elements[5] * 0.5;
     const P = S.P;
     if (P && showPlayer) {
-      this.player = this.rig(this.player, P.dv, false, JSON.stringify(buildToGhost(P.build)), P.x, P.y);
+      this.player = this.rig(this.player, P.dv, false, JSON.stringify(buildToGhost(P.build)), P.x, P.y, this.callsign());
       const r = this.player, m = r.model;
       m.root.visible = true;
       this.motion(r, P.x, P.y, rdt, t, 1, false);
@@ -102,7 +111,7 @@ export class ShipLayer implements Layer {
       m.root.scale.set(1, 1, 1);
       m.root.updateMatrixWorld(true);
       this.turrets(r, S, rdt, t, false, P.x, P.y, 1, P.cds);
-      this.animate(r, rdt);
+      this.animate(r, rdt, 1);
       this.plumes(r, t, 1, false, clamp(0.55 + Math.max(0, -r.vy) / 260, 0.4, 1.3));
       this.steam(r, t, 1);
       this.damage(r, P.hp / P.dv.maxHp, rdt, t, 1, false);
@@ -114,12 +123,12 @@ export class ShipLayer implements Layer {
     const Bo = S.boss;
     if (Bo && (Bo.alive || S.mode === 'bossdown')) {
       if (this.bossRef !== Bo) { this.clear(); this.bossRef = Bo; }
-      this.boss = this.rig(this.boss, Bo.dv, true, JSON.stringify(buildToGhost(Bo.build)), Bo.x, Bo.y);
+      this.boss = this.rig(this.boss, Bo.dv, true, JSON.stringify(buildToGhost(Bo.build)), Bo.x, Bo.y, Bo.ghost?.name ?? '');
       const r = this.boss, m = r.model, s = Bo.s, L = livery(true, e.renderer);
       m.root.visible = true;
       const sink = S.mode === 'bossdown' ? clamp((2.6 - S.endT) / 2.6, 0, 1) : 0;
       this.motion(r, Bo.x, Bo.y, rdt, t, s, true);
-      e.toFlight(Bo.x, Bo.y, -(DECK + 2) * s - sink * 300 + this.bob(t + 2, s), m.root.position); m.root.position.z += sink * 60;
+      e.toFlight(Bo.x, Bo.y, -(DECK + 2) * m.k * s - sink * 300 + this.bob(t + 2, s), m.root.position); m.root.position.z += sink * 60;
       m.root.rotation.set(r.pitch + sink * 0.5, r.yaw, r.roll + sink * 0.7, 'YXZ');
       m.root.scale.set(s, s, -s);
       m.root.updateMatrixWorld(true);
@@ -128,7 +137,7 @@ export class ShipLayer implements Layer {
       L.u.flicker.value = fl; lightUniforms.uFlick.value = fl;
       if (m.edges) (m.edges.material as THREE.LineBasicMaterial).opacity = clamp(0.55 + 0.45 * fl, 0, 1);
       this.turrets(r, S, rdt, t, true, Bo.x, Bo.y, s, null);
-      this.animate(r, rdt);
+      this.animate(r, rdt, s);
       this.plumes(r, t, s, true, 0.8);
       this.steam(r, t, s);
       this.damage(r, Bo.hp / Bo.maxHp, rdt, t, s, true);
@@ -153,85 +162,97 @@ export class ShipLayer implements Layer {
   }
   private bob(t: number, s: number) { return (Math.sin(t * 0.7) * 1.1 + Math.sin(t * 1.27 + 1) * 0.45) * s; }
 
-  /** Slew turrets toward their targets and detect shots for recoil. */
+  /**
+   * Turret training. Each mount trains inside its own traverse (arcs.ts): dorsal mounts all round and
+   * anti-air only, bow casemates in a forward cone, flank sponsons across their own beam; with nothing in
+   * the arc a gun goes back to rest. Ghosts are mirrored (bow down the screen) and train on the player
+   * only when the player is inside the mount's arc, so their broadside guns stay on the broadside.
+   */
   private turrets(r: Rig, S: FrameCtx['S'], dt: number, t: number, hostile: boolean, sx: number, sy: number, s: number, cds: Record<number, number> | null) {
-    const P = S.P, B = S.boss;
-    for (let i = 0; i < r.model.turrets.length; i++) {
-      const tr = r.model.turrets[i];
-      const fx = sx + tr.x * s, fy = hostile ? sy - tr.z * s : sy + tr.z * s;
-      let want = 0;
-      if (tr.aim === 'spin') { tr.cur += tr.rate * dt; }
-      else if (tr.aim !== 'fixed') {
+    const P = S.P, Bo = S.boss, m = r.model, k = m.k;
+    for (let i = 0; i < m.turrets.length; i++) {
+      const tr = m.turrets[i], tv = tr.trav;
+      const fx = sx + tr.x * k * s, fy = hostile ? sy - tr.z * k * s : sy + tr.z * k * s;
+      if (tr.aim === 'spin') tr.cur += tr.rate * dt;
+      else if (tr.aim === 'fixed') tr.cur = tv.center;
+      else {
         let rt = (r.retarget.get(tr.uid) ?? 0) - dt;
         if (rt <= 0) {
           rt = 0.15 + Math.random() * 0.1;
-          let tx = NaN, ty = NaN;
-          if (hostile) { if (P) { tx = P.x; ty = P.y; } }
+          let want = tv.center;
+          if (hostile) { if (P) { const dx = P.x - fx, dy = P.y - fy; want = clampYaw(tv, Math.atan2(-dx, dy)); } }
           else {
-            const tg = this.target(tr, S.enemies, S.eb, B && B.alive ? B : null, fx, fy);
-            if (tg) { tx = tg.x; ty = tg.y; }
+            const tg = this.target(tr, S.enemies, S.eb, Bo && Bo.alive ? Bo : null, fx, fy);
+            if (tg) want = clampYaw(tv, Math.atan2(-(tg.x - fx), -(tg.y - fy)));
           }
-          if (tx === tx) { const dx = tx - fx, dy = ty - fy; r.aims.set(tr.uid, hostile ? Math.atan2(-dx, dy) : Math.atan2(-dx, -dy)); }
-          else r.aims.set(tr.uid, 0);
-          r.retarget.set(tr.uid, rt);
-        } else r.retarget.set(tr.uid, rt);
-        want = r.aims.get(tr.uid) ?? 0;
-        if (tr.aim === 'cone') want = clamp(want, -tr.arc, tr.arc);
-        const dd = angDiff(want, tr.cur), mx = tr.rate * dt;
+          r.aims.set(tr.uid, want);
+        }
+        r.retarget.set(tr.uid, rt);
+        const want = r.aims.get(tr.uid) ?? tv.center, dd = angDiff(want, tr.cur), mx = tr.rate * dt;
         // Ease in the last few degrees so heavy guns settle instead of snapping.
         tr.cur += clamp(dd * Math.min(1, dt * 6), -mx, mx);
-      } else tr.cur = 0;
-      tr.yaw.rotation.y = tr.cur;
+        if (tv.half < Math.PI) tr.cur = tv.center + clamp(angDiff(tr.cur, tv.center), -tv.half, tv.half);
+      }
       const lf = fireLog.get(tr.uid);
-      if (lf !== undefined && lf !== r.seen.get(tr.uid)) { r.seen.set(tr.uid, lf); tr.kick = 1; this.onFire(r, tr, i, s); }
+      if (lf !== undefined && lf !== r.seen.get(tr.uid)) {
+        r.seen.set(tr.uid, lf);
+        // The cluster fires as a short ripple, gun by gun.
+        for (let g = 0; g < tr.guns.length; g++) tr.guns[g].delay = 1e-4 + g * 0.045;
+        if (tr.id === 'bomb') tr.door = 1;
+      }
       // Rail charge glow follows the cooldown.
       if (tr.charge) {
         const cd = cds ? cds[tr.uid] ?? 0 : 0.5, q = hostile ? 0.5 + 0.5 * Math.sin(t * 3) : clamp(1 - cd / 1.7, 0, 1);
-        (tr.charge.material as THREE.MeshBasicMaterial).color.setRGB(0.79 * (0.4 + 3 * q * q), 0.65 * (0.4 + 3 * q * q), 1 * (0.4 + 3 * q * q));
+        if (q > 0.05) for (const g of tr.guns) this.chargeGlow(m, g, tr.cur, tr.charge, q * q, s);
       }
     }
   }
+  private chargeGlow(m: ShipModel, g: Gun, yaw: number, ch: [V3, V3], q: number, s: number) {
+    const e = this.engine;
+    this.gunPoint(m, g, yaw, ch[0], v); this.gunPoint(m, g, yaw, ch[1], w);
+    const len = Math.hypot(w.x - v.x, w.z - v.z);
+    e.glow.add((v.x + w.x) / 2, (v.y + w.y) / 2 + 0.5, (v.z + w.z) / 2, Math.atan2(w.z - v.z, w.x - v.x), len, 1.4 * m.k * s, rgb(m.hostile ? '#ff7a6b' : '#c9a6ff'), 0.25 + 0.6 * q, Shape.Streak);
+  }
+  /** World position of a point in a gun's local space (yaw 0 toward the bow). */
+  private gunPoint(m: ShipModel, g: Gun, yaw: number, p: V3, out: THREE.Vector3) {
+    const c = Math.cos(yaw), sn = Math.sin(yaw), x = p[0] * g.gs, y = p[1] * g.gs, z = p[2] * g.gs;
+    out.set(c * x + sn * z + g.px, y + g.py, -sn * x + c * z + g.pz);
+    return m.body.localToWorld(out);
+  }
   private target(tr: Turret, enemies: FrameCtx['S']['enemies'], eb: Ent[], boss: Ent | null, x: number, y: number): Ent | null {
+    const tv = tr.trav, limited = tv.half < Math.PI;
+    const inArc = (ex: number, ey: number) => !limited || Math.abs(angDiff(Math.atan2(-(ex - x), -(ey - y)), tv.center)) <= tv.half + 0.15;
     let best: Ent | null = null, bd = tr.layer === 'none' ? 260 * 260 : 760 * 760;
     if (tr.layer === 'none') {
       for (const b of eb) { if (b.dead || b.kind === 'beam' || b.kind === 'strike') continue; const dd = (b.x - x) ** 2 + (b.y - y) ** 2; if (dd < bd) { bd = dd; best = b; } }
       return best;
     }
     for (const en of enemies) {
-      if (en.dead || (tr.layer !== 'both' && en.layer !== tr.layer)) continue;
-      const dd = (en.x - x) ** 2 + (en.y - y) ** 2; if (dd < bd) { bd = dd; best = en; }
+      if (en.dead) continue;
+      if (tr.layer === 'air' ? en.layer === 'ground' : tr.layer === 'ground' ? en.layer !== 'ground' : false) continue;
+      const dd = (en.x - x) ** 2 + (en.y - y) ** 2; if (dd < bd && inArc(en.x, en.y)) { bd = dd; best = en; }
     }
-    if (boss && tr.layer !== 'ground') { const dd = (boss.x - x) ** 2 + (boss.y - y) ** 2 * 0.5; if (dd < bd) best = boss; }
-    if (boss && tr.layer === 'ground' && !best) best = boss;
+    if (boss && inArc(boss.x, boss.y)) { const dd = (boss.x - x) ** 2 + (boss.y - y) ** 2 * 0.5; if (dd < bd || (!best && tr.layer === 'ground')) best = boss; }
     return best;
   }
-  private onFire(r: Rig, tr: Turret, i: number, s: number) {
-    const e = this.engine;
-    if (tr.lids.length) { r.lidOpen[i] = 1; r.salvo[i] = (r.salvo[i] + 1) % 6; }
-    // Barrel-tip flash at the real muzzle (combat's own muzzle fx marks the mount).
-    for (const mz of tr.muzzles) {
-      v.set(mz[0], mz[1], mz[2]); tr.yaw.localToWorld(v);
-      e.glow.add(v.x, v.y + 2, v.z, 0, 16 * s, 16 * s, rgb(r.model.hostile ? '#ff7a5c' : '#fff1c1'), 0.9, Shape.Hot);
-    }
-  }
-  /** Recoil, VLS lids, bomb-bay doors. */
-  private animate(r: Rig, dt: number) {
-    const m = r.model;
+  /** Recoil ripples, bay doors, the gun uniforms; spinning radars. */
+  private animate(r: Rig, dt: number, s: number) {
+    const m = r.model, A = m.rig.u.uGunA.value, Bv = m.rig.u.uGunB.value, e = this.engine;
     for (let i = 0; i < m.turrets.length; i++) {
-      const tr = m.turrets[i];
-      if (tr.kick > 0.001) {
-        tr.kick *= Math.exp(-dt * (tr.id === 'artillery' ? 3.5 : 7));
-        const off = tr.recoil * (1 - Math.pow(1 - tr.kick, 3));
-        for (let b = 0; b < tr.barrels.length; b++) tr.barrels[b].position.z = tr.barrelRest[b] + off;
-      }
-      if (tr.lids.length) {
-        r.lidOpen[i] = Math.max(0, r.lidOpen[i] - dt * 1.6);
-        const o = Math.min(1, r.lidOpen[i] * 2.2), a = r.salvo[i] * 2;
-        for (let k = 0; k < tr.lids.length; k++) tr.lids[k].rotation.x = (k === a || k === a + 1 ? -1.3 : 0) * o;
-      }
-      if (tr.doors.length) {
-        const o = Math.min(1, tr.kick * 3);
-        tr.doors[0].rotation.z = -1.25 * o; tr.doors[1].rotation.z = 1.25 * o;
+      const tr = m.turrets[i], decay = tr.id === 'artillery' || tr.id === 'rail' ? 3.5 : 8;
+      if (tr.door > 0) tr.door = Math.max(0, tr.door - dt * 0.9);
+      for (const g of tr.guns) {
+        if (g.delay > 0) {
+          g.delay -= dt;
+          if (g.delay <= 0) {
+            g.delay = 0; g.kick = 1;
+            // Barrel-tip flash at the real muzzle (combat's own muzzle fx marks the mount).
+            for (const mz of g.muzzles) { this.gunPoint(m, g, tr.cur, mz, v); e.glow.add(v.x, v.y + 1, v.z, 0, 4.5 * m.k * s, 4.5 * m.k * s, rgb(m.hostile ? '#ff7a5c' : '#fff1c1'), 0.9, Shape.Hot); }
+          }
+        } else if (g.kick > 0.001) g.kick *= Math.exp(-dt * decay); else g.kick = 0;
+        A[g.idx * 4 + 3] = tr.cur;
+        Bv[g.idx * 4] = tr.recoil * (1 - Math.pow(1 - g.kick, 3));
+        Bv[g.idx * 4 + 1] = Math.min(1, tr.door * 3) * 2.1;
       }
     }
     for (const sp of m.spinners) sp.obj.rotation.y += sp.speed * dt;
@@ -271,17 +292,19 @@ export class ShipLayer implements Layer {
       const vp = m.vents[i];
       v.set(vp[0], vp[1], vp[2]).applyMatrix4(m.root.matrixWorld);
       for (let k = 0; k < 3; k++) {
-        const q = (t * 0.45 + k / 3 + i * 0.37) % 1, sz = (3 + q * 12) * s;
-        e.dark.add(v.x + d.x * q * 18 * s + Math.sin(i + q * 3) * 2 * s, v.y + 3 + q * 6, v.z + d.z * q * 18 * s, q * 2, sz, sz, rgb('#a9b2bb'), (1 - q) * q * 0.55, DarkShape.Soft);
+        const q = (t * 0.45 + k / 3 + i * 0.37) % 1, sz = (1.5 + q * 6) * s * m.k;
+        e.dark.add(v.x + d.x * q * 10 * s * m.k + Math.sin(i + q * 3) * s, v.y + 2 + q * 4, v.z + d.z * q * 10 * s * m.k, q * 2, sz, sz, rgb('#a9b2bb'), (1 - q) * q * 0.5, DarkShape.Soft);
       }
     }
   }
 
   /** Battle damage: scorch at 60%, sparks; fires, smoke and venting under 30%. */
-  private damage(r: Rig, frac: number, dt: number, t: number, s: number, hostile: boolean) {
-    const e = this.engine, m = r.model, pts = m.dmgPts, n = pts.length;
+  private damage(r: Rig, frac: number, dt: number, t: number, s0: number, hostile: boolean) {
+    const e = this.engine, m = r.model, pts = m.dmgPts, n = pts.length, s = s0 * m.k;
     const sc = clamp((0.75 - frac) / 0.6, 0, 1), nScorch = Math.floor(n * sc);
     m.scorch.geometry.setDrawRange(0, nScorch * 6);
+    // Burnt-out sections: steady lights start to fail below 70% hull, most are dark near the end.
+    (m.lights.material as THREE.ShaderMaterial).uniforms.uDmg.value = clamp((0.7 - frac) / 0.7, 0, 0.8);
     if (frac >= 0.6 || frac <= 0) return;
     const toField = (p: THREE.Vector3) => { p.x += FIELD_W / 2; p.z += FIELD_H / 2; return p; };
     r.sparkAcc += dt * (0.6 - frac) * 14;
@@ -289,10 +312,10 @@ export class ShipLayer implements Layer {
       r.sparkAcc -= 1;
       const p = pts[Math.floor(Math.random() * Math.max(1, nScorch))];
       toField(w.set(p[0], p[1], p[2]).applyMatrix4(m.root.matrixWorld));
-      for (let k = 0; k < 4; k++) { const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 160; addFx({ type: 'spark', x: w.x, y: w.z, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.25 + Math.random() * 0.2, max: 0.45, size: 1.2, drag: 3, tint: '#ffd27a' }); }
+      for (let k = 0; k < 4; k++) { const a = Math.random() * Math.PI * 2, sp = 30 + Math.random() * 90; addFx({ type: 'spark', x: w.x, y: w.z, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.25 + Math.random() * 0.2, max: 0.45, size: 0.8, drag: 3, tint: '#ffd27a' }); }
     }
     if (frac >= 0.3) return;
-    const nf = Math.min(n, 3 + Math.floor(((0.3 - frac) / 0.3) * 10));
+    const nf = Math.min(n, 4 + Math.floor(((0.3 - frac) / 0.3) * 16));
     d.set(0, 0, 1).transformDirection(m.root.matrixWorld);
     for (let i = 0; i < nf; i++) {
       const p = pts[i];
@@ -300,17 +323,18 @@ export class ShipLayer implements Layer {
       const fl = 0.7 + 0.3 * Math.sin(t * (11 + i) + i * 7), fl2 = 0.8 + 0.2 * Math.sin(t * 23 + i * 3);
       // Smoke column first (alpha-blended), then the fire on top (additive).
       for (let k = 0; k < 3; k++) {
-        const q = (t * 0.55 + k / 3 + i * 0.29) % 1, sz = (6 + q * 18) * s;
-        e.dark.add(v.x + d.x * q * 34 * s + Math.sin(i * 1.7 + q * 4) * 3 * s, v.y + 6 + q * 12, v.z + d.z * q * 34 * s, q * 3 + i, sz, sz, rgb('#26262a'), (1 - q) * Math.min(1, q * 4) * 0.6, DarkShape.Soft);
+        const q = (t * 0.55 + k / 3 + i * 0.29) % 1, sz = (3 + q * 12) * s;
+        e.dark.add(v.x + d.x * q * 26 * s + Math.sin(i * 1.7 + q * 4) * 2 * s, v.y + 4 + q * 10, v.z + d.z * q * 26 * s, q * 3 + i, sz, sz, rgb('#26262a'), (1 - q) * Math.min(1, q * 4) * 0.6, DarkShape.Soft);
       }
-      e.glow.add(v.x, v.y + 3, v.z, 0, 26 * s * fl2, 26 * s * fl2, rgb(FIRE[3]), 0.22 * fl, Shape.Soft);
-      e.glow.add(v.x, v.y + 3.5, v.z, i, (11 + 5 * fl) * s, (9 + 4 * fl) * s, rgb(FIRE[2]), 0.75 * fl, Shape.Soft);
-      e.glow.add(v.x, v.y + 4, v.z, 0, 5 * s * fl2, 5 * s * fl2, rgb(FIRE[1]), 0.9 * fl, Shape.Hot);
+      // Small, many fires: a deck fire is a few metres of a 300 m ship.
+      e.glow.add(v.x, v.y + 2, v.z, 0, 12 * s * fl2, 12 * s * fl2, rgb(FIRE[3]), 0.2 * fl, Shape.Soft);
+      e.glow.add(v.x, v.y + 2.5, v.z, i, (5 + 2.5 * fl) * s, (4 + 2 * fl) * s, rgb(FIRE[2]), 0.75 * fl, Shape.Soft);
+      e.glow.add(v.x, v.y + 3, v.z, 0, 2.2 * s * fl2, 2.2 * s * fl2, rgb(FIRE[1]), 0.9 * fl, Shape.Hot);
       // Venting: pale jets from the hull side nearest the fire.
       if (i % 3 === 1) {
         w.set(Math.sign(p[0] || 1) * 1, 0, 0).transformDirection(m.root.matrixWorld);
-        const vl = (16 + 8 * Math.sin(t * 9 + i)) * s;
-        e.glow.add(v.x + w.x * vl * 0.6, v.y + 2, v.z + w.z * vl * 0.6, Math.atan2(w.z, w.x), vl, 3.4 * s, rgb(hostile ? '#ff9a7a' : '#cfe3f0'), 0.3 * fl2, Shape.Streak);
+        const vl = (8 + 4 * Math.sin(t * 9 + i)) * s;
+        e.glow.add(v.x + w.x * vl * 0.6, v.y + 2, v.z + w.z * vl * 0.6, Math.atan2(w.z, w.x), vl, 1.6 * s, rgb(hostile ? '#ff9a7a' : '#cfe3f0'), 0.3 * fl2, Shape.Streak);
       }
     }
     r.smokeAcc += dt * nf * 3;
@@ -318,8 +342,8 @@ export class ShipLayer implements Layer {
       r.smokeAcc -= 1;
       const p = pts[Math.floor(Math.random() * nf)];
       toField(w.set(p[0], p[1], p[2]).applyMatrix4(m.root.matrixWorld));
-      addFx({ type: 'smoke', x: w.x, y: w.z, vx: (Math.random() - 0.5) * 16, vy: 60 + Math.random() * 40, life: 1.3, max: 1.3, size: 3.5 * s, grow: 2.6, a: 0.5 });
-      if (Math.random() < 0.4) addFx({ type: 'fire', x: w.x, y: w.z, vx: 0, vy: 50, life: 0.3, max: 0.3, size: 4 * s, grow: 0.6 });
+      addFx({ type: 'smoke', x: w.x, y: w.z, vx: (Math.random() - 0.5) * 16, vy: 60 + Math.random() * 40, life: 1.3, max: 1.3, size: 2.2 * s, grow: 2.6, a: 0.5 });
+      if (Math.random() < 0.4) addFx({ type: 'fire', x: w.x, y: w.z, vx: 0, vy: 50, life: 0.3, max: 0.3, size: 2.2 * s, grow: 0.6 });
     }
   }
 }

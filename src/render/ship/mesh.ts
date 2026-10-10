@@ -45,9 +45,12 @@ const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _n = new THREE.Vector3
 
 export class MB {
   p: number[] = []; n: number[] = []; uv: number[] = []; c: number[] = [];
+  /** Optional per-vertex gun tag (index, kind) for shader-animated turrets (see turrets.ts). */
+  g: number[] = []; tag: V2 | null = null;
   get tris() { return this.p.length / 9; }
   private push(v: V3, nn: THREE.Vector3, t: V2, col: THREE.Color) {
     this.p.push(v[0], v[1], v[2]); this.n.push(nn.x, nn.y, nn.z); this.uv.push(t[0], t[1]); this.c.push(col.r, col.g, col.b);
+    if (this.tag) this.g.push(this.tag[0], this.tag[1]);
   }
   /** Triangle; if `out` is given, the winding is flipped so the face normal points along it. */
   tri(a: V3, b: V3, c: V3, ta: V2, tb: V2, tc: V2, col: THREE.Color, out?: V3) {
@@ -73,6 +76,7 @@ export class MB {
         this.p.push(v.x, v.y, v.z); this.n.push(nv.x, nv.y, nv.z);
         if (uv) this.uv.push(uv.getX(i), uv.getY(i)); else this.uv.push(0, 0);
         this.c.push(col.r, col.g, col.b);
+        if (this.tag) this.g.push(this.tag[0], this.tag[1]);
       }
     }
   }
@@ -82,6 +86,7 @@ export class MB {
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.n, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.c, 3));
+    if (this.g.length) g.setAttribute('aGun', new THREE.Float32BufferAttribute(this.g, 2));
     g.computeBoundingSphere(); g.computeBoundingBox();
     return g;
   }
@@ -90,7 +95,10 @@ export class MB {
 /** One MB per material key. */
 export class Buckets {
   b = new Map<MatKey, MB>();
-  get(k: MatKey) { let m = this.b.get(k); if (!m) { m = new MB(); this.b.set(k, m); } return m; }
+  private tagv: V2 | null = null;
+  get(k: MatKey) { let m = this.b.get(k); if (!m) { m = new MB(); this.b.set(k, m); } m.tag = this.tagv; return m; }
+  /** Tag every vertex appended from now on with (gun index, kind); null stops tagging. */
+  tag(t: V2 | null) { this.tagv = t; for (const m of this.b.values()) m.tag = t; }
   /** Build meshes (one per material) into a group. */
   meshes(mats: Record<MatKey, THREE.Material>, into: THREE.Object3D, shadows = true) {
     const out: THREE.Mesh[] = [];
