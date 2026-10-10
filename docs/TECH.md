@@ -299,7 +299,7 @@ tests/unit/balance.test.ts --disable-console-intercept` prints the table (`ONLY=
 
 ### Debug hooks (`window.__gd`)
 `run`, `profile`, `S`, `debug.timeScale`, `god()`, `winNow()` (kills boss/elite outright), `killPlayer()`, `overdrive()` (charge and fire),
-`travelTo(type)`, `forceNext(type)`, `addScrap(n)`, `aim`, `gunnery`, `selectGroup(i)`.
+`travelTo(type)`, `forceNext(type)`, `addScrap(n)`, `aim`, `gunnery`, `selectGroup(i)`, `spawn(type)` (one director group), `spawnElite(type)`.
 
 ## Units, symbology and FLIR (`src/render/units/`, `src/render/flir.ts`)
 - **True-scale models** (`specs.ts`, `scale.ts`): `buildSpecs` authors each unit at any size, then sets `spec.scale` so its largest
@@ -318,7 +318,7 @@ tests/unit/balance.test.ts --disable-console-intercept` prints the table (`ONLY=
   salvage square; glyphs for armour, infantry, AA, SAM, flak tower, rotary, fixed wing, UAV, bomber, carrier, crate, pod, wreck). Contacts
   larger than `BIG` get a designator (SAM, FLAK, BOMBER...), elites a double box. Out of weapon range = 60% alpha, under our hull = 30%.
   `tele` wind-up turns the contact pale and closes a ring on it. `aim.hover` / `aim.lock` = white lock box. Damaged = a health tick.
-  Same-class contacts within `GROUP_R` (24 screen units, single link) merge into one box with a count. Kills leave a short opening-box
+  Same-class contacts within `GROUP_R` (30 screen units, single link) merge into one box with a count. Kills leave a short opening-box
   splash. Aircraft markers follow their visual altitude (`visAlt`, `altShift`).
 - **FLIR** (`flir.ts`): `FLIR.on` (main.ts: Shift held or T latched, combat only), eased `FLIR.k` / `flirUniform`. The post grade remaps
   luminance to white-hot greyscale with scanlines and heavier grain; the livery shader swaps unit emissive for body heat (hotter low hull,
@@ -326,10 +326,52 @@ tests/unit/balance.test.ts --disable-console-intercept` prints the table (`ONLY=
   keep their light. The HUD adds crop marks, a readout and a 4x zoom inset on the target (copied from the WebGL canvas in the same frame).
   Costs: one uniform and a branch in the grade; nothing extra on the low tier.
 
+## Refit board (`src/ui/refit.ts`, `src/ui/refitLogic.ts`, `src/ui/drag.ts`)
+At true warship scale the guns are a few pixels on the hull, so the refit screen is an engineering callout drawing: the
+ship's plan (`drawBlueprint` with an explicit `fit`) on a blueprint sheet, and every mount called out by a leader line to a
+hand-sized, not-to-scale socket tile around it. Opened from the map (`#btn-refit`) and from the merchant's "Refit ship"
+service, which also passes the counter (`market`, `sections` getters on `RefitExtras`).
+- **Layout** (`layoutBoard`, pure): bow mount tile above the ship, port mounts (`ox < 0`) in the left column, starboard in the
+  right, centreline mounts to the shorter column. Tiles sit level with their mount where they can (`resolve1D` spreads
+  them in order inside the column), shrinking to 40 px when a column is crowded (`compact`). Anchors are where the mount is
+  drawn (`mountDrawPos` in `shipPreview.ts`: broadside guns sit on their sponsons). Leaders run tile edge -> stub ->
+  diagonal across the gutter -> level run over the hull -> mount; the diagonals share two vertical lines in the same order
+  as the level runs, so a column's leaders cannot cross. Mounts level with each other (a battery's flank gun and centre
+  bay) get runs `LEVEL_STEP` (15 px) apart. Below `STACK_BELOW` (640 px board width, phones) it stacks: ship on top with
+  numbered balloons, numbered tiles listed under it. `tests/unit/refitBoard.test.ts` holds every hull and the worst
+  8-section builds at four board sizes to: tiles in bounds, no overlaps, zero crossings, no leader through a tile, sides correct.
+- **Moves** (pure): `Src` = hold / mount / counter, `Dst` = mount / hold. `checkMove` gives `ok` or a refusal (`kind`: wrong slot
+  kind, `scrap`: counter part not affordable, `same`, `noop`) with the reason shown on the socket; `applyMove` swaps mount to
+  mount, sends a replaced part to the hold, unmounts to the hold; `previewMove` returns the build a move would leave. Sections:
+  `canMoveSection` / `moveSection` (insert; the bridge stays at the bow), `canCutSection` / `cutSection` (parts to the hold).
+  The board applies every one inside `changeBuild(run, ...)` exactly as the old refit did; counter parts are bought with the
+  merchant's own purchase function (`buyPart` in main.ts: scrap, sold flag, part into the hold) and then moved from the hold.
+- **Preview**: while a part is picked or carried, every socket gets `.cand` (lit, with the arc tag and target layers the part
+  would get there from `mountTraverse`, and its top stat deltas) or `.nope` (dimmed, with the reason). The socket under the
+  pointer draws the firing-arc wedge on the plan (ventral ordnance: drop rings), redraws the ship with the previewed build and
+  shows `statDeltas` in the particulars panel (hull, speed, fire rate, shield, rated anti-air / anti-ground dmg/s from
+  `firepower()`, mass, thrust, PD, repair, drones). A section drag redraws the reordered hull at its own fit.
+- **Drag** (`draggable(el, hooks)`): pointer events, one path for mouse, pen and touch. Mouse/pen start after 6 px of travel,
+  a finger after a 260 ms press-and-hold (a quick swipe still scrolls). Targets are `[data-drop]` elements
+  (`slot:<si>:<i>`, `hold`, `sec:<i>`, `cut`); the carried tile is a clone hung below-right of the pointer (so the socket under it stays
+  readable) that snaps into the target (150 ms overshoot) or springs back. Edge auto-scroll while carrying (phones: hold below the board). Escape cancels. The board does not re-render
+  mid-drag (`dragging()`).
+- **Feedback**: landing plays `uiSound('stamp')` (a counter purchase `'buy'`), the socket does a clunk (scale overshoot and a
+  well flash) and its leader and ring flash; refused drops `'deny'` and wobble. Gauges rebuild only when the committed fit
+  changes, so needles swing once per refit.
+- **Click and keyboard**: click (or Enter) a hold part to pick it, then a socket to place it; click a mounted part to pick it
+  up, then another socket to swap or "Return to hold"; Delete unmounts the focused socket; Esc lets go. Sections also keep
+  their ▲ ▼ buttons and guarded Cut switch; dropping a section in the cut bin asks for confirmation.
+- Screenshots: `docs/shots/ui-refit-*.jpg` (board idle, drag over a lit / refused socket, equipped, swap, section drag,
+  merchant counter, an 8-section build, phone).
+- Hooks for tests: `.mtile[data-slot="si-i"]` (`.cand`, `.nope`, `.over`), `[data-inv]`, `[data-mkt]`, `.rf-hold`,
+  `li.sec[data-sec]`, `.rf-toast`, `.board-lines .lead` / `.arc-w.hot`.
+
 ## Ship rendering (`src/render/ship/`)
 - `hull.ts` builds a hull at the reference scale (`SHIP_SCALE` 2.6) and scales a `body` group by `SHIP_SCALE / 2.6`, so every detail keeps its proportion if the ship scale changes. Layer-facing points (`nozzles`, `vents`, `dmgPts`) are in root space; turret pivots are in body space (`model.k`).
 - Three detail scales, all merged per material: superstructure (bridge stack, citadels), medium equipment (vents, tanks, deck houses), and the dense greeble layer in `greebles.ts` (recursively split machinery fields, masts, dishes, PDC blisters, heat sinks, hangar mouths, belt pipes, stencils). Seeded per hull section, so a build always looks the same and ghosts match their builds. Plate seams are procedural in the hull shader (`materials.ts`, fwidth-faded).
 - Weapon mounts (`turrets.ts`) are clusters of small guns dressed by their traverse (`arcs.ts`, on `Mount.trav`): raised dorsal barbettes, a bow casemate, flank sponsons, ventral bays. All guns of a ship are one mesh per material, animated in the vertex shader from `uGunA` (pivot, yaw) and `uGunB` (recoil, door slide, gun scale). Yaw is clamped with `clampTraverse` (ghosts mirrored); `manualAimFor` overrides the target for heavy groups.
+- Utility modules (`utilities.ts`) are clusters of small installations bedded into the deck, never one big glowing part: shield = a ring of emitter pylons with capacitors, conduits and a faint flickering spark shimmer strung between the tips; reactor = an armoured containment block (tiny core glow, the module's steam vent) with heat-sink banks, coolant tanks and, at higher tiers, secondary pods; salvage magnet = a grid of tractor dishes, a control house, cranes over scrap bins; repair = a row of drone hangars with lit doors and landing pads; drone bay = lit launch slots with parked drones and a control cab; armour plating = bolted slabs over the outboard gallery, then belt courses and a gallery bulwark (no deck blob); vector thrusters = nozzle pods on the outboard gallery (`Nozzle.aft`: small fixed aft jets) fed by a plenum on deck. No element exceeds ~3-4 units (reference scale); a higher tier adds installations, not size; glows are light points or finger-sized emissive bits. Each module owns a zone around its mount (`utilZone`, claimed before the sections build), places installations inside it, beds the gaps with low machinery, and reserves belt stretches (`GCtx.belt`) so belt greebles keep off its hardware. Seeded per section and slot. Spine radiator fields and armour-deck elevators follow the same rule (grids of small fin banks, 6-unit lifts).
 - Lights are one `THREE.Points` per ship (`lights.ts`): portholes, deck lamps, nav lights (red port, green starboard, white strobes). `uDmg` knocks out steady lights as the hull fails.
 - Dev viewer: `/tools/ship.html?build=starter|big|max|<json>&zoom=&tilt=&orbit=&lx=&ly=&ghost=1&px=&py=&hp=`; `window.__shipInfo()` reports draw calls and triangles.
 

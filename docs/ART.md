@@ -91,4 +91,5 @@ Rules for new UI:
 - Icons come from `src/ui/icons.ts` (game-icons.net, CC BY 3.0); map a new id there rather than drawing one-off glyphs.
 - Screens are built in `src/ui/screens/*.ts` and shown with `show()`, which transitions automatically. Give each screen a `data-screen` key; re-rendering the same key swaps in place.
 - UI sounds go through `uiSound()` in `src/ui/sound.ts` (hooks: press, hover, buy, stamp, flap, type, deny).
+- The refit board is a callout drawing, not a parts list: the ship's plan on blueprint paper, thin pale leader lines to steel socket tags (stencil number strip, recessed socket well, arc and target-layer tags). Tags are deliberately not to scale. Lit means "fits" (plasma), dimmed means "refused" (with the reason); gains read in plasma, losses in hazard amber, never hostile red. A part lands with a snap and a clunk, never a fade.
 - Map node symbols follow military plotting conventions: hostile diamonds (fight, elite, boss), neutral squares (merchant, derelict), unknown quatrefoil (signal), friendly circle (drydock).
