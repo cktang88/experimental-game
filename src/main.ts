@@ -34,7 +34,9 @@ import { wreckReport } from './ui/screens/report';
 import { pauseView, runMenuView, holdView } from './ui/screens/pause';
 import { refitView } from './ui/screens/refit';
 import { pick, rint, clamp } from './util/rng';
-import { loadProfile, perksFor, dailySeed, dateKey, type Profile } from './game/meta';
+import { loadProfile, perksFor, dailySeed, utcDateKey, type Profile, type Settlement } from './game/meta';
+import { filingFor, submitDaily, fetchDailyBoard, flushPendingDaily } from './game/daily';
+import { roster, localRow, dailyBriefing } from './ui/screens/roster';
 import { launchPanel, admiraltyScreen, settle, victoryScreen, portScreen } from './game/metaScreens';
 import { HULLS } from './data/hulls';
 import { heatFx } from './data/heat';
@@ -152,19 +154,39 @@ function titleScreen() {
     initAudio(); sfx('ui');
     const cs = sanitizeName(raw) || 'PILOT'; try { localStorage.setItem('gd.callsign', cs); } catch { /* ignore */ }
     if (saved) settle(profile, saved, saved.won ? 'victory' : 'abandoned'); // a run left unfinished is banked at half pay
-    const key = dateKey();
+    const key = utcDateKey();
     run = daily ? newRun(cs, dailySeed(key), { daily: key }) : newRun(cs, undefined, { hull: profile.hull, heat: profile.heat, perks: perksFor(profile.xp) });
     mapToast = daily ? `Daily strike ${key}: the same route for every pilot today.` : 'Choose your first node. Everything on floor one is a fight.';
     mapScreen();
   };
   const callsign = () => (document.getElementById('callsign') as HTMLInputElement | null)?.value ?? '';
+  // Daily Strike opens the briefing: today's (or yesterday's) duty roster, then the launch switch.
+  const openDaily = () => {
+    const host = document.querySelector('[data-screen="title"]');
+    if (!host || host.querySelector('.daily-modal')) return;
+    initAudio(); sfx('ui');
+    const now = Date.now(), cs = () => sanitizeName(callsign()) || 'PILOT';
+    const close = () => { m.remove(); document.getElementById('btn-daily')?.focus(); };
+    const m = dailyBriefing({
+      today: utcDateKey(new Date(now)), yesterday: utcDateKey(new Date(now - 86_400_000)), callsign: cs,
+      load: async (date) => {
+        await flushPendingDaily();
+        const board = await fetchDailyBoard(date, cs());
+        const d = profile.daily && profile.daily.date === date ? profile.daily : null;
+        return { board, local: d ? localRow({ callsign: cs(), date, score: d.score, sector: d.sector, floor: d.floor, kills: d.kills, hull: 'vanguard', won: d.won }) : null };
+      },
+      onLaunch: () => { m.remove(); launch(callsign(), true); },
+      onClose: close,
+    });
+    host.append(m);
+  };
   show(titleView({
     callsign: stored || `PILOT-${rint(100, 999)}`,
     saved: saved ? { sector: saved.sector, floor: saved.at ? saved.map.nodes[saved.at].floor : -1, callsign: saved.callsign, hp: saved.hp, maxHp: maxHp(saved) } : null,
     noGl: !renderer,
     registry: registryOnline(),
     sound: soundSwitch,
-    launchPanel: launchPanel(profile, () => launch(callsign(), true), () => admiraltyScreen(profile, titleScreen)),
+    launchPanel: launchPanel(profile, openDaily, () => admiraltyScreen(profile, titleScreen)),
     onStart: (raw) => launch(raw, false),
     onContinue: () => { initAudio(); run = saved; if (saved!.phase === 'victory') { showVictory(); return; } mapToast = 'Run restored.'; mapScreen(); },
   }));
@@ -412,11 +434,26 @@ function bossReward(g: Ghost) {
   render();
 }
 
+/** Daily runs: file the run with the registry and print the day's duty roster (null for ordinary runs). */
+function dailyRoster(r: RunState, st: Settlement): Node | null {
+  const f = filingFor(r.callsign, st);
+  if (!f) return null;
+  const ro = roster({ date: f.date, callsign: f.callsign });
+  ro.status('Filing your run with the registry…');
+  void (async () => {
+    const res = await submitDaily(f);
+    ro.filing(res, f);
+    const board = await fetchDailyBoard(f.date, f.callsign);
+    ro.show(board, board.online ? null : localRow(f));
+  })();
+  return ro.node;
+}
+
 function showVictory() {
   const r = run!;
   mode = 'menu'; sfx('clear'); music.setScene('victory');
   victoryScreen(r,
-    () => { const st = settle(profile, r, 'victory'); clearSave(); portScreen(r, st, () => { run = null; titleScreen(); }); },
+    () => { const st = settle(profile, r, 'victory'); clearSave(); portScreen(r, st, () => { run = null; titleScreen(); }, dailyRoster(r, st)); },
     () => { r.endless = true; r.phase = 'map'; enterNextSector(r); sectorGhosts = []; mapToast = `Endless: sector ${r.sector}. The map keeps going, and so do they.`; saveRun(r); mapScreen(); });
 }
 
@@ -425,7 +462,7 @@ async function onDeath() {
   clearSave(); music.setScene('death');
   const st = settle(profile, r, 'dead');
   const g = deathGhost(r);
-  const report = wreckReport({ run: r, floor: g.floor, settlement: st, onAgain: () => { run = null; titleScreen(); } });
+  const report = wreckReport({ run: r, floor: g.floor, settlement: st, onAgain: () => { run = null; titleScreen(); }, roster: dailyRoster(r, st) });
   show(report.node);
   const res = await submitGhost(g);
   report.setStatus(res === 'shared'

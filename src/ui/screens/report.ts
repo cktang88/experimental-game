@@ -9,7 +9,7 @@ import { icon } from '../icons';
 import { stamp, teletype } from '../kit';
 import { pin } from '../cards';
 
-export interface WreckOpts { run: RunState; floor: number; settlement: Settlement | null; onAgain: () => void }
+export interface WreckOpts { run: RunState; floor: number; settlement: Settlement | null; onAgain: () => void; /** Daily runs: the duty roster printout. */ roster?: Node | null }
 
 export function wreckReport(o: WreckOpts) {
   const r = o.run;
@@ -26,6 +26,7 @@ export function wreckReport(o: WreckOpts) {
           el('span', null, el('small', null, 'Hull'), `${HULLS[r.hull]?.name ?? 'Vanguard'}${r.heat ? ` · heat ${r.heat}` : ''}`),
           el('span', null, el('small', null, 'Sections lost'), String(r.build.sections.length))),
         reportBody(r, o.settlement),
+        o.roster ?? null,
         r.relics.length ? el('div', 'wr-pins', el('small', null, 'Insignia recovered from the wreck'), el('span', 'pinrow', ...r.relics.map((id) => pin(id, 34)))) : null,
         el('div', 'wr-reg crt', el('div', 'crt-k', 'Registry transmission'), status),
         el('div', 'foot', el('button', { class: 'switch primary', id: 'btn-again', onclick: o.onAgain },

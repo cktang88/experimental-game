@@ -12,7 +12,7 @@ import { EN, type EnemyType } from '../data/enemies';
 import { WEAPONS, UTILS, TIER, partDef, allParts, derive } from '../data/parts';
 import { RELICS } from '../data/relics';
 import {
-  rankOf, hullUnlocked, maxHeat, saveProfile, dateKey, settleRun, type Profile, type RunSummary, type Settlement,
+  rankOf, hullUnlocked, maxHeat, saveProfile, dateKey, utcDateKey, settleRun, type Profile, type RunSummary, type Settlement,
 } from './meta';
 import type { RunState } from './run';
 import { sfx } from './audio';
@@ -51,7 +51,7 @@ export function launchPanel(p: Profile, onDaily: () => void, onAdmiralty: () => 
         class: 'heat-key' + (p.heat === i ? ' sel' : '') + (i ? '' : ' zero'), 'data-heat': i, 'aria-pressed': String(p.heat === i),
         title: i ? HEAT.slice(0, i).map((x) => x.name).join(', ') : 'No modifiers', onclick: () => { p.heat = i; saveProfile(p); sfx('ui'); render(); },
       }, String(i))))) : null;
-    const daily = p.daily && p.daily.date === dateKey() ? `Today's best: ${fmt(p.daily.score)} pts` : 'Same route for every pilot today';
+    const daily = p.daily && p.daily.date === utcDateKey() ? `Today's best: ${fmt(p.daily.score)} pts` : 'Same route for every pilot today';
     root.replaceChildren(...nodes(
       el('div', 'rank-row',
         insignia(r.rank),
@@ -197,11 +197,12 @@ export function victoryScreen(run: RunState, onRetire: () => void, onEndless: ()
     ))));
 }
 /** After retiring from a victory: the full report and the way home. */
-export function portScreen(run: RunState, st: Settlement, home: () => void) {
+export function portScreen(run: RunState, st: Settlement, home: () => void, roster: Node | null = null) {
   show(el('div', { class: 'page wreck-page victory-page', 'data-screen': 'port' }, el('div', 'screen center',
     el('section', 'report-sheet',
       el('div', 'wr-top', el('div', null, el('div', 'eyebrow', 'Returned to port'), el('h2', null, 'Wreck report')), el('span', 'wr-socket', icon('anchor'))),
       wreckReport(run, st),
+      roster,
       run.relics.length ? el('div', 'pins', ...run.relics.slice(0, 6).map((id) => relicCard(id))) : null,
       el('div', 'foot', el('button', { class: 'btn primary', id: 'btn-home', onclick: home }, 'Back to the hangar'))))));
 }

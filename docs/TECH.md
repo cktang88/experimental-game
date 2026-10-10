@@ -111,6 +111,18 @@ heat.scrap * dv.scrapMult` (see "Scrap economy" below). Scrap pickups home to th
 counts pickups landing within 0.5 s of each other (rising pitch for audio). City agent: `worldBlast()` should return about 1-4 scrap per
 building destroyed; combat applies the scaling and carnage, counts it as a structure and feeds Overdrive.
 
+### City (`src/game/worldgen.ts`, rendering in `src/render/world/`)
+- The city is generated in rows (`CITY.chunks`) in a fixed city space: field y = `cy + S.scrollY`. `S.decor` holds every live
+  building (`type: 'bldg'`, dead ones stay as rubble) and crater (`type: 'crater'`), with field `x, y` kept in sync with the scroll.
+- Buildings: `hp / maxHp` (about 2-10 bomb hits by size, towers up to 240), `value` 1-4 scrap, `fire` 0..1, `collapseT`, `dead`.
+  `worldBlast(x, y, r, dmg)` damages footprints (and roofs as seen, via `CITY.project`), ignites, collapses, leaves a crater and
+  returns the scrap of what collapsed. Refinery tanks, silos and flares chain-react: their follow-up blasts go through combat's
+  `groundBlast` so they pay like any other. Combat emits `structure` (audio plays `collapse`).
+- `DARK`: the blackout grid. The city's power dies around the dreadnought as it passes; shaders sample it.
+- Renderer: global instanced batches (blocks, flats, props, lights, traffic, craters) refilled only when a row enters or leaves.
+  Window grids, burning floors, collapse and rubble are in the building shader (`src/render/world/shaders.ts`). Debug: `window.__city`
+  (`CITY`, `DARK`, `worldBlast`) and, in dev, `window.__cityLayer`.
+
 ### Hitstop and slow-mo
 - `S.stop = { left, since, total }`: while `left > 0` the simulation is frozen; the renderer keeps drawing (shake keeps decaying).
   Ordinary kills use the dead-air formula capped at 60 ms with a 240 ms cooldown; elite kill 120 ms, boss death 350 ms, heavy player hit 100 ms always land.
@@ -186,8 +198,23 @@ clearing sector 3 shows the victory screen; the pilot banks the run or pushes on
 - `settleRun(profile, summary)` is pure and returns XP lines, goals completed, rank change, new hulls, heat unlocked, best/daily records.
   main.ts settles exactly once per run: on death, on retiring after victory, or on abandoning (half XP).
 - Heat: `maxHeat(profile)` is 0 until the first victory, then one above the highest heat won (max 8). `heatFx(level)` folds the modifiers.
-- Daily strike: `dailySeed(dateKey())`, Vanguard, heat 0, no perks; `dailyShareLine` for sharing.
+- Daily strike: `dailySeed(utcDateKey())` (UTC days, so every time zone flies the same route), Vanguard, heat 0, no perks; `dailyShareLine` for sharing. Ranked on the duty roster below.
 - Screens: `src/game/metaScreens.ts` (launch panel on the title, Admiralty with service record / goals / codex tabs, wreck report, victory, port).
+
+### Daily strike duty roster (leaderboard)
+- **Score** (`dailyScore` in `src/game/meta.ts`, constants `DAILY_SCORE`), from the run's existing stats:
+
+  `daily score = combat score + 2500 × nodes charted + 1500 × elites + 6000 × ghosts laid to rest + 5 × structures + 25000 if victory`
+
+  Combat score (`run.stats.score`) already carries enemy value, enemy level and the carnage multiplier. The route terms make depth
+  count: one more node is worth more than a typical fight's kills, so a pilot who reaches sector 3 outranks one who farms sector 1.
+  Endless sectors after a victory keep adding. The profile's `daily` record and the share line use this score.
+- **API** (`server/server.mjs`, validation in `server/validate.mjs`, the board in `server/daily.mjs`, stored in `GHOST_DATA_DIR/daily.json`, 60 days kept):
+  - `GET /api/daily/:date[?callsign=X&limit=N]` -> `{ today, date, count, entries: top 50 [{ rank, callsign, date, score, sector, floor, kills, hull, won, at }], you? }`. `you` is that callsign's row and rank, even outside the top 50. Bad dates are a 400.
+  - `POST /api/daily` with `{ callsign, date, score, sector, floor, kills, hull, won }` -> `201 { ok, improved: true, rank, count, entry }`, or `200 { improved: false, ... }` when the callsign already has a better run that day (the best run per callsign per day is kept). Strict validation, no clamping: `date` must be a real `YYYY-MM-DD` equal to today's or yesterday's UTC date; integers only, `score` 0..20,000,000, `sector` 1..99, `floor` 0..20, `kills` 0..100,000; `hull` a known class; `won` a boolean (and needs sector 3+); callsign 1-16 of `A-Z 0-9 space _ . -` (case-folded; raw strings over 40 chars refused); body under 2 KB. Rate limit per IP: 12 filings an hour, 5 s apart (429 with `retry-after`; `DAILY_RATE_MAX` raises the hourly cap, the e2e server sets it).
+  - Ranking: score, then sector, then floor, then the earlier filing.
+- **Client** (`src/game/daily.ts`): `filingFor(callsign, settlement)` builds the filing from `Settlement.summary` / `dailyScore`; `submitDaily` returns `filed | kept | queued | rejected`. Offline, 429 or 5xx queue the filing in `localStorage['gd.daily.pending']` (best per callsign and day); `flushPendingDaily()` resends them when the roster is next opened and drops ones whose day has closed. `fetchDailyBoard(date, callsign)` returns `online: false` instead of throwing.
+- **UI** (`src/ui/screens/roster.ts`): the roster is fan-fold line-printer paper (pin-feed margins, green bars, line-by-line print), the pilot's row marked with a highlighter, a rubber stamp for the filing result (Filed / On file / Held / Refused). It prints on the wreck report (death) and the port report (retiring after victory) of daily runs, and in the Daily Strike briefing on the title (today / yesterday tabs, then the launch switch, `#btn-daily-launch`). Offline it says "No carrier" and shows this device's own run, unranked.
 
 ### Balance harness
 `tests/sim/harness.ts` runs real fights headless with a scripted pilot and seeded `Math.random`. `BALANCE=1 npx vitest run
