@@ -163,7 +163,7 @@ export function startCombat(c: CombatSetup) {
 export { seedDecor, updateBg } from './worldgen';
 import { seedDecor, updateBg, worldBlast } from './worldgen';
 /** Every ground blast goes through here: buildings it destroys pay scrap (times carnage) and feed carnage/overdrive. */
-function groundBlast(x: number, y: number, r: number, d: number, lance = false) {
+export function groundBlast(x: number, y: number, r: number, d: number, lance = false) {
   const sc = worldBlast(x, y, r, d);
   if (sc > 0) {
     S.stats.structures++; if (lance) S.stats.lanceStructures++;

@@ -11,7 +11,7 @@
 //  engine.groundScale. FLOOR is one storey.
 import { rnd, pick, clamp } from '../util/rng';
 import { FIELD_W as W, FIELD_H as H } from './field';
-import { S } from './combat';
+import { S, groundBlast } from './combat';
 import { addFx, boomFx, V } from './vfx';
 
 export const FLOOR = 4.4;
@@ -173,15 +173,20 @@ function bldg(ch: Chunk, kind: BKind, x0: number, y0: number, x1: number, y1: nu
   const w = x1 - x0, h = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   let top = 0; for (const t of tiers) top = Math.max(top, t.z0 + t.hgt);
   const floors = Math.max(1, Math.round(top / FLOOR));
-  const maxHp = kind === 'tank' ? 30 + w * 0.6 : 12 + floors * 3 + (w * h) / 150;
+  const maxHp = kind === 'tank' ? 30 + w * 0.6 : Math.min(140, 12 + floors * 3 + (w * h) / 150);
   const b: Bldg = {
     type: 'bldg', kind, x: cx, y: cy + S.scrollY, cy, w, h, r: Math.hypot(w, h) / 2, hgt: top, tiers, style, seed: nextSeed(), floors,
     lit: rnd(0.25, 0.7), keepLit: Math.random() < 0.12, neon: 0,
-    hp: maxHp, maxHp, value: kind === 'tank' ? 3 : 0.6 + maxHp / 40,
+    hp: maxHp, maxHp, value: scrapValue(kind, maxHp),
     fire: 0, burnT: -1, collapseT: -1, dead: false, chunk: ch, rot: 0, ...o,
   };
   ch.bldgs.push(b); S.decor.push(b);
   return b;
+}
+/** Scrap a collapsed building pays (1-4, bigger pays more); combat scales it by carnage. */
+export function scrapValue(kind: BKind, maxHp: number) {
+  if (kind === 'tank') return 3;
+  return clamp(Math.round(1 + (maxHp - 20) / 40), 1, 4);
 }
 const tier = (w: number, h: number, z0: number, hgt: number, ox = 0, oy = 0): Tier => ({ ox, oy, w, h, z0, hgt });
 
@@ -511,8 +516,8 @@ export function updateBg(dt: number) {
     if (y < -60 || y > H + 60) continue;
     boomFx(p.x, y, p.r * 0.75, '#ffb347', true);
     V.shake = Math.min(14, V.shake + 5);
-    const sc = worldBlast(p.x, y, p.r, p.dmg);
-    if (sc > 0 && S.P) for (let k = 0, n = Math.min(5, Math.ceil(sc / 3)); k < n; k++) S.pickups.push({ x: p.x, y, vx: rnd(-70, 70), vy: rnd(-90, 20), val: (sc * S.P.dv.scrapMult) / n, t: 0, kind: 'scrap' });
+    // Through combat so collapses pay scrap (times carnage), count as structures and feed Overdrive once.
+    if (S.P && S.active) groundBlast(p.x, y, p.r, p.dmg); else worldBlast(p.x, y, p.r, p.dmg);
   }
   // Fires burn down slowly; smoke and embers rise from the worst of them.
   for (let i = CITY.burning.length - 1; i >= 0; i--) {
