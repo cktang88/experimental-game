@@ -18,7 +18,7 @@ import {
   newCarnage, addCarnage, stepCarnage, type Carnage,
 } from './feel';
 
-import { FIELD_W, FIELD_H } from './field';
+import { FIELD_W, FIELD_H, SHIP_SCALE } from './field';
 export const W = FIELD_W, H = FIELD_H;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -294,7 +294,8 @@ function spawnBoss(g: Ghost) {
   // A ghost that comes about to bring its broadsides to bear also takes ours. Early hulls are broadside-heavy, so the
   // early ghosts get the most extra hull (x1.75 in sector 1, x1.35 in 2, none from 3): every duel lasts about half a minute.
   const duel = Math.max(1, 2.15 - 0.4 * sec);
-  const maxHp = (1800 * Math.pow(sec, 1.55) + dv.maxHp * 2) * duel * S.P!.dv.mods.bossHpMul * S.heat.bossHp;
+  // SHIP_SCALE / 2.6: hulls grew with the scale pass (more of our guns bear on it), so the duel keeps its length.
+  const maxHp = (1800 * Math.pow(sec, 1.55) + dv.maxHp * 2) * duel * (SHIP_SCALE / 2.6) * S.P!.dv.mods.bossHpMul * S.heat.bossHp;
   const u = dv.u, shield = u.shield * 40 * (0.8 + 0.35 * sec);
   S.boss = {
     ghost: g, build, dv, s, x: W / 2, y: -(dv.len * s) / 2 - 10, homeY: (dv.len * s) / 2 + 70, halfW: (dv.width * s) / 2, r: (dv.width * s) / 2,
