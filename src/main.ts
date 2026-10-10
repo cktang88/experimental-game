@@ -171,15 +171,23 @@ function titleScreen() {
 }
 
 /* ---------------- map ---------------- */
-async function ensureIntel() {
-  if (!run || run.bossGhost) return;
-  const sector = run.sector;
-  const { ghosts, count } = await fetchGhosts(sector);
-  if (!run || run.sector !== sector) return;
-  sectorGhosts = ghosts;
-  run.bossGhost = chooseGhost(ghosts, sector, run.pilot);
-  run.bossGhostCount = count;
-  saveRun(run);
+/** One registry lookup per sector at a time: the map's dossier and the boss node share it, so the ghost you were
+ *  shown is the ghost you fight (two racing lookups could each pick a different one). */
+let intelPending: { run: RunState; sector: number; p: Promise<void> } | null = null;
+function ensureIntel(): Promise<void> {
+  if (!run || run.bossGhost) return Promise.resolve();
+  const r = run, sector = r.sector;
+  if (intelPending && intelPending.run === r && intelPending.sector === sector) return intelPending.p;
+  const p = (async () => {
+    const { ghosts, count } = await fetchGhosts(sector);
+    if (run !== r || r.sector !== sector || r.bossGhost) return;
+    sectorGhosts = ghosts;
+    r.bossGhost = chooseGhost(ghosts, sector, r.pilot);
+    r.bossGhostCount = count;
+    saveRun(r);
+  })().finally(() => { if (intelPending?.p === p) intelPending = null; });
+  intelPending = { run: r, sector, p };
+  return p;
 }
 function intelCard(): HTMLElement {
   if (!run!.bossGhost) {

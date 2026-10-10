@@ -278,13 +278,16 @@ export interface BossGlint { x: number; y: number; tele: number; ang: number; sp
 export const bossPhaseOf = (hpFrac: number) => (hpFrac > BOSS_PHASES[0] ? 1 : hpFrac > BOSS_PHASES[1] ? 2 : 3);
 /** Rounds each gun packs into a ghost broadside (ours is broadsideRounds; ghosts fire fewer, heavier-telegraphed rounds). */
 export const bossRounds = (p: Part, phase: number) =>
-  p.id === 'missile' || p.id === 'rail' ? 1 : p.id === 'flak' ? 2 : clamp(Math.round(broadsideRounds(p) * 0.4), 2, 5) + (phase - 1);
+  p.id === 'missile' || p.id === 'rail' ? 1 : p.id === 'flak' ? 2 : clamp(Math.round(broadsideRounds(p) * 0.4), 2, 5) + (phase >= 3 ? 1 : 0);
 
 function spawnBoss(g: Ghost) {
   const sec = S.sector, build = ghostToBuild(g.sections), dv = derive(build);
   const s = Math.min(1.6, 520 / dv.len, 700 / dv.width);
   // Sector dominates: player power grows several-fold across a run, so the ghosts must too. The ghost's own hull adds on top.
-  const maxHp = (1800 * Math.pow(sec, 1.55) + dv.maxHp * 2) * S.P!.dv.mods.bossHpMul * S.heat.bossHp;
+  // A ghost that comes about to bring its broadsides to bear also takes ours. Early hulls are broadside-heavy, so the
+  // early ghosts get the most extra hull (x1.75 in sector 1, x1.35 in 2, none from 3): every duel lasts about half a minute.
+  const duel = Math.max(1, 2.15 - 0.4 * sec);
+  const maxHp = (1800 * Math.pow(sec, 1.55) + dv.maxHp * 2) * duel * S.P!.dv.mods.bossHpMul * S.heat.bossHp;
   const u = dv.u, shield = u.shield * 40 * (0.8 + 0.35 * sec);
   S.boss = {
     ghost: g, build, dv, s, x: W / 2, y: -(dv.len * s) / 2 - 10, homeY: (dv.len * s) / 2 + 70, halfW: (dv.width * s) / 2, r: (dv.width * s) / 2,
@@ -403,7 +406,7 @@ function bossRound(b: Boss, w: BossGun, side: number, r: number, R: number, lock
   if (!b.alive || S.mode !== 'play') return;
   const BS = BOSS_BROADSIDE, P = S.P!, p = w.part, t = p.tier, ph = b.phase;
   const { x, y } = bossGunPos(b, w, side);
-  const dmg = edmg() * 0.9 * (1 + 0.15 * (t - 1)), spd = bspd() * 0.9;
+  const dmg = edmg() * 0.7 * (1 + 0.15 * (t - 1)), spd = bspd() * 0.9;
   let d = lock;
   if (ph === 2 && R > 1) {
     // rake: sweep from above the line to below it, skipping a hole the player can sit in
@@ -412,12 +415,12 @@ function bossRound(b: Boss, w: BossGun, side: number, r: number, R: number, lock
     d = lock + (u - 0.5) * BS.rake;
   } else if (ph === 3) d = lock + (r % 2 ? BS.weave : -BS.weave);
   const a = sideAngle(side, d);
-  shooter = 'boss';
+  shooter = 'boss:broadside';
   switch (p.id) {
     case 'spread': for (const o of [-0.08, 0, 0.08]) eShot(x, y, a + o, spd * 0.85, { dmg, col: '#ff7a6b' }); break;
     case 'flak': { const dist = clamp(Math.hypot(P.x - x, P.y - y), 140, 700); eShot(x, y, a, 160, { kind: 'orb', r: 8, life: dist / 160, col: '#ffd27a', dmg, burst: 6 }); break; }
     case 'missile': for (const o of [-1, 1]) eShot(x, y + o * 8, a + o * 0.25, 150, { kind: 'missile', turn: 1.5 + 0.2 * t, spd: 150 + 10 * t, hp: 5 * S.sector, life: 5, r: 5, col: '#ff9f5a', dmg: dmg * 2 }); break;
-    case 'rail': S.eb.push({ kind: 'beam', x, y, x2: x + Math.cos(a) * 1900, y2: y + Math.sin(a) * 1900, warn: 0.55, dur: 0.3, w: 16 + 3 * t, dmg: dmg * 6, t: 0, life: 9, vx: 0, vy: 0, r: 0, col: '#c9a6ff', dead: false, src: 'boss' }); break;
+    case 'rail': S.eb.push({ kind: 'beam', x, y, x2: x + Math.cos(a) * 1900, y2: y + Math.sin(a) * 1900, warn: 0.55, dur: 0.3, w: 16 + 3 * t, dmg: dmg * 6, t: 0, life: 9, vx: 0, vy: 0, r: 0, col: '#c9a6ff', dead: false, src: 'boss:broadside' }); break;
     default: for (const o of [-7, 7]) eShot(x, y + o, a, spd, { dmg }); // twin barrels: pulse and anything else
   }
   // phase 3 adds a slow second layer under the fast one
@@ -465,11 +468,12 @@ function updateBoss(dt: number) {
   if (b.droneEvery && b.entered) { b.droneT -= dt; if (b.droneT <= 0) { b.droneT = b.droneEvery; for (let i = 0; i < 2; i++) spawnEnemy('drone', b.x, b.y - i * 24, { baseX: clamp(b.x, 80, W - 80), phase: i * 0.6 }); } }
   S.escortT -= dt; if (S.escortT <= 0) { S.escortT = rnd(8, 11); spawnGroup(pick(['heli', 'turret', 'tank', 'jet', 'infantry'] as EnemyType[])); }
   if (!b.entered) return;
-  const fm = b.fireMul * (b.phase === 1 ? 1 : b.phase === 2 ? 1.25 : 1.45);
+  // Escalation lives mostly in the broadsides; the bow guns only quicken a little.
+  const fmBow = b.fireMul * (b.phase === 1 ? 1 : b.phase === 2 ? 1.12 : 1.22), fm = b.fireMul * (b.phase === 1 ? 1 : b.phase === 2 ? 1.25 : 1.45);
   shooter = 'boss';
   for (const w of b.weps) {
     if (w.arc === 'broadside') continue; // fired by the flank volleys
-    w.cd -= dt * fm; if (w.cd > 0) continue;
+    w.cd -= dt * fmBow; if (w.cd > 0) continue;
     w.cd = BOSS_CD[w.part.id] * b.cdMul * rnd(0.85, 1.15); bossFire(w); fireLog.set(w.part.uid, S.t);
   }
   updateBossBroadsides(b, dt, fm);
@@ -487,7 +491,7 @@ function bossDown() {
   S.mode = 'bossdown'; S.endT = 3.2; S.chain = 0; clearEnemyFire(true);
   S.score += 2000 * S.sector; S.kills++;
   addCarnage(S.carnage, 120);
-  for (let i = 0; i < 24; i++) S.pickups.push({ x: b.x + rnd(-b.halfW, b.halfW), y: b.y + rnd(-40, 40), vx: rnd(-80, 80), vy: rnd(-80, 40), val: (4 + 2 * S.sector) * S.P!.dv.scrapMult * S.heat.scrap, t: 0, kind: 'scrap' });
+  for (let i = 0; i < 24; i++) S.pickups.push({ x: b.x + rnd(-b.halfW, b.halfW), y: b.y + rnd(-40, 40), vx: rnd(-80, 80), vy: rnd(-80, 40), val: (4 + 2 * S.sector) * scrapSectorMul(S.sector) * S.P!.dv.scrapMult * S.heat.scrap, t: 0, kind: 'scrap' });
   setBanner(b.ghost.ai ? 'CORE DESTROYED' : 'GHOST LAID TO REST', b.ghost.name, 3, '#8fe39a');
   V.shake = 18; V.flashA = 0.35;
   requestStop(S.stop, HITSTOP.bossDeath, true); requestSlow(S.slowmo, SLOWMO_BOSS);
@@ -511,6 +515,7 @@ function updatePlayer(dt: number) {
   if (P.x < x0) { P.x = x0; P.vx = Math.max(0, P.vx); } else if (P.x > x1) { P.x = x1; P.vx = Math.min(0, P.vx); }
   if (P.y < y0) { P.y = y0; P.vy = Math.max(0, P.vy); } else if (P.y > y1) { P.y = y1; P.vy = Math.min(0, P.vy); }
   if (P.tx != null && P.ty != null) { P.tx = clamp(P.tx, x0, x1); P.ty = clamp(P.ty, y0, y1); }
+  keepClearOfBoss(P);
   P.bank = stepBank(P.bank, P.vx, dv.speed, dt);
   P.lastHit += dt;
   if (dv.regen) P.hp = Math.min(dv.maxHp, P.hp + dv.regen * dt);
@@ -523,6 +528,18 @@ function updatePlayer(dt: number) {
     if (Math.random() < 0.5) addFx({ type: 'fire', x, y, vx: 0, vy: 60, life: 0.3, max: 0.3, size: 5, grow: 0.6 });
   }
   if (P.hp < dv.maxHp * 0.25) V.hurt = Math.max(V.hurt, 0.22 + 0.12 * Math.sin(S.t * 6));
+}
+/** Two dreadnoughts do not pass through each other: the player's hull is shouldered out of the ghost's bounding box
+ *  along the shallower overlap (and never pushed off the field). */
+function keepClearOfBoss(P: Player) {
+  const b = S.boss; if (!b || !b.alive || !b.entered) return;
+  const hw = P.dv.width / 2, hl = P.dv.len / 2, bl = (b.dv.len * b.s) / 2;
+  const ox = hw + b.halfW - Math.abs(P.x - b.x), oy = hl + bl - Math.abs(P.y - b.y);
+  if (ox <= 0 || oy <= 0) return;
+  const x0 = hw + 6, x1 = W - hw - 6, y1 = H - hl - 8;
+  const sx = P.x >= b.x ? 1 : -1, canX = sx > 0 ? P.x + ox <= x1 : P.x - ox >= x0;
+  if (oy < ox || !canX) { P.y = Math.min(y1, P.y + oy); P.vy = Math.max(0, P.vy); if (P.ty != null) P.ty = Math.max(P.ty, P.y); }
+  else { P.x += sx * ox; P.vx = sx > 0 ? Math.max(0, P.vx) : Math.min(0, P.vx); }
 }
 /** `src` names what hit the ship (enemy type, 'boss', 'ram:<type>', 'strike', 'beam'); tallied in S.stats.dmgBy. */
 export function damagePlayer(d: number, src = 'unknown') {
@@ -849,9 +866,16 @@ export function damageTarget(e: Ent, d: number) {
 }
 /** Global scrap tuning: kill and salvage values in data/enemies.ts are multiplied by this before carnage. */
 export const SCRAP_SCALE = 0.35;
+/**
+ * Late sectors spawn several times as much to kill, and carnage sits at its cap, so raw scrap grows faster than
+ * merchant prices. Each sector past the first divides drops by 1 + SCRAP_SECTOR_TAX: a fight buys about the same
+ * share of an average part in every sector (see docs/TECH.md "Scrap economy" and tests/unit/economy.test.ts).
+ */
+export const SCRAP_SECTOR_TAX = 0.45;
+export const scrapSectorMul = (sector: number) => 1 / (1 + SCRAP_SECTOR_TAX * Math.max(0, sector - 1));
 function dropScrap(x: number, y: number, total: number, n: number) {
   S.stats.scrapRaw += total;
-  const v = total * SCRAP_SCALE * S.carnage.mult * S.heat.scrap * S.P!.dv.scrapMult;
+  const v = total * SCRAP_SCALE * scrapSectorMul(S.sector) * S.carnage.mult * S.heat.scrap * S.P!.dv.scrapMult;
   for (let i = 0; i < n; i++) S.pickups.push({ x, y, vx: rnd(-70, 70), vy: rnd(-90, 20), val: v / n, t: 0, kind: 'scrap' });
 }
 function killEnemy(e: Enemy) {
@@ -1080,7 +1104,7 @@ function updateEB(dt: number) {
       if (b.t >= b.warn && !b.fired) {
         b.fired = true; sfx('rail', { x: b.x, layer: 'air' }); V.shake = Math.min(10, V.shake + 5); V.flashA = Math.max(V.flashA, 0.12);
         for (let i = 0; i < 22; i++) addFx({ type: 'spark', x: b.x + rnd(-b.w / 2, b.w / 2), y: rnd(b.y, H), vx: rnd(-220, 220), vy: rnd(-80, 80), life: rnd(0.2, 0.5), max: 0.5, size: 1.8, drag: 3, tint: '#e3d0ff' });
-        if (canHit && beamHits(b)) damagePlayer(b.dmg, 'beam');
+        if (canHit && beamHits(b)) damagePlayer(b.dmg, b.src ? `${b.src}:rail` : 'beam');
       }
       if (b.t > b.warn + b.dur) b.dead = true; continue;
     }

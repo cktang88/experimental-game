@@ -101,8 +101,8 @@ Kinds (`OVERDRIVES` in `src/data/hulls.ts`):
 
 ### Carnage (`S.carnage`) and scrap
 `{ value, mult 1..3, since, peak }` (`src/game/feel.ts`, `CARNAGE`). Kills and structures add value; after a 1.6 s grace it decays at
-8 + 35% of value per second. `mult = 1 + value / 80`, capped at 3. Every scrap drop is `base * SCRAP_SCALE (0.35) * carnage.mult *
-heat.scrap * dv.scrapMult`. Scrap pickups home to the hull on their own after ~0.9 s (sooner with magnets); `S.pickStreak = { n, t }`
+8 + 35% of value per second. `mult = 1 + value / 80`, capped at 3. Every scrap drop is `base * SCRAP_SCALE (0.35) * scrapSectorMul(sector) * carnage.mult *
+heat.scrap * dv.scrapMult` (see "Scrap economy" below). Scrap pickups home to the hull on their own after ~0.9 s (sooner with magnets); `S.pickStreak = { n, t }`
 counts pickups landing within 0.5 s of each other (rising pitch for audio). City agent: `worldBlast()` should return about 1-4 scrap per
 building destroyed; combat applies the scaling and carnage, counts it as a structure and feeds Overdrive.
 
@@ -115,6 +115,55 @@ building destroyed; combat applies the scaling and carnage, counts it as a struc
 ### Enemies
 Besides `x, y, r, hp, maxHp, layer, type`: `hdg` heading (aircraft), `ang` turret aim, `tele` 0..1 wind-up before a shot (draw a growing hostile glint),
 `vx`. Enemy shots in `S.eb` carry `src` (who fired). Kinds unchanged: `bullet`, `orb`, `mine`, `missile`, `beam` (warn then fire), `strike` (growing ring).
+
+### Ghost bosses (`S.boss`, boss section of combat.ts)
+A ghost flies its recorded build (`ghostToBuild`), mirrored: its bow points down the screen, so a mount at design offset
+(ox, oy) sits at field (x + ox·s, y − oy·s). Every `BossGun` keeps its mount's `arc` and `side`:
+- bow guns fire inside `BOSS_BROADSIDE.bowCone` (±0.6 rad) of straight down, on their own cooldowns (`BOSS_CD`);
+- ventral (bombs: mines; mortars: telegraphed strikes) and omni (arc coil rings, point defense) as before;
+- broadside guns fire **volleys** per flank (`B.volley[0]` port / screen left, `[1]` starboard): a flank whose arc holds the
+  player winds up for `BOSS_BROADSIDE.tele[phase]` s (the FX layer draws `B.glints`: a hostile glint per gun and its lane,
+  or the arc it will rake), then ripples stern to bow, `stagger` 75 ms per round. Rounds per gun `bossRounds(part, phase)`.
+  Pulse fires twin-barrel pairs, scatter a 3-fan, flak an orb that bursts into 6, seekers a pair, rail a telegraphed beam
+  across the field (`eb` beam with `x2, y2`). Centre (either-side) guns join the flank the player is on.
+- Phases by hull (`BOSS_PHASES` 66% / 33%, notches on the HUD bar): 1 **lanes** (each gun's rounds on one locked line;
+  the ghost sweeps the field), 2 **rake** (rounds sweep ±0.45 rad across the locked line with a 0.34 rad hole; the ghost
+  comes about to hold the player on its beam, at about 85 units/s), 3 **full broadside** (both flanks every volley,
+  ±0.15 weave plus a slow second layer, 40 units lower). Fire rate ×1 / ×1.25 / ×1.45. Under its bow you face the bow
+  guns; beside it, the broadsides. The player's hull is shouldered out of the ghost's bounding box.
+- Hull: `(1800·sector^1.55 + 2·ghost hull) · max(1, 2.15 − 0.4·sector)` (×1.75 in sector 1, ×1.35 in 2): a ghost that comes
+  about to bring its broadsides to bear also takes ours, and early builds are broadside-heavy. Hull damage from its
+  broadsides is tallied as `boss:broadside` in `S.stats.dmgBy` (rails `boss:broadside:rail`), bow, ventral and omni as `boss`.
+- Defense cores (`aiGhost`, no player ghost available) always carry a Broadside Battery behind the bridge, a second
+  from sector 3, with broadside-capable guns on its flanks.
+
+### Scrap economy (`tests/sim/economy.ts`, `tests/unit/economy.test.ts`)
+`BALANCE=1 npx vitest run tests/unit/economy.test.ts --disable-console-intercept` prints, per sector, the mean scrap of
+every fight (floors 2 and 6), elite and boss (plus the boss strip option) with the harness builds, the income of an
+average route (4.3 fights, 0.9 elites, a derelict, a boss), and the price of an average merchant part and a merchant's
+whole stock (3 parts, 2 a tier better, 2 sections, a relic, patching half the hull).
+Before tuning, sector 3 paid 542 a fight against a 341 average part (1.59 parts per fight vs 0.84 in sector 1) and a
+sector's income bought 117% of a merchant's stock. Two levers fix it:
+- `SCRAP_SECTOR_TAX = 0.45` (combat.ts): every drop is divided by `1 + 0.45·(sector − 1)` (×0.69 in sector 2, ×0.53 in
+  sector 3, ×0.45 in 4); the boss's death scrap too.
+- Merchant repairs cost by the hull point: `REPAIR.hullPerScrap = 3` in sector 1, divided by `1 + 0.35·(sector − 1)`
+  (3, 2.2, 1.76 hull per scrap), times the heat repair factor.
+
+| Sector | Fight | Elite | Boss + strip | Route income | Avg part | Merchant stock | Half-hull repair | Parts / fight | Income / stock |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 93 | 116 | 265 | 821 | 111 | 1237 | 46 | 0.84 | 0.66 |
+| 2 | 187 | 129 | 286 | 1258 | 217 | 1883 | 77 | 0.86 | 0.67 |
+| 3 | 286 | 114 | 309 | 1689 | 341 | 2573 | 124 | 0.84 | 0.66 |
+
+A fight now buys the same 0.85 of an average part in every sector, and a whole sector buys about two thirds of one
+merchant's stock, so the last shop is a choice between parts, a section, a relic and repairs. The unit test fails if a
+sector 3 fight buys more than 15% more than a sector 1 fight, or if sector 3 income leaves the 0.35–0.85 stock band.
+
+### Repairs and heat 8
+All out-of-combat repairs go through `run.ts`: `healAmount(run, frac)` (what a heal would restore now, after heat and
+capped at the missing hull; screens quote it), `heal(run, frac)` (drydock 35%, signals, boss salvage 30%, Nanite Vats) and
+`repairQuote` / `buyRepair` (merchant, by the hull point). Heat 8 *No Quarter* multiplies all of them, and repair kits
+picked up in combat, by 0.7; `tests/unit/repair.test.ts` holds the heat description to that number.
 
 ### Fight stats (`S.stats`, `S.seen`)
 `kills, airKills, groundKills, elites, structures, broadsides, maxVolley, overdrives, lanceStructures, dmgTaken, dmgDealt, dmgToTarget,
