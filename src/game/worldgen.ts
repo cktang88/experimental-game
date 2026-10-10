@@ -175,7 +175,7 @@ function bldg(ch: Chunk, kind: BKind, x0: number, y0: number, x1: number, y1: nu
   const w = x1 - x0, h = y1 - y0, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
   let top = 0; for (const t of tiers) top = Math.max(top, t.z0 + t.hgt);
   const floors = Math.max(1, Math.round(top / FLOOR));
-  const maxHp = kind === 'tank' ? 30 + w * 0.6 : Math.min(140, 12 + floors * 3 + (w * h) / 150);
+  const maxHp = kind === 'tank' ? 40 + w : Math.min(240, 30 + floors * 5 + (w * h) / 90);
   const b: Bldg = {
     type: 'bldg', kind, x: cx, y: cy + S.scrollY, cy, w, h, r: Math.hypot(w, h) / 2, hgt: top, tiers, style, seed: nextSeed(), floors,
     lit: rnd(0.25, 0.7), keepLit: Math.random() < 0.12, neon: 0,
@@ -188,7 +188,7 @@ function bldg(ch: Chunk, kind: BKind, x0: number, y0: number, x1: number, y1: nu
 /** Scrap a collapsed building pays (1-4, bigger pays more); combat scales it by carnage. */
 export function scrapValue(kind: BKind, maxHp: number) {
   if (kind === 'tank') return 3;
-  return clamp(Math.round(1 + (maxHp - 20) / 40), 1, 4);
+  return clamp(Math.round(maxHp / 60), 1, 4);
 }
 const tier = (w: number, h: number, z0: number, hgt: number, ox = 0, oy = 0): Tier => ({ ox, oy, w, h, z0, hgt });
 
