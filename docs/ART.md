@@ -90,6 +90,8 @@ A ghost is a dead player's dreadnought, rebuilt from their build at the same det
 | Phase 2 (66%) | A blackout (the lights die for a second, then come back with fewer of them), fires break out at the wounds, coolant and atmosphere vent in pale jets, more smoke, sparks, faster emergency beacons. |
 | Phase 3 (33%) | Another blackout, the hull burning along its length, most lights dead, constant stutters, drives sputtering, more venting. The last third of its hull adds fires on top. |
 
+Reference shots: `docs/shots/ghost-after-*.jpg` (game zoom, phase 2, phase 3 with a broadside wind-up, close-ups at phase 1 and 3); the old neon-outline look for comparison in `ghost-before-*.jpg`. A hit flash on the boss is a faint pulse, never a wash over the hull.
+
 Rules: no magenta anywhere on the ghost (its broadside telegraphs, glints and lane markers are the brightest magenta things near it, drawn on top); red only for the beacons, the hairline rim and its own muzzle flashes; everything else in the corpse-light or fire families.
 
 ## Light
