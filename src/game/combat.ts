@@ -630,6 +630,13 @@ function updateOverdrive(dt: number) {
       o.trail.push({ x: P.x + rnd(-6, 6), y: P.y + rnd(-4, 4), life: 6, max: 6 });
       addFx({ type: 'fire', x: P.x + rnd(-14, 14), y: P.y + rnd(-10, 10), vx: rnd(-30, 30), vy: rnd(-30, 30), life: 0.7, max: 0.7, size: rnd(10, 18), grow: 1.4, ground: true });
       if (Math.random() < 0.4) addFx({ type: 'smoke', x: P.x, y: P.y, vx: rnd(-15, 15), vy: rnd(-15, 15), life: 2, max: 2, size: 12, grow: 2, a: 0.5, ground: true });
+      // Molten spray and a dust front thrown out past the hull's silhouette, so the burn reads from above.
+      const R = Math.max(P.dv.width, P.dv.len) / 2;
+      for (let i = 0; i < 3; i++) {
+        const an = rnd(0, Math.PI * 2), sp = rnd(320, 640);
+        addFx({ type: 'spark', x: P.x, y: P.y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp, life: rnd(0.5, 0.9), max: 0.9, size: rnd(1.6, 2.6), drag: 1.3, ground: true, h: 4, vh: rnd(60, 200), grav: -320, tint: '#ffd27a' });
+      }
+      if (Math.random() < 0.6) { const an = rnd(0, Math.PI * 2); addFx({ type: 'dust', x: P.x + Math.cos(an) * R * 0.8, y: P.y + Math.sin(an) * R * 0.8, vx: Math.cos(an) * 140, vy: Math.sin(an) * 140, life: 1.1, max: 1.1, size: 18, grow: 2.4, drag: 1.6, a: 0.4, ground: true, h: 2, col: '#6a5d50', rot: rnd(0, 6.28) }); }
       V.shake = Math.max(V.shake, 3);
     }
   } else if (o.kind === 'spear') {

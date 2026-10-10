@@ -23,6 +23,8 @@ const v = new THREE.Vector3(), a = new THREE.Vector3(), b = new THREE.Vector3();
 const WHITE = rgb('#ffffff'), HOSTILE = rgb('#ff4a3a'), HOSTILE_HOT = rgb('#ff7a4a'), EMBER = rgb('#ff8a3d');
 const SPARK_HOT = rgb('#fff1c8'), SPARK_MID = rgb('#ffc35a'), SPARK_COOL = rgb('#ff6a3d');
 const N_LIGHTS = 6;
+/** Extra bloom requested this frame (the Lance), eased into the post chain's bloom intensity. */
+let lanceBloom = 0, bloomBase = -1, bloomBoost = 0;
 
 /** Jagged polyline for a quick zap (kept for callers that want a plain zig). */
 export function zigPts(x1: number, y1: number, x2: number, y2: number) {
@@ -103,6 +105,12 @@ export class FxLayer implements Layer {
   }
   /** Lerp between the ground (h=0) and the flight plane (h=1) for things falling through altitude. */
   private between(x: number, y: number, h: number, out: THREE.Vector3) { this.e.toFlight(x, y, 0, a); this.e.toGround(x, y, b); return out.lerpVectors(b, a, h); }
+  /** A flat streak on the ground plane between two field points (the furrow). */
+  private groundStreak(x1: number, y1: number, x2: number, y2: number, wid: number, c: readonly number[], I: number, op: number) {
+    const e = this.e; e.toGround(x1, y1, a); e.toGround(x2, y2, b);
+    const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz); if (L < 0.01) return;
+    this.ground.add((a.x + b.x) / 2, 2.5, (a.z + b.z) / 2, Math.atan2(dz, dx), L + wid, wid, c, I, FxShape.Beam, op);
+  }
   private streak(B: FxBatch, x1: number, y1: number, x2: number, y2: number, alt: number, wid: number, c: readonly number[], I: number, op: number, shape = FxShape.Streak) {
     const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy); if (L < 0.01) return;
     this.e.toFlight((x1 + x2) / 2, (y1 + y2) / 2, alt, v); B.add(v.x, v.y, v.z, Math.atan2(dy, dx), L + wid, wid, c, I, shape, op);
@@ -177,6 +185,11 @@ export class FxLayer implements Layer {
       else { const s = 13 + 2 * Math.sin(p.t * 9 + p.x); A.add(v.x, v.y, v.z, p.t * 4 + p.x, s, s * 1.3, rgb('#e0c35c'), 2.2, FxShape.Diamond, 0.95); A.add(v.x, v.y, v.z, 0, 30, 30, rgb('#e0c35c'), 0.5, FxShape.Soft, 0.5); }
     }
 
+    // Bloom boost (Lance): eased so it swells and fades instead of popping.
+    if (bloomBase < 0) bloomBase = e.post.bloom.intensity;
+    bloomBoost += (lanceBloom - bloomBoost) * Math.min(1, dt * 6); lanceBloom = 0;
+    e.post.bloom.intensity = bloomBase * (1 + bloomBoost);
+
     G.flush(); A.flush(); H.flush();
     this.updateLights(Vs.fx, dt);
   }
@@ -221,6 +234,13 @@ export class FxLayer implements Layer {
     // The Lance's burning furrow: scorched ground, flames and heat, fading as it scrolls away.
     for (let i = 0; i < o.trail.length; i++) {
       const p = o.trail[i], q = p.life / p.max, fl = 0.7 + 0.3 * Math.sin(t * 19 + i * 2.3);
+      // molten cut: a white-hot line joining the burn points, cooling to orange as it scrolls out from under the hull
+      const n = o.trail[i + 1];
+      if (n && Math.hypot(n.x - p.x, n.y - p.y) < 90) {
+        const hot = q * q;
+        this.groundStreak(p.x, p.y, n.x, n.y, 30 * k, EMBER, 2.2, q * 0.8 * fl);
+        this.groundStreak(p.x, p.y, n.x, n.y, 10 * k, rgb('#ffd27a'), 3 + 4 * hot, (0.3 + 0.7 * hot) * fl);
+      }
       e.toGround(p.x, p.y, v);
       if (i % 2 === 0) G.add(v.x, 1.0, v.z, i * 1.7, 44 * k, 38 * k, WHITE, 1, FxShape.Scorch, Math.min(1, q * 3), q * q, (i * 0.137) % 1);
       G.add(v.x, 2, v.z, 0, 70 * k * (0.5 + 0.5 * q), 70 * k * (0.5 + 0.5 * q), EMBER, 1.2, FxShape.Soft, q * 0.6 * fl);
@@ -230,24 +250,35 @@ export class FxLayer implements Layer {
     if (!o.active || !P) return;
     const b = o.beam;
     if (o.kind === 'lance' && b) {
-      const c = rgb(b.col), fl = 0.85 + 0.15 * Math.sin(t * 45), w = b.w;
-      // A pillar of light from the keel straight down: seen from above, stacked rings shrinking with depth.
-      for (let i = 0; i <= 16; i++) {
-        const h = 1 - i / 16;
-        this.between(b.x1, b.y1, h, v);
-        const ww = w * (1.3 + 0.3 * Math.sin(t * 30 + i));
-        A.add(v.x, v.y, v.z, t * 3 + i, ww * 2.4, ww * 2.4, c, 1.6, FxShape.Soft, 0.35 * fl);
-        A.add(v.x, v.y, v.z, 0, ww, ww, WHITE, 3, FxShape.Hot, 0.6 * fl);
-      }
+      // Seen from the top-down camera the beam is end-on: it runs from the keel straight away from the lens and the
+      // ground point under the ship lies behind the hull. So the Lance reads by what spills past the silhouette:
+      // a glare disc on the city that backlights the hull, impact rings racing out past its edges, the molten
+      // furrow (below) emerging from under the stern, a halo rim around the hull and a screen-wide anamorphic flare.
+      const c = rgb(b.col), fl = 0.85 + 0.15 * Math.sin(t * 45), w = b.w, R = Math.max(P.dv.width, P.dv.len) / 2;
+      const left = clamp(o.t / 0.25, 0, 1) * clamp((o.dur - o.t) / 0.2, 0, 1); // ramp in and out
+      const I = fl * (0.35 + 0.65 * left);
       e.toGround(b.x2, b.y2, v);
-      G.add(v.x, 4, v.z, 0, w * 11 * k, w * 11 * k, c, 3, FxShape.Soft, 0.9 * fl);
-      G.add(v.x, 5, v.z, t * 6, w * 3.4 * k, w * 3.4 * k, c, 3, FxShape.Star, fl, 0, (t * 3) % 1);
-      G.add(v.x, 5, v.z, 0, w * 2 * k, w * 2 * k, WHITE, 4, FxShape.Hot, fl);
-      const rr = ((t * 2.5) % 1);
-      G.add(v.x, 3, v.z, 0, w * (2 + 6 * rr) * k, w * (2 + 6 * rr) * k, c, 2, FxShape.Ring, 1 - rr, 0.05);
-      this.at(b.x2, b.y2, 40, true, a); D.add(a.x, a.y, a.z, 0, w * 6 * k, w * 7 * k, DistShape.Haze, 2, 0, 0.7);
-      e.toFlight(b.x1, b.y1, 0, a); A.add(a.x, a.y, a.z, 0, w * 3, w * 3, c, 2.5, FxShape.Hot, 0.8 * fl);
-      addFx({ type: 'light', x: b.x2, y: b.y2, life: 0.05, max: 0.05, size: 520, str: 45, col: b.col, ground: true });
+      // glare: a broad warm wash, then a hotter core; the hull occludes the middle so its outline glows
+      G.add(v.x, 4, v.z, 0, R * 5.2 * k, R * 5.2 * k, c, 1.2, FxShape.Soft, 0.55 * I);
+      G.add(v.x, 4.5, v.z, 0, R * 2.8 * k, R * 2.8 * k, c, 2.6, FxShape.Soft, 0.8 * I);
+      G.add(v.x, 5, v.z, 0, R * 1.3 * k, R * 1.3 * k, WHITE, 3, FxShape.Hot, 0.8 * I);
+      G.add(v.x, 5, v.z, t * 6, R * 3.2 * k, R * 3.2 * k, c, 3, FxShape.Star, I, 0, (t * 3) % 1);
+      // impact rings: three staggered fronts expanding from under the keel to well past the hull
+      for (let i = 0; i < 3; i++) {
+        const rr = (t * 1.6 + i / 3) % 1, rad = (R * 0.8 + R * 2.2 * rr) * 2 * k;
+        G.add(v.x, 3, v.z, 0, rad, rad, c, 3.2, FxShape.Ring, (1 - rr) * I, 0.035);
+      }
+      this.at(b.x2, b.y2, 40, true, a); D.add(a.x, a.y, a.z, 0, R * 3 * k, R * 3.4 * k, DistShape.Haze, 2, 0, 0.7);
+      // on the flight plane: a thin keel spark, a halo rim just outside the hull and the lens flare over everything
+      e.toFlight(b.x1, b.y1, 0, a); A.add(a.x, a.y, a.z, 0, w * 1.4, w * 1.4, c, 2.5, FxShape.Hot, 0.5 * I);
+      e.toFlight(P.x, P.y, AIR - 10, a);
+      A.add(a.x, a.y, a.z, 0, R * 3, R * 3, c, 2.2, FxShape.Ring, 0.35 * I, 0.1);
+      e.toFlight(P.x, P.y, AIR + 40, a);
+      A.add(a.x, a.y, a.z, 0, 1500 * (0.8 + 0.2 * fl), 40, c, 2.2, FxShape.Flare, 0.45 * I);
+      A.add(a.x, a.y, a.z, Math.PI / 2, 360 * fl, 18, c, 1.6, FxShape.Flare, 0.3 * I);
+      addFx({ type: 'light', x: b.x2, y: b.y2, life: 0.05, max: 0.05, size: 720, str: 60, col: b.col, ground: true });
+      // a little more bloom while the beam burns
+      lanceBloom = Math.max(lanceBloom, 0.25 * left);
     } else if (o.kind === 'spear' && b) {
       const c = rgb(b.col), fl = 0.85 + 0.15 * Math.sin(t * 50), w = b.w;
       this.streak(A, b.x1, b.y1, b.x2, b.y2, AIR + 3, w * 3.2, c, 1.8, 0.6 * fl, FxShape.Beam);

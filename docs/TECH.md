@@ -95,6 +95,11 @@ Kinds (`OVERDRIVES` in `src/data/hulls.ts`):
   plane and (x2, y2) the same field point on the ground: draw a vertical column from `toFlight(x1, y1)` down to `toGround(x2, y2)`.
   Every 50 ms it calls `worldBlast(x, y, 44, dmg)` and burns ground units in radius 50. `trail[]` = `{ x, y, life, max }` scorch points
   that scroll with the city (draw burning ground, fade by life / max).
+  The camera sees the beam end-on (the ground point under the keel is behind the hull), so the FX layer sells it by what
+  spills past the silhouette: a glare disc on the city that backlights the hull, three impact rings racing out to about
+  2.4x the hull radius, a molten furrow joining the trail points (white-hot, cooling as it scrolls out from under the
+  stern), a halo rim, a screen-wide anamorphic flare and a bloom swell (eased). Combat also throws molten sparks and a
+  dust front past the hull every burn tick.
 - `spear` Lance Spear (Lance, 2.6 s): `beam = { x1, y1 (bow), x2: x1, y2: -60, w: 54, ground: false }` on the flight plane. Deletes enemy shots in it.
 - `wing` Strike Wing (Leviathan, 7 s): `allies[]` = `{ x, y, vx, vy, hdg, cd, tg, t }`, eight strike craft on the flight plane. Their shots are normal `S.pb` bolts.
 - `bulwark` Bulwark Aegis (Bastion, 5 s): a 460-radius shockwave on activation, then `radius` > 0: an aegis around the hull that eats enemy shots; damage taken halved.
