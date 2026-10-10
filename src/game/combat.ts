@@ -420,7 +420,7 @@ function bossRound(b: Boss, w: BossGun, side: number, r: number, R: number, lock
     case 'spread': for (const o of [-0.08, 0, 0.08]) eShot(x, y, a + o, spd * 0.85, { dmg, col: '#ff7a6b' }); break;
     case 'flak': { const dist = clamp(Math.hypot(P.x - x, P.y - y), 140, 700); eShot(x, y, a, 160, { kind: 'orb', r: 8, life: dist / 160, col: '#ffd27a', dmg, burst: 6 }); break; }
     case 'missile': for (const o of [-1, 1]) eShot(x, y + o * 8, a + o * 0.25, 150, { kind: 'missile', turn: 1.5 + 0.2 * t, spd: 150 + 10 * t, hp: 5 * S.sector, life: 5, r: 5, col: '#ff9f5a', dmg: dmg * 2 }); break;
-    case 'rail': S.eb.push({ kind: 'beam', x, y, x2: x + Math.cos(a) * 1900, y2: y + Math.sin(a) * 1900, warn: 0.55, dur: 0.3, w: 16 + 3 * t, dmg: dmg * 6, t: 0, life: 9, vx: 0, vy: 0, r: 0, col: '#c9a6ff', dead: false, src: 'boss:broadside' }); break;
+    case 'rail': S.eb.push({ kind: 'beam', x, y, x2: x + Math.cos(a) * 1900, y2: y + Math.sin(a) * 1900, warn: 0.55, dur: 0.3, w: 16 + 3 * t, dmg: dmg * 6, t: 0, life: 9, vx: 0, vy: 0, r: 0, col: '#c9a6ff', dead: false, src: 'boss:broadside', gun: w, side }); break;
     default: for (const o of [-7, 7]) eShot(x, y + o, a, spd, { dmg }); // twin barrels: pulse and anything else
   }
   // phase 3 adds a slow second layer under the fast one
@@ -1107,6 +1107,9 @@ function updateEB(dt: number) {
     if (b.dead) continue;
     b.t += dt; b.life -= dt;
     if (b.kind === 'beam') {
+      // a ghost's broadside rail rides with its gun as the ship moves; the line keeps its angle
+      const G = S.boss;
+      if (b.gun && G && G.alive) { const p = bossGunPos(G, b.gun, b.side), dx = p.x - b.x, dy = p.y - b.y; b.x += dx; b.y += dy; b.x2 += dx; b.y2 += dy; }
       if (!b.charged) { b.charged = true; sfx('railCharge', { x: b.x, y: b.y, layer: 'air' }); }
       if (b.t >= b.warn && !b.fired) {
         b.fired = true; sfx('rail', { x: b.x, layer: 'air' }); V.shake = Math.min(10, V.shake + 5); V.flashA = Math.max(V.flashA, 0.12);
